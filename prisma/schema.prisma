@@ -1,0 +1,236 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  // output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  // provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/*
+  Enums
+*/
+
+enum UserStatus {
+  active
+  suspended
+  banned
+  deleted
+}
+
+enum UserType {
+  regular
+  business
+}
+
+enum CommunityStatus {
+  active
+  private
+  archived
+  deleted
+}
+
+enum ModeratorRole {
+  moderator
+  admin
+  super_moderator
+}
+
+enum PostStatus {
+  active
+  archived
+  deleted
+  hidden
+  pending
+}
+
+enum CommentStatus {
+  active
+  archived
+  deleted
+  hidden
+  pending
+}
+
+enum TokenType {
+  email
+  api
+}
+
+/*
+  Models
+*/
+
+model User {
+  id        String  @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  last_login DateTime?
+
+  username  String  @unique
+  email     String  @unique
+  password_hash String
+  profile_picture_url String?
+  account_status UserStatus @default(active)
+  
+  user_type UserType @default(regular)
+  is_email_verified Boolean @default(false)
+  notification_preferences Json?
+
+  posts Post[]
+  saved_posts Post[] @relation("saved_posts")
+
+  created_communities Community[] @relation("created_communities")
+  joined_communities Community[] @relation("joined_communities")
+
+  moderationships Moderator[]
+
+  upvoted_posts Post[] @relation("upvoted_posts")
+  downvoted_posts Post[] @relation("downvoted_posts")
+
+  upvoted_comments Comment[] @relation("upvoted_comments")
+  downvoted_comments Comment[] @relation("downvoted_comments")
+
+  reported_posts Post[] @relation("reported_posts")
+  reported_comments Comment[] @relation("reported_comments")
+
+  blocked_users User[] @relation("blocked_users")
+  blocked_by User[] @relation("blocked_users")
+
+  moderator_additions Moderator[] @relation("moderator_additions")
+
+  comments Comment[]
+
+  tokens Token[]
+  auth_tokens AuthToken[]
+}
+
+model Community {
+  id         String  @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  created_by String
+  created_by_ref User @relation("created_communities", fields: [created_by], references: [id])
+
+  name String @unique
+  description String?
+  image_url String?
+  rules Json?
+  status CommunityStatus @default(active)
+  seo_metadata Json?
+  preferences Json?
+  
+  moderators Moderator[]
+  members User[] @relation("joined_communities")
+  posts Post[]
+}
+
+model Moderator {
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  
+  user_id String
+  user_ref User @relation(fields: [user_id], references: [id])
+  
+  community_id String
+  community Community @relation(fields: [community_id], references: [id])
+  
+  role ModeratorRole @default(moderator) // moderator, admin, super_moderator
+  permissions Json? // Store specific permissions
+  is_active Boolean @default(true)
+  
+  added_by String? // Who made them a moderator
+  added_by_user User? @relation("moderator_additions", fields: [added_by], references: [id])
+  
+  @@unique([user_id, community_id])
+}
+
+model Post {
+  id         String  @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  title String
+  content String
+  impressions Int @default(0)
+  is_anonymous Boolean @default(false)
+  is_sponsored Boolean @default(false)
+  tags String[]
+  slug String @unique
+  ai_summary String?
+
+  status PostStatus @default(active)
+
+  author String
+  author_ref User @relation(fields: [author], references: [id])
+
+  community String
+  community_ref Community @relation(fields: [community], references: [id])
+
+  upvoters User[] @relation("upvoted_posts")
+  downvoters User[] @relation("downvoted_posts")
+  reporters User[] @relation("reported_posts")
+
+  comments Comment[]
+  saved_by User[] @relation("saved_posts")
+}
+
+model Comment {
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  content String
+  status CommentStatus @default(active)
+  is_anonymous Boolean @default(false)
+  is_sponsored Boolean @default(false)
+  
+  author String
+  author_ref User @relation(fields: [author], references: [id])
+
+  post String
+  post_ref Post @relation(fields: [post], references: [id])
+
+  parent_comment_id String?
+  parent_comment_ref Comment? @relation("parent_comment", fields: [parent_comment_id], references: [id])
+  child_comments Comment[] @relation("parent_comment")
+
+  upvoters User[] @relation("upvoted_comments")
+  downvoters User[] @relation("downvoted_comments")
+  reporters User[] @relation("reported_comments")
+}
+
+model Token {
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  type TokenType @default(email) // EMAIL/API
+  email_token String? @unique
+
+  valid Boolean @default(true)
+  expiration DateTime
+  
+  user_id String
+  user User @relation(fields: [user_id], references: [id])
+}
+
+model AuthToken {
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  
+  valid Boolean @default(true)
+  short_lived_token String?
+  long_lived_token String?
+  
+  user_id String
+  user User @relation(fields: [user_id], references: [id])
+}
