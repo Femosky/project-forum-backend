@@ -75,12 +75,20 @@ model User {
   username  String  @unique
   email     String  @unique
   password_hash String
-  profile_picture_url String?
+  avatar_id String @default("default_1")
   account_status UserStatus @default(active)
   
   user_type UserType @default(regular)
   is_email_verified Boolean @default(false)
   notification_preferences Json?
+
+  is_deleted Boolean @default(false)
+  deleted_at DateTime?
+  deleted_reason String?
+
+  is_suspended Boolean @default(false)
+  suspended_at DateTime?
+  suspended_reason String?
 
   posts Post[]
   saved_posts Post[] @relation("saved_posts")
@@ -108,6 +116,35 @@ model User {
 
   tokens Token[]
   auth_tokens AuthToken[]
+
+  login_sessions LoginSession[]
+}
+
+model LoginSession {
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  
+  expires_at DateTime
+  is_active Boolean @default(true)
+  
+  device_type String?
+  browser String?
+  os String?
+  user_agent String?
+  
+  ip_address String?
+  country String?
+  city String?
+  
+  is_trusted Boolean @default(false)
+  last_activity DateTime @default(now())
+  
+  user_id String
+  user User @relation(fields: [user_id], references: [id])
+  
+  @@index([user_id, is_active])
+  @@index([expires_at])
 }
 
 model Community {

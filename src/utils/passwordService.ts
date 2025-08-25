@@ -11,8 +11,8 @@ export type DecodedToken = {
     authTokenId: string;
 };
 
-const SHORT_LIVED_TOKEN_EXPIRATION = '1h';
-const LONG_LIVED_TOKEN_EXPIRATION = '1y';
+export const SHORT_LIVED_TOKEN_EXPIRATION = '1h';
+export const LONG_LIVED_TOKEN_EXPIRATION = '1y';
 
 export class PasswordService {
     static async hashPassword(password: string): Promise<string> {
@@ -69,5 +69,43 @@ export class PasswordService {
         } catch (error) {
             return null;
         }
+    }
+
+    // Decode JWT without verification to get expiry
+    static decodeToken(token: string): any {
+        try {
+            // Decode without verification (safe for getting expiry)
+            const decoded = jwt.decode(token);
+            return decoded;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    // Get token expiry date
+    static getTokenExpiry(token: string): Date | null {
+        const decoded = this.decodeToken(token);
+        if (!decoded || !decoded.exp) {
+            return null;
+        }
+
+        // JWT exp is in seconds, convert to Date
+        return new Date(decoded.exp * 1000);
+    }
+
+    // Check if token is expired
+    static isTokenExpired(token: string): boolean {
+        const expiry = this.getTokenExpiry(token);
+        if (!expiry) return true;
+
+        return new Date() > expiry;
+    }
+
+    // Get time until expiry
+    static getTimeUntilExpiry(token: string): number | null {
+        const expiry = this.getTokenExpiry(token);
+        if (!expiry) return null;
+
+        return expiry.getTime() - new Date().getTime();
     }
 }
