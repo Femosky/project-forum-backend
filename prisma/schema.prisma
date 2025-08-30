@@ -32,6 +32,7 @@ enum CommunityStatus {
   active
   private
   archived
+  closed
   deleted
 }
 
@@ -45,6 +46,7 @@ enum PostStatus {
   active
   archived
   deleted
+  removed
   hidden
   pending
 }
@@ -65,6 +67,84 @@ enum TokenType {
 /*
   Models
 */
+
+model Follow {
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  follower_id String
+  followee_id String
+
+  follower User @relation("followers", fields: [follower_id], references: [id])
+  followee User @relation("followees", fields: [followee_id], references: [id])
+
+  @@index([follower_id])
+  @@index([followee_id])
+  @@unique([follower_id, followee_id])
+}
+
+model FollowRequest {
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  response_at DateTime?
+  requester_id String
+  target_id String
+
+  response_message String?
+
+  expires_at DateTime @default(dbgenerated("(now() + interval '30 days')"))
+
+  requester_user User @relation("follow_requests_sent", fields: [requester_id], references: [id])
+  target_user User @relation("follow_requests_received", fields: [target_id], references: [id])
+
+  @@index([requester_id])
+  @@index([target_id])
+  @@unique([requester_id, target_id])
+}
+
+model CommunityJoinRequest {
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  requester_id String
+  community_id String
+
+  response_at DateTime?
+  response_by String?
+
+  expires_at DateTime @default(dbgenerated("(now() + interval '30 days')"))
+
+  request_message String?
+  response_message String?
+
+  user User @relation("user_join_requests", fields: [requester_id], references: [id])
+  community Community @relation("community_join_requests", fields: [community_id], references: [id])
+
+  @@index([requester_id])
+  @@index([community_id])
+  @@index([expires_at])
+  @@unique([requester_id, community_id])
+}
+
+model Block {
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  blocker_id String
+  blocked_id String
+
+  blocker_users User @relation("blocked_users", fields: [blocker_id], references: [id])
+  blocked_by User @relation("blocked_by", fields: [blocked_id], references: [id])
+
+  @@index([blocker_id])
+  @@index([blocked_id])
+  @@unique([blocker_id, blocked_id])
+}
 
 model User {
   id        String  @id @default(uuid())
@@ -93,6 +173,20 @@ model User {
   posts Post[]
   saved_posts Post[] @relation("saved_posts")
 
+  followers Follow[] @relation("followers")
+  followings Follow[] @relation("followees")
+
+  follow_requests_sent FollowRequest[] @relation("follow_requests_sent")
+  follow_requests_received FollowRequest[] @relation("follow_requests_received")
+
+  user_join_requests CommunityJoinRequest[] @relation("user_join_requests")
+
+  blocked_users Block[] @relation("blocked_users")
+  blocked_by Block[] @relation("blocked_by")
+
+  reports_sent Report[] @relation("reporting_users")
+  reported_received Report[] @relation("reported_users")
+
   created_communities Community[] @relation("created_communities")
   joined_communities Community[] @relation("joined_communities")
 
@@ -104,12 +198,6 @@ model User {
   upvoted_comments Comment[] @relation("upvoted_comments")
   downvoted_comments Comment[] @relation("downvoted_comments")
 
-  reported_posts Post[] @relation("reported_posts")
-  reported_comments Comment[] @relation("reported_comments")
-
-  blocked_users User[] @relation("blocked_users")
-  blocked_by User[] @relation("blocked_users")
-
   moderator_additions Moderator[] @relation("moderator_additions")
 
   comments Comment[]
@@ -118,6 +206,12 @@ model User {
   auth_tokens AuthToken[]
 
   login_sessions LoginSession[]
+
+  @@index([username])
+  @@index([email])
+  @@index([account_status])
+  @@index([is_deleted])
+  @@index([is_suspended])
 }
 
 model LoginSession {
@@ -157,15 +251,31 @@ model Community {
 
   name String @unique
   description String?
-  image_url String?
+  image_url String? @default("default_1")
   rules Json?
+  
   status CommunityStatus @default(active)
+  is_deleted Boolean @default(false)
+  deleted_at DateTime?
+  deleted_reason String?
+
+  is_archived Boolean @default(false)
+  archived_at DateTime?
+  archived_reason String?
+
   seo_metadata Json?
   preferences Json?
   
   moderators Moderator[]
   members User[] @relation("joined_communities")
   posts Post[]
+
+  user_join_requests CommunityJoinRequest[] @relation("community_join_requests")
+
+  @@index([status])
+  @@index([is_deleted])
+  @@index([created_by])
+  @@index([is_archived])
 }
 
 model Moderator {
@@ -186,6 +296,8 @@ model Moderator {
   added_by String? // Who made them a moderator
   added_by_user User? @relation("moderator_additions", fields: [added_by], references: [id])
   
+  @@index([user_id])
+  @@index([community_id])
   @@unique([user_id, community_id])
 }
 
@@ -204,19 +316,31 @@ model Post {
   ai_summary String?
 
   status PostStatus @default(active)
+  is_removed Boolean @default(false)
+  removed_at DateTime?
+  removed_reason String?
 
   author String
   author_ref User @relation(fields: [author], references: [id])
 
-  community String
-  community_ref Community @relation(fields: [community], references: [id])
+  community_id String
+  community_ref Community @relation(fields: [community_id], references: [id])
 
   upvoters User[] @relation("upvoted_posts")
   downvoters User[] @relation("downvoted_posts")
-  reporters User[] @relation("reported_posts")
+  reports Report[] @relation("reported_posts")
 
   comments Comment[]
   saved_by User[] @relation("saved_posts")
+
+  @@index([author])
+  @@index([community_id])
+  @@index([status])
+  @@index([created_at])
+  @@index([slug])
+  
+  @@unique([author, slug])
+  @@unique([community_id, slug])
 }
 
 model Comment {
@@ -241,7 +365,13 @@ model Comment {
 
   upvoters User[] @relation("upvoted_comments")
   downvoters User[] @relation("downvoted_comments")
-  reporters User[] @relation("reported_comments")
+  reports Report[] @relation("reported_comments")
+
+  @@index([author])
+  @@index([post])
+  @@index([parent_comment_id])
+  @@index([status])
+  @@index([created_at])
 }
 
 model Token {
@@ -257,6 +387,9 @@ model Token {
   
   user_id String
   user User @relation(fields: [user_id], references: [id])
+
+  @@index([expiration])
+  @@index([valid])
 }
 
 model AuthToken {
@@ -270,4 +403,48 @@ model AuthToken {
   
   user_id String
   user User @relation(fields: [user_id], references: [id])
+
+  @@index([valid])
+}
+
+enum ReportType {
+  community
+  post
+  comment
+  user
+  chat
+}
+
+enum ReportStatus {
+  pending
+  resolved
+}
+
+model Report {
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  report_type ReportType
+  report_message String
+  report_status ReportStatus @default(pending)
+
+  reporter_id String
+  reporter_ref User @relation("reporting_users", fields: [reporter_id], references: [id])
+  
+  reported_id String
+  reported_ref User @relation("reported_users", fields: [reported_id], references: [id])
+
+  post_id String?
+  post_ref Post? @relation("reported_posts", fields: [post_id], references: [id])
+
+  comment_id String?
+  comment_ref Comment? @relation("reported_comments", fields: [comment_id], references: [id])
+
+  @@index([reporter_id])
+  @@index([reported_id])
+  @@index([report_type])
+  @@index([report_status])
+  @@index([created_at])
+  @@unique([reporter_id, reported_id, post_id, comment_id])
 }

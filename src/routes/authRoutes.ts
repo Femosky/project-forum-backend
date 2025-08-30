@@ -5,6 +5,7 @@ import { TokenPair } from '../utils/passwordService';
 import { UserInterface, UserStatus, UserType } from '../models/interfaces/userType';
 import { UAParser } from 'ua-parser-js';
 import { User } from '@prisma/client';
+import { ErrorResponse } from '../models/interfaces/errorType';
 
 const router = Router();
 
@@ -13,13 +14,7 @@ enum TokenType {
     EMAIL = 'email',
 }
 
-interface TokensErrorResponse {
-    error: {
-        message: string;
-    };
-}
-
-async function generateTokens(user: User, response: any): Promise<TokenPair | TokensErrorResponse> {
+async function generateTokens(user: User, response: any): Promise<TokenPair | ErrorResponse> {
     // Create AuthToken
     const authToken = await prisma.authToken.create({
         data: {
@@ -30,14 +25,14 @@ async function generateTokens(user: User, response: any): Promise<TokenPair | To
     });
 
     if (!authToken) {
-        return { error: { message: 'Could not create auth token.' } } as TokensErrorResponse;
+        return { error: 'Could not create auth token.' } as ErrorResponse;
     }
 
     // Generate Access and Refresh Tokens
     const tokens = await PasswordService.generateTokens(authToken.id);
     if (!tokens) {
         await prisma.authToken.delete({ where: { id: authToken.id } });
-        return { error: { message: 'Could not generate tokens.' } } as TokensErrorResponse;
+        return { error: 'Could not generate tokens.' } as ErrorResponse;
     }
 
     const isAuthTokenUpdated = await prisma.authToken.update({
@@ -50,7 +45,7 @@ async function generateTokens(user: User, response: any): Promise<TokenPair | To
 
     if (!isAuthTokenUpdated) {
         await prisma.authToken.delete({ where: { id: authToken.id } });
-        return { error: { message: 'Could not update auth token.' } } as TokensErrorResponse;
+        return { error: 'Could not update auth token.' } as ErrorResponse;
     }
 
     return tokens;
@@ -115,10 +110,10 @@ router.post('/login', async (request, response) => {
         }
 
         // Generate tokens
-        const tokens: TokenPair | TokensErrorResponse = await generateTokens(user, response);
+        const tokens: TokenPair | ErrorResponse = await generateTokens(user, response);
 
         if ('error' in tokens) {
-            return response.status(500).json({ error: tokens.error.message });
+            return response.status(500).json({ error: tokens.error });
         }
 
         response.json({
@@ -165,7 +160,7 @@ router.post('/refresh-token', async (request, response) => {
 
         response.json({ accessToken: newShortLivedToken });
     } catch (error) {
-        response.status(500).json({ error: { message: 'Internal server error.', stack: error } });
+        response.status(500).json({ error: 'Internal server error.', details: error } as ErrorResponse);
     }
 });
 
@@ -175,6 +170,7 @@ interface LoginSessionDetails {
     os: string | null | undefined;
     device: string | null | undefined;
     ipAddress: string | null | undefined;
+    error?: unknown;
 }
 
 async function getLoginSessionDetails(request: any): Promise<LoginSessionDetails> {
@@ -193,7 +189,7 @@ async function getLoginSessionDetails(request: any): Promise<LoginSessionDetails
 
         return { userAgent, browser, os, device, ipAddress };
     } catch (error) {
-        return { userAgent: null, browser: null, os: null, device: null, ipAddress: null };
+        return { userAgent: null, browser: null, os: null, device: null, ipAddress: null, error: error as string };
     }
 }
 
@@ -248,10 +244,10 @@ router.post('/create-user', async (request, response) => {
         }
 
         // Generate tokens
-        const tokens: TokenPair | TokensErrorResponse = await generateTokens(user as User, response);
+        const tokens: TokenPair | ErrorResponse = await generateTokens(user as User, response);
 
         if ('error' in tokens) {
-            return response.status(500).json({ error: tokens.error.message });
+            return response.status(500).json({ error: tokens.error });
         }
 
         // Create login session
@@ -276,7 +272,7 @@ router.post('/create-user', async (request, response) => {
 
         response.json({ message: 'Successfully created user', success: true, user, loginSession });
     } catch (error) {
-        response.status(500).json({ error: 'Failed to create user' });
+        response.status(500).json({ error: 'Failed to create user', details: error });
     }
 });
 
