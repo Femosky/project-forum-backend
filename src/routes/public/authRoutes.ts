@@ -61,11 +61,11 @@ router.post('/login', async (request, response) => {
 
         if (email) {
             user = (await prisma.user.findUnique({
-                where: { email },
+                where: { email: email.toLowerCase() },
             })) as User | null;
         } else if (username) {
             user = (await prisma.user.findUnique({
-                where: { username },
+                where: { username: username.toLowerCase() },
             })) as User | null;
         } else {
             return response.json({ error: 'Email or username is required.' });
@@ -177,7 +177,7 @@ router.post('/create-user', async (request, response) => {
 
     try {
         const isEmailTaken = await prisma.user.findUnique({
-            where: { email },
+            where: { email: email.toLowerCase() },
         });
 
         if (isEmailTaken) {
@@ -185,7 +185,7 @@ router.post('/create-user', async (request, response) => {
         }
 
         const isUsernameTaken = await prisma.user.findUnique({
-            where: { username },
+            where: { username: username.toLowerCase() },
         });
 
         if (isUsernameTaken) {
@@ -196,8 +196,8 @@ router.post('/create-user', async (request, response) => {
 
         const user = await prisma.user.create({
             data: {
-                email,
-                username,
+                email: email.toLowerCase(),
+                username: username.toLowerCase(),
                 password_hash: hashedPassword,
             },
             select: {

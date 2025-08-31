@@ -98,6 +98,30 @@ router.post('/join', async (request: AuthRequest, response) => {
     }
 });
 
+const validateCommunityName = (name: string): string | null => {
+    if (name.length < 3) {
+        return 'Community name must be at least 3 characters long';
+    }
+
+    if (name.length > 21) {
+        return 'Community name cannot exceed 21 characters';
+    }
+
+    if (!/^[a-zA-Z0-9_]+$/.test(name)) {
+        return 'Community name can only contain letters and numbers and underscores';
+    }
+
+    if (/^[0-9]/.test(name)) {
+        return 'Community name cannot start with a number';
+    }
+
+    if (/^[_]/.test(name)) {
+        return 'Community name cannot start with an underscore';
+    }
+
+    return null; // Valid name
+};
+
 router.post('/create-community', async (request: AuthRequest, response) => {
     const { image_url, name, description, seo_metadata, preferences } = request.body;
     const user = request.user;
@@ -111,6 +135,13 @@ router.post('/create-community', async (request: AuthRequest, response) => {
     }
 
     try {
+        // Check for spaces or special characters in name
+        const communityNameError = validateCommunityName(name);
+
+        if (!communityNameError) {
+            return response.status(400).json({ error: communityNameError } as ErrorResponse);
+        }
+
         // Check if user is at least 30 days old
         // if (!DateUtils.isAgeGreaterThan30Days(user)) {
         //     return response.status(400).json({ error: 'User must be at least 30 days old' } as ErrorResponse);
@@ -118,7 +149,7 @@ router.post('/create-community', async (request: AuthRequest, response) => {
 
         // Check if community already exists
         const existingCommunity = await prisma.community.findUnique({
-            where: { name },
+            where: { name: name.toLowerCase() },
         });
 
         if (existingCommunity) {
@@ -129,7 +160,7 @@ router.post('/create-community', async (request: AuthRequest, response) => {
         const community = await prisma.community.create({
             data: {
                 created_by: user.id,
-                name,
+                name: name.toLowerCase(),
                 description,
                 image_url,
                 seo_metadata,
