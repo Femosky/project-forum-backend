@@ -1,11 +1,11 @@
 import { Router } from 'express';
-import prisma from '../prismaConnection';
-import { DecodedToken, LONG_LIVED_TOKEN_EXPIRATION, PasswordService } from '../utils/passwordService';
-import { TokenPair } from '../utils/passwordService';
-import { UserInterface, UserStatus, UserType } from '../models/interfaces/userType';
+import prisma from '../../prismaConnection';
+import { DecodedToken, LONG_LIVED_TOKEN_EXPIRATION, PasswordService } from '../../utils/passwordService';
+import { TokenPair } from '../../utils/passwordService';
+import { UserInterface, UserStatus, UserType } from '../../models/interfaces/userType';
 import { UAParser } from 'ua-parser-js';
 import { User } from '@prisma/client';
-import { ErrorResponse } from '../models/interfaces/errorType';
+import { ErrorResponse } from '../../models/interfaces/errorType';
 
 const router = Router();
 
@@ -62,42 +62,14 @@ router.post('/login', async (request, response) => {
         if (email) {
             user = (await prisma.user.findUnique({
                 where: { email },
-                select: {
-                    id: true,
-                    created_at: true,
-                    updated_at: true,
-                    last_login: true,
-                    username: true,
-                    email: true,
-                    avatar_id: true,
-                    account_status: true,
-                    user_type: true,
-                    is_email_verified: true,
-                    notification_preferences: true,
-                },
             })) as User | null;
         } else if (username) {
             user = (await prisma.user.findUnique({
                 where: { username },
-                select: {
-                    id: true,
-                    created_at: true,
-                    updated_at: true,
-                    last_login: true,
-                    username: true,
-                    email: true,
-                    avatar_id: true,
-                    account_status: true,
-                    user_type: true,
-                    is_email_verified: true,
-                    notification_preferences: true,
-                },
             })) as User | null;
         } else {
             return response.json({ error: 'Email or username is required.' });
         }
-
-        console.log('got here');
 
         if (!user) {
             return response.json({ error: 'User not found.' });
@@ -116,17 +88,19 @@ router.post('/login', async (request, response) => {
             return response.status(500).json({ error: tokens.error });
         }
 
+        const { password_hash, ...userWithoutPassword } = user;
+
         response.json({
-            message: 'Login sucessful.',
+            message: 'Login successful.',
             success: true,
             tokens: {
                 short_lived_token: tokens.short_lived_token,
                 long_lived_token: tokens.long_lived_token,
             } as TokenPair,
-            user,
+            user: userWithoutPassword,
         });
     } catch (error) {
-        response.status(500).json({ error: { message: 'Internal server error.', stack: error } });
+        response.status(500).json({ error: 'Failed to login.', details: error } as ErrorResponse);
     }
 });
 
@@ -218,11 +192,13 @@ router.post('/create-user', async (request, response) => {
             return response.status(400).json({ error: 'Username already in use' });
         }
 
+        const hashedPassword = await PasswordService.hashPassword(password);
+
         const user = await prisma.user.create({
             data: {
                 email,
                 username,
-                password_hash: password,
+                password_hash: hashedPassword,
             },
             select: {
                 id: true,
@@ -270,7 +246,7 @@ router.post('/create-user', async (request, response) => {
             return response.status(500).json({ error: 'Failed to create login session' });
         }
 
-        response.json({ message: 'Successfully created user', success: true, user, loginSession });
+        response.json({ message: 'Successfully created user', success: true, user, loginSession, tokens });
     } catch (error) {
         response.status(500).json({ error: 'Failed to create user', details: error });
     }

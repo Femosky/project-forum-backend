@@ -306,13 +306,15 @@ model Post {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
+  short_id String @unique
+
   title String
   content String
   impressions Int @default(0)
   is_anonymous Boolean @default(false)
   is_sponsored Boolean @default(false)
   tags String[]
-  slug String @unique
+  slug String?
   ai_summary String?
 
   status PostStatus @default(active)

@@ -1,74 +1,10 @@
 import { Router } from 'express';
-import prisma from '../prismaConnection';
-import { ErrorResponse } from '../models/interfaces/errorType';
-import DateUtils from '../utils/dateUtils';
-import { AuthRequest } from '../middlewares/authMiddleware';
-import { Community, Moderator, User } from '@prisma/client';
+import { AuthRequest } from '../../middlewares/authMiddleware';
+import { ErrorResponse } from '../../models/interfaces/errorType';
+import prisma from '../../prismaConnection';
+import { Community, Moderator, User, ModeratorRole, PostStatus, CommunityStatus } from '@prisma/client';
 
 const router = Router();
-
-/*
-    Community routes as /community
-    - Get a community by ID
-    - Create a community
-    - Delete a community
-    - Archive a community
-    - Unarchive a community
-*/
-
-enum CommunityStatus {
-    ACTIVE = 'active',
-    PRIVATE = 'private',
-    ARCHIVED = 'archived',
-    CLOSED = 'closed',
-    DELETED = 'deleted',
-}
-
-enum ModeratorRole {
-    MODERATOR = 'moderator',
-    ADMIN = 'admin',
-    SUPER_MODERATOR = 'super_moderator',
-}
-
-enum PostStatus {
-    ACTIVE = 'active',
-    ARCHIVED = 'archived',
-    REMOVED = 'removed',
-    DELETED = 'deleted',
-    HIDDEN = 'hidden',
-    PENDING = 'pending',
-}
-
-router.get('/:id', async (request: AuthRequest, response) => {
-    const { id } = request.params;
-
-    if (!id) {
-        return response.status(400).json({ error: 'Community ID is required' } as ErrorResponse);
-    }
-
-    try {
-        const community = await prisma.community.findUnique({
-            where: { id },
-            include: {
-                moderators: true,
-                _count: {
-                    select: {
-                        members: true,
-                        posts: true,
-                    },
-                },
-            },
-        });
-
-        if (!community) {
-            return response.status(404).json({ error: 'Community not found' } as ErrorResponse);
-        }
-
-        return response.status(200).json({ community });
-    } catch (error) {
-        return response.status(500).json({ error: 'Failed to get community', details: error } as ErrorResponse);
-    }
-});
 
 router.post('/join', async (request: AuthRequest, response) => {
     const { community_id, request_message } = request.body;
@@ -110,9 +46,9 @@ router.post('/join', async (request: AuthRequest, response) => {
         }
 
         //  Join user to community if community is open, otherwise require community join request
-        if (community.status === CommunityStatus.CLOSED) {
+        if (community.status === CommunityStatus.closed) {
             return response.status(400).json({ error: 'Community is closed' } as ErrorResponse);
-        } else if (community.status === CommunityStatus.PRIVATE) {
+        } else if (community.status === CommunityStatus.private) {
             // Check if user has already requested to join the community
             const existingJoinRequest = await prisma.communityJoinRequest.findFirst({
                 where: {
@@ -162,7 +98,7 @@ router.post('/join', async (request: AuthRequest, response) => {
     }
 });
 
-router.get('/create-community', async (request: AuthRequest, response) => {
+router.post('/create-community', async (request: AuthRequest, response) => {
     const { image_url, name, description, seo_metadata, preferences } = request.body;
     const user = request.user;
 
@@ -176,9 +112,9 @@ router.get('/create-community', async (request: AuthRequest, response) => {
 
     try {
         // Check if user is at least 30 days old
-        if (!DateUtils.isAgeGreaterThan30Days(user)) {
-            return response.status(400).json({ error: 'User must be at least 30 days old' } as ErrorResponse);
-        }
+        // if (!DateUtils.isAgeGreaterThan30Days(user)) {
+        //     return response.status(400).json({ error: 'User must be at least 30 days old' } as ErrorResponse);
+        // }
 
         // Check if community already exists
         const existingCommunity = await prisma.community.findUnique({
@@ -572,7 +508,7 @@ router.post('/remove-moderator', async (request: AuthRequest, response) => {
         });
 
         const isAdmin = await prisma.community.findFirst({
-            where: { id: community_id, moderators: { some: { user_id: user.id, role: ModeratorRole.ADMIN } } },
+            where: { id: community_id, moderators: { some: { user_id: user.id, role: ModeratorRole.admin } } },
         });
 
         if (!isCreator && !isAdmin) {
@@ -636,7 +572,7 @@ router.post('/update-moderator-role', async (request: AuthRequest, response) => 
         });
 
         const isAdmin = await prisma.community.findFirst({
-            where: { id: community_id, moderators: { some: { user_id: user.id, role: ModeratorRole.ADMIN } } },
+            where: { id: community_id, moderators: { some: { user_id: user.id, role: ModeratorRole.admin } } },
         });
 
         if (!isCreator && !isAdmin) {
@@ -660,7 +596,7 @@ router.post('/update-moderator-role', async (request: AuthRequest, response) => 
         const isModeratorRoleUpdated = await prisma.community.update({
             where: { id: community_id },
             data: {
-                moderators: { update: { where: { id: moderatorId }, data: { role: ModeratorRole.MODERATOR } } },
+                moderators: { update: { where: { id: moderatorId }, data: { role: ModeratorRole.admin } } },
             },
         });
 
@@ -706,7 +642,7 @@ router.post('/update-community-status', async (request: AuthRequest, response) =
         });
 
         const isAdmin = await prisma.community.findFirst({
-            where: { id: community_id, moderators: { some: { user_id: user.id, role: ModeratorRole.ADMIN } } },
+            where: { id: community_id, moderators: { some: { user_id: user.id, role: ModeratorRole.admin } } },
         });
 
         if (!isCreator && !isAdmin) {
@@ -730,115 +666,6 @@ router.post('/update-community-status', async (request: AuthRequest, response) =
         return response
             .status(500)
             .json({ error: 'Failed to update community status', details: error } as ErrorResponse);
-    }
-});
-
-// Posts
-
-router.post('/create-post', async (request: AuthRequest, response) => {
-    const { community_id, title, content, is_anonymous, is_sponsored, tags, slug, ai_summary } = request.body;
-    const user = request.user;
-
-    if (!user) {
-        return response.status(401).json({ error: 'Unauthorized' } as ErrorResponse);
-    }
-
-    if (!community_id || !title || !content) {
-        return response.status(400).json({ error: 'Community ID, title and content are required' } as ErrorResponse);
-    }
-
-    try {
-        // Check if community exists
-        const community = await prisma.community.findUnique({
-            where: { id: community_id },
-        });
-
-        if (!community) {
-            return response.status(400).json({ error: 'Community not found' } as ErrorResponse);
-        }
-
-        // Create post
-        const isPostCreated = await prisma.post.create({
-            data: {
-                title,
-                content,
-                is_anonymous,
-                is_sponsored,
-                tags,
-                slug,
-                ai_summary,
-                author: user.id,
-                community_id,
-            },
-        });
-
-        if (!isPostCreated) {
-            return response.status(500).json({ error: 'Failed to create post' } as ErrorResponse);
-        }
-
-        return response.status(200).json({ message: 'Post created successfully' });
-    } catch (error) {
-        return response.status(500).json({ error: 'Failed to create post', details: error } as ErrorResponse);
-    }
-});
-
-router.post('remove-post', async (request: AuthRequest, response) => {
-    const { community_id, postId, removed_reason } = request.body;
-    const user = request.user;
-
-    if (!user) {
-        return response.status(401).json({ error: 'Unauthorized' } as ErrorResponse);
-    }
-
-    if (!community_id || !postId) {
-        return response.status(400).json({ error: 'Community ID and post ID are required' } as ErrorResponse);
-    }
-
-    try {
-        // Check if community exists
-        const community = await prisma.community.findUnique({
-            where: { id: community_id },
-        });
-
-        if (!community) {
-            return response.status(400).json({ error: 'Community not found' } as ErrorResponse);
-        }
-
-        // Check if user is a moderator of the community
-        const isUserModerator = await prisma.community.findFirst({
-            where: { id: community_id, moderators: { some: { user_id: user.id } } },
-        });
-
-        if (!isUserModerator) {
-            return response.status(400).json({ error: 'User is not a moderator of the community' } as ErrorResponse);
-        }
-
-        const isPostExists = await prisma.post.findUnique({
-            where: { id: postId },
-        });
-
-        if (!isPostExists) {
-            return response.status(400).json({ error: 'Post not found' } as ErrorResponse);
-        }
-
-        // Remove post from community
-        const isPostRemoved = await prisma.post.update({
-            where: { id: postId },
-            data: {
-                status: PostStatus.REMOVED,
-                is_removed: true,
-                removed_at: new Date(),
-                removed_reason,
-            },
-        });
-
-        if (!isPostRemoved) {
-            return response.status(500).json({ error: 'Failed to remove post' } as ErrorResponse);
-        }
-
-        return response.status(200).json({ message: 'Post has been marked asremoved from community successfully' });
-    } catch (error) {
-        return response.status(500).json({ error: 'Failed to remove post', details: error } as ErrorResponse);
     }
 });
 

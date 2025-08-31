@@ -32,6 +32,6 @@ export async function authenticateToken(request: AuthRequest, response: Response
         request.user = token.user as User;
         next();
     } catch (error) {
-        return response.status(500).json({ error: { message: 'Internal server error.', stack: error } });
+        return response.status(500).json({ error: { message: 'Failed to authenticate token.', stack: error } });
     }
 }
