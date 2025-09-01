@@ -5,16 +5,14 @@ import DateUtils from '../../utils/dateUtils';
 import { AuthRequest } from '../../middlewares/authMiddleware';
 import { Community, Moderator, User, ModeratorRole, PostStatus, CommunityStatus } from '@prisma/client';
 import { CommunityService } from '../services/CommunityService';
+import { CommentService } from '../services/CommentService';
 
 const router = Router();
 
 /*
     Community routes as /community
-    - Get a community by ID
-    - Create a community
-    - Delete a community
-    - Archive a community
-    - Unarchive a community
+    - Get a community by name
+    - Get posts for a community with pagination
 */
 
 // Get community by name
@@ -64,8 +62,8 @@ router.get('/:community_name/posts', async (request, response) => {
             return response.status(404).json({ error: 'Community not found with this name' });
         }
 
-        const pageNumber = parseInt(page as string);
-        const limitNumber = parseInt(limit as string);
+        const pageNumber = Math.max(1, parseInt(page as string) || CommentService.DEFAULT_PAGE_NUMBER);
+        const limitNumber = Math.min(Math.max(1, parseInt(limit as string) || CommentService.DEFAULT_LIMIT), 100);
         const offset = (pageNumber - 1) * limitNumber;
 
         const posts = await prisma.post.findMany({

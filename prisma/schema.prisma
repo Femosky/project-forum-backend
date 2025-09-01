@@ -37,6 +37,7 @@ enum CommunityStatus {
 }
 
 enum ModeratorRole {
+  creator
   moderator
   admin
   super_moderator
@@ -64,351 +65,6 @@ enum TokenType {
   api
 }
 
-/*
-  Models
-*/
-
-model Follow {
-  id String @id @default(uuid())
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  follower_id String
-  followee_id String
-
-  follower User @relation("followers", fields: [follower_id], references: [id])
-  followee User @relation("followees", fields: [followee_id], references: [id])
-
-  @@index([follower_id])
-  @@index([followee_id])
-  @@unique([follower_id, followee_id])
-}
-
-model FollowRequest {
-  id String @id @default(uuid())
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  response_at DateTime?
-  requester_id String
-  target_id String
-
-  response_message String?
-
-  expires_at DateTime @default(dbgenerated("(now() + interval '30 days')"))
-
-  requester_user User @relation("follow_requests_sent", fields: [requester_id], references: [id])
-  target_user User @relation("follow_requests_received", fields: [target_id], references: [id])
-
-  @@index([requester_id])
-  @@index([target_id])
-  @@unique([requester_id, target_id])
-}
-
-model CommunityJoinRequest {
-  id String @id @default(uuid())
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  requester_id String
-  community_id String
-
-  response_at DateTime?
-  response_by String?
-
-  expires_at DateTime @default(dbgenerated("(now() + interval '30 days')"))
-
-  request_message String?
-  response_message String?
-
-  user User @relation("user_join_requests", fields: [requester_id], references: [id])
-  community Community @relation("community_join_requests", fields: [community_id], references: [id])
-
-  @@index([requester_id])
-  @@index([community_id])
-  @@index([expires_at])
-  @@unique([requester_id, community_id])
-}
-
-model Block {
-  id String @id @default(uuid())
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  blocker_id String
-  blocked_id String
-
-  blocker_users User @relation("blocked_users", fields: [blocker_id], references: [id])
-  blocked_by User @relation("blocked_by", fields: [blocked_id], references: [id])
-
-  @@index([blocker_id])
-  @@index([blocked_id])
-  @@unique([blocker_id, blocked_id])
-}
-
-model User {
-  id        String  @id @default(uuid())
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-  last_login DateTime?
-
-  username  String  @unique
-  email     String  @unique
-  password_hash String
-  avatar_id String @default("default_1")
-  account_status UserStatus @default(active)
-  
-  user_type UserType @default(regular)
-  is_email_verified Boolean @default(false)
-  notification_preferences Json?
-
-  is_deleted Boolean @default(false)
-  deleted_at DateTime?
-  deleted_reason String?
-
-  is_suspended Boolean @default(false)
-  suspended_at DateTime?
-  suspended_reason String?
-
-  posts Post[]
-  saved_posts Post[] @relation("saved_posts")
-
-  followers Follow[] @relation("followers")
-  followings Follow[] @relation("followees")
-
-  follow_requests_sent FollowRequest[] @relation("follow_requests_sent")
-  follow_requests_received FollowRequest[] @relation("follow_requests_received")
-
-  user_join_requests CommunityJoinRequest[] @relation("user_join_requests")
-
-  blocked_users Block[] @relation("blocked_users")
-  blocked_by Block[] @relation("blocked_by")
-
-  reports_sent Report[] @relation("reporting_users")
-  reported_received Report[] @relation("reported_users")
-
-  created_communities Community[] @relation("created_communities")
-  joined_communities Community[] @relation("joined_communities")
-
-  moderationships Moderator[]
-
-  upvoted_posts Post[] @relation("upvoted_posts")
-  downvoted_posts Post[] @relation("downvoted_posts")
-
-  upvoted_comments Comment[] @relation("upvoted_comments")
-  downvoted_comments Comment[] @relation("downvoted_comments")
-
-  moderator_additions Moderator[] @relation("moderator_additions")
-
-  comments Comment[]
-
-  tokens Token[]
-  auth_tokens AuthToken[]
-
-  login_sessions LoginSession[]
-
-  @@index([username])
-  @@index([email])
-  @@index([account_status])
-  @@index([is_deleted])
-  @@index([is_suspended])
-}
-
-model LoginSession {
-  id String @id @default(uuid())
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-  
-  expires_at DateTime
-  is_active Boolean @default(true)
-  
-  device_type String?
-  browser String?
-  os String?
-  user_agent String?
-  
-  ip_address String?
-  country String?
-  city String?
-  
-  is_trusted Boolean @default(false)
-  last_activity DateTime @default(now())
-  
-  user_id String
-  user User @relation(fields: [user_id], references: [id])
-  
-  @@index([user_id, is_active])
-  @@index([expires_at])
-}
-
-model Community {
-  id         String  @id @default(uuid())
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  created_by String
-  created_by_ref User @relation("created_communities", fields: [created_by], references: [id])
-
-  name String @unique
-  description String?
-  image_url String? @default("default_1")
-  rules Json?
-  
-  status CommunityStatus @default(active)
-  is_deleted Boolean @default(false)
-  deleted_at DateTime?
-  deleted_reason String?
-
-  is_archived Boolean @default(false)
-  archived_at DateTime?
-  archived_reason String?
-
-  seo_metadata Json?
-  preferences Json?
-  
-  moderators Moderator[]
-  members User[] @relation("joined_communities")
-  posts Post[]
-
-  user_join_requests CommunityJoinRequest[] @relation("community_join_requests")
-
-  @@index([status])
-  @@index([is_deleted])
-  @@index([created_by])
-  @@index([is_archived])
-}
-
-model Moderator {
-  id String @id @default(uuid())
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-  
-  user_id String
-  user_ref User @relation(fields: [user_id], references: [id])
-  
-  community_id String
-  community Community @relation(fields: [community_id], references: [id])
-  
-  role ModeratorRole @default(moderator) // moderator, admin, super_moderator
-  permissions Json? // Store specific permissions
-  is_active Boolean @default(true)
-  
-  added_by String? // Who made them a moderator
-  added_by_user User? @relation("moderator_additions", fields: [added_by], references: [id])
-  
-  @@index([user_id])
-  @@index([community_id])
-  @@unique([user_id, community_id])
-}
-
-model Post {
-  id         String  @id @default(uuid())
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  short_id String @unique
-
-  title String
-  content String
-  impressions Int @default(0)
-  is_anonymous Boolean @default(false)
-  is_sponsored Boolean @default(false)
-  tags String[]
-  slug String?
-  ai_summary String?
-
-  status PostStatus @default(active)
-  is_removed Boolean @default(false)
-  removed_at DateTime?
-  removed_reason String?
-
-  author_id String
-  author_ref User @relation(fields: [author_id], references: [id])
-
-  community_id String
-  community_ref Community @relation(fields: [community_id], references: [id])
-
-  upvoters User[] @relation("upvoted_posts")
-  downvoters User[] @relation("downvoted_posts")
-  reports Report[] @relation("reported_posts")
-
-  comments Comment[]
-  saved_by User[] @relation("saved_posts")
-
-  @@index([author_id])
-  @@index([community_id])
-  @@index([status])
-  @@index([created_at])
-  @@index([slug])
-  
-  @@unique([author_id, slug])
-  @@unique([community_id, slug])
-}
-
-model Comment {
-  id String @id @default(uuid())
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  content String
-  status CommentStatus @default(active)
-  is_anonymous Boolean @default(false)
-  is_sponsored Boolean @default(false)
-  
-  author_id String
-  author_ref User @relation(fields: [author_id], references: [id])
-
-  post_id String
-  post_ref Post @relation(fields: [post_id], references: [id])
-
-  parent_comment_id String?
-  parent_comment_ref Comment? @relation("parent_comment", fields: [parent_comment_id], references: [id])
-  child_comments Comment[] @relation("parent_comment")
-
-  upvoters User[] @relation("upvoted_comments")
-  downvoters User[] @relation("downvoted_comments")
-  reports Report[] @relation("reported_comments")
-
-  @@index([author_id])
-  @@index([post_id])
-  @@index([parent_comment_id])
-  @@index([status])
-  @@index([created_at])
-}
-
-model Token {
-  id String @id @default(uuid())
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  type TokenType @default(email) // EMAIL/API
-  email_token String? @unique
-
-  valid Boolean @default(true)
-  expiration DateTime
-  
-  user_id String
-  user User @relation(fields: [user_id], references: [id])
-
-  @@index([expiration])
-  @@index([valid])
-}
-
-model AuthToken {
-  id String @id @default(uuid())
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-  
-  valid Boolean @default(true)
-  short_lived_token String?
-  long_lived_token String?
-  
-  user_id String
-  user User @relation(fields: [user_id], references: [id])
-
-  @@index([valid])
-}
-
 enum ReportType {
   community
   post
@@ -422,15 +78,594 @@ enum ReportStatus {
   resolved
 }
 
-model Report {
+
+/*
+  Models
+*/
+
+model Follow {
+  // Automatically generated
   id String @id @default(uuid())
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  report_type ReportType
-  report_message String
-  report_status ReportStatus @default(pending)
+  // Id fields
+  follower_id String
+  follower User @relation("followers", fields: [follower_id], references: [id])
 
+  followee_id String
+  followee User @relation("followees", fields: [followee_id], references: [id])
+
+  // Indexes and unique constraints
+  @@index([follower_id])
+  @@index([followee_id])
+  @@unique([follower_id, followee_id])
+}
+
+model FollowRequest {
+  // Automatically generated
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Id fields
+  requester_id String
+  requester_user User @relation("follow_requests_sent", fields: [requester_id], references: [id])
+
+  target_id String
+  target_user User @relation("follow_requests_received", fields: [target_id], references: [id])
+  
+  // Response details
+  response_at DateTime?
+  response_message String?
+  expires_at DateTime @default(dbgenerated("(now() + interval '30 days')"))
+
+  // Indexes and unique constraints
+  @@index([requester_id])
+  @@index([target_id])
+  @@unique([requester_id, target_id])
+}
+
+model CommunityJoinRequest {
+  // Automatically generated
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Id fields
+  requester_id String
+  requester_ref User @relation("user_join_requests", fields: [requester_id], references: [id])
+
+  community_id String
+  community Community @relation("community_join_requests", fields: [community_id], references: [id])
+
+  // Request details
+  request_message String?
+  expires_at DateTime @default(dbgenerated("(now() + interval '30 days')"))
+
+  // Response details
+  is_accepted Boolean?
+  response_at DateTime?
+  response_message String?
+  response_by String?
+  response_by_ref Moderator? @relation("community_join_responses", fields: [response_by], references: [id])
+
+  // Indexes and unique constraints
+  @@index([requester_id])
+  @@index([community_id])
+  @@index([expires_at])
+  @@unique([requester_id, community_id])
+}
+
+model Block {
+  // Automatically generated
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Id fields
+  blocker_id String
+  blocker_ref User @relation("blocked_users", fields: [blocker_id], references: [id])
+  
+  blocked_id String
+  blocked_by_ref User @relation("blocked_by", fields: [blocked_id], references: [id])
+
+  // Indexes and unique constraints
+  @@index([blocker_id])
+  @@index([blocked_id])
+  @@unique([blocker_id, blocked_id])
+}
+
+model User {
+  // Automatically generated
+  id        String  @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  last_login DateTime?
+
+  // Id fields
+  username  String  @unique
+  email     String  @unique
+  password_hash String
+  
+  display_name String?
+  avatar_id String @default("default_1")
+
+  // Account details
+  user_type UserType @default(regular)
+  is_email_verified Boolean @default(false)
+
+  // Account status
+  account_status UserStatus @default(active)
+  
+  // Notification preferences
+  notification_preferences Json?
+
+  // Deletion details
+  is_deleted Boolean @default(false)
+  deleted_at DateTime?
+  deleted_reason String?
+
+  // Suspension details
+  is_suspended Boolean @default(false)
+  suspended_at DateTime?
+  suspended_reason String?
+
+  // Posts
+  posts Post[]
+  saved_posts Post[] @relation("saved_posts")
+  saved_comments Comment[] @relation("saved_comments")
+  upvoted_posts Post[] @relation("upvoted_posts")
+  downvoted_posts Post[] @relation("downvoted_posts")
+  seen_posts PostView[] @relation("seen_posts")
+
+  // Comments
+  comments Comment[]
+  upvoted_comments Comment[] @relation("upvoted_comments")
+  downvoted_comments Comment[] @relation("downvoted_comments")
+  seen_comments CommentView[] @relation("seen_comments")
+
+  // Followers and followings details
+  followers Follow[] @relation("followers")
+  followings Follow[] @relation("followees")
+
+  follow_requests_sent FollowRequest[] @relation("follow_requests_sent")
+  follow_requests_received FollowRequest[] @relation("follow_requests_received")
+
+  // Community details
+  created_communities Community[] @relation("created_communities")
+  joined_communities Community[] @relation("joined_communities")
+  user_join_requests CommunityJoinRequest[] @relation("user_join_requests")
+
+
+  // Blocked users and blocked by details
+  blocked_users Block[] @relation("blocked_users")
+  blocked_by Block[] @relation("blocked_by")
+
+  // Report details
+  reports_sent Report[] @relation("reporting_users")
+  reported_received Report[] @relation("reported_users")
+
+  // Moderator details
+  moderationships Moderator[] @relation("moderators")
+
+  // Sponsored posts and comments
+  sponsored_posts Post[] @relation("sponsored_posts")
+  sponsored_comments Comment[] @relation("sponsored_comments")
+
+  // Tokens and auth tokens
+  tokens Token[]
+  auth_tokens AuthToken[]
+
+  // Login sessions
+  login_sessions LoginSession[]
+
+  // Indexes and unique constraints
+  @@index([username])
+  @@index([email])
+  @@index([account_status])
+  @@index([is_deleted])
+  @@index([is_suspended])
+}
+
+model LoginSession {
+  // Automatically generated
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Id fields
+  user_id String
+  user User @relation(fields: [user_id], references: [id])
+
+  // Session details
+  expires_at DateTime
+  is_active Boolean @default(true)
+  
+  // Device details
+  device_type String?
+  browser String?
+  os String?
+  user_agent String?
+  
+  // Location details
+  ip_address String?
+  country String?
+  city String?
+  
+  // Trusted details
+  is_trusted Boolean @default(false)
+  last_activity DateTime @default(now())
+
+  // Indexes and unique constraints
+  @@index([user_id, is_active])
+  @@index([expires_at])
+}
+
+model Community {
+  // Automatically generated
+  id         String  @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Id fields
+  created_by String
+  created_by_ref User @relation("created_communities", fields: [created_by], references: [id])
+
+  // Community details
+  name String @unique
+  description String?
+  image_url String? @default("default_1")
+  rules Json?
+
+  // Community status
+  status CommunityStatus @default(active)
+
+  // Moderators
+  moderators Moderator[] @relation("moderators")
+
+  // Members
+  members User[] @relation("joined_communities")
+  posts Post[]
+
+  // Join requests
+  user_join_requests CommunityJoinRequest[] @relation("community_join_requests")
+
+  // Deletion details
+  is_deleted Boolean @default(false)
+  deleted_at DateTime?
+  deleted_reason String?
+
+  // Archived details
+  is_archived Boolean @default(false)
+  archived_at DateTime?
+  archived_reason String?
+
+  // SEO metadata
+  seo_metadata Json?
+
+  // Preferences
+  preferences Json?
+
+  // Indexes and unique constraints
+  @@index([status])
+  @@index([is_deleted])
+  @@index([created_by])
+  @@index([is_archived])
+}
+
+model Moderator {
+  // Automatically generated
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  
+  // Id fields
+  user_id String
+  user_ref User @relation("moderators", fields: [user_id], references: [id])
+  
+  community_id String
+  community Community @relation("moderators", fields: [community_id], references: [id])
+
+  // Moderator details
+  role ModeratorRole @default(moderator) // moderator, admin, super_moderator
+  is_active Boolean @default(true)
+  permissions Json? // Store specific permissions
+
+  // Join requests
+  community_join_requests CommunityJoinRequest[] @relation("community_join_responses")
+  
+  // Added by details
+  added_by_date DateTime?
+  added_by String?
+  added_by_user Moderator? @relation("moderator_additions", fields: [added_by], references: [id])
+  moderators_added Moderator[] @relation("moderator_additions")
+
+  // Pinned posts and comments
+  pinned_posts Post[] @relation("pinned_posts")
+  pinned_comments Comment[] @relation("pinned_comments")
+
+  // Hidden posts and comments
+  hidden_posts Post[] @relation("hidden_posts")
+  hidden_comments Comment[] @relation("hidden_comments")
+  
+  // Removed by this moderator
+  removed_moderators Moderator[] @relation("removed_moderators_by")
+  removed_posts Post[] @relation("removed_posts")
+  removed_comments Comment[] @relation("removed_comments")
+
+  // Moderator removed details
+  is_removed Boolean @default(false)
+  removed_at DateTime?
+  removed_reason String?
+  removed_by String?
+  removed_by_user Moderator? @relation("removed_moderators_by", fields: [removed_by], references: [id])
+  
+  // Indexes and unique constraints
+  @@index([user_id])
+  @@index([community_id])
+  @@unique([user_id, community_id])
+  @@index([is_removed])
+}
+
+model PostView {
+  // Automatically generated
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  
+  // Id fields
+  post_id String
+  post Post @relation("seen_posts", fields: [post_id], references: [id])
+  
+  user_id String
+  user User @relation("seen_posts", fields: [user_id], references: [id])
+  
+  // Indexes and unique constraints
+  @@unique([post_id, user_id])  // Prevent duplicate views per user
+  @@index([post_id])
+  @@index([user_id])
+}
+
+model Post {
+  // Automatically generated
+  id         String  @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Id fields
+  short_id String @unique
+
+  author_id String
+  author_ref User @relation(fields: [author_id], references: [id])
+
+  community_id String
+  community_ref Community @relation(fields: [community_id], references: [id])
+
+  // Post details
+  title String
+  content String
+  ai_summary String?
+  is_anonymous Boolean @default(false)
+  slug String?
+  tags String[]
+
+  // Edited details
+  is_edited Boolean @default(false)
+  edited_at DateTime?
+
+  // Status
+  status PostStatus @default(active)
+
+  // Views
+  impressions Int @default(0)
+  views PostView[] @relation("seen_posts")
+
+  // Sponsored details
+  is_sponsored Boolean @default(false)
+  sponsored_at DateTime?
+  sponsored_reason String?
+  sponsored_by String?
+  sponsored_by_user User? @relation("sponsored_posts", fields: [sponsored_by], references: [id])
+
+  // Pinned details
+  is_pinned Boolean @default(false)
+  pinned_at DateTime?
+  pinned_reason String?
+  pinned_by String?
+  pinned_by_user Moderator? @relation("pinned_posts", fields: [pinned_by], references: [id])
+
+  // Hidden details
+  is_hidden Boolean @default(false)
+  hidden_at DateTime?
+  hidden_reason String?
+  hidden_by String?
+  hidden_by_user Moderator? @relation("hidden_posts", fields: [hidden_by], references: [id])
+
+  // Deleted details
+  is_deleted Boolean @default(false)
+  deleted_at DateTime?
+  deleted_reason String?
+
+  // Removed details
+  is_removed Boolean @default(false)
+  removed_at DateTime?
+  removed_reason String?
+  removed_by String?
+  removed_by_user Moderator? @relation("removed_posts", fields: [removed_by], references: [id])
+
+  // Upvoters and downvoters
+  upvoters User[] @relation("upvoted_posts")
+  downvoters User[] @relation("downvoted_posts")
+  
+  // Reports
+  reports Report[] @relation("reported_posts")
+
+  // Comments
+  comments Comment[]
+  
+  // Saved posts
+  saved_by User[] @relation("saved_posts")
+
+  // Indexes and unique constraints
+  @@index([author_id])
+  @@index([community_id])
+  @@index([status])
+  @@index([created_at])
+  @@index([slug])
+  
+  @@unique([author_id, slug])
+  @@unique([community_id, slug])
+}
+
+model CommentView {
+  // Automatically generated
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  
+  // Id fields
+  comment_id String
+  comment Comment @relation("seen_comments", fields: [comment_id], references: [id])
+  
+  user_id String
+  user User @relation("seen_comments", fields: [user_id], references: [id])
+  
+  // Indexes and unique constraints
+  @@unique([comment_id, user_id])  // Prevent duplicate views per user
+  @@index([comment_id])
+  @@index([user_id])
+}
+
+model Comment {
+  // Automatically generated
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Id fields
+  author_id String
+  author_ref User @relation(fields: [author_id], references: [id])
+
+  post_id String
+  post_ref Post @relation(fields: [post_id], references: [id])
+
+  parent_comment_id String?
+  parent_comment_ref Comment? @relation("parent_comment", fields: [parent_comment_id], references: [id])
+
+  saved_by User[] @relation("saved_comments")
+
+  // Comment details
+  content String
+  status CommentStatus @default(active)
+  is_anonymous Boolean @default(false)
+
+  child_comments Comment[] @relation("parent_comment")
+
+  // Views
+  impressions Int @default(0)
+  views CommentView[] @relation("seen_comments")
+
+  // Edited details
+  is_edited Boolean @default(false)
+  edited_at DateTime?
+
+  // Pinned details
+  is_pinned Boolean @default(false)
+  pinned_at DateTime?
+  pinned_reason String?
+  pinned_by String?
+  pinned_by_user Moderator? @relation("pinned_comments", fields: [pinned_by], references: [id])
+
+  // Hidden details
+  is_hidden Boolean @default(false)
+  hidden_at DateTime?
+  hidden_reason String?
+  hidden_by String?
+  hidden_by_user Moderator? @relation("hidden_comments", fields: [hidden_by], references: [id])
+
+  // Deleted details
+  is_deleted Boolean @default(false)
+  deleted_at DateTime?
+  deleted_reason String?
+
+  // Removed details
+  is_removed Boolean @default(false)
+  removed_at DateTime?
+  removed_reason String?
+  removed_by String?
+  removed_by_user Moderator? @relation("removed_comments", fields: [removed_by], references: [id])
+
+  // Sponsored details
+  is_sponsored Boolean @default(false)
+  sponsored_at DateTime?
+  sponsored_reason String?
+  sponsored_by String?
+  sponsored_by_user User? @relation("sponsored_comments", fields: [sponsored_by], references: [id])
+
+  // Upvoters and downvoters
+  upvoters User[] @relation("upvoted_comments")
+  downvoters User[] @relation("downvoted_comments")
+
+  // Reports
+  reports Report[] @relation("reported_comments")
+
+  // Indexes and unique constraints
+  @@index([author_id])
+  @@index([post_id])
+  @@index([parent_comment_id])
+  @@index([status])
+  @@index([created_at])
+}
+
+model Token {
+  // Automatically generated
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Id fields
+  user_id String
+  user User @relation(fields: [user_id], references: [id])
+
+  // Token details
+  type TokenType @default(email) // email/api
+  email_token String? @unique
+
+  valid Boolean @default(true)
+  expiration DateTime
+  
+  // Indexes and unique constraints
+  @@index([expiration])
+  @@index([valid])
+}
+
+model AuthToken {
+  // Automatically generated
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  
+  // Id fields
+  user_id String
+  user User @relation(fields: [user_id], references: [id])
+
+  // Token details
+  valid Boolean @default(true)
+  short_lived_token String?
+  long_lived_token String?
+  
+
+  @@index([valid])
+}
+
+model Report {
+  // Automatically generated
+  id String @id @default(uuid())
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Id fields
   reporter_id String
   reporter_ref User @relation("reporting_users", fields: [reporter_id], references: [id])
   
@@ -443,6 +678,12 @@ model Report {
   comment_id String?
   comment_ref Comment? @relation("reported_comments", fields: [comment_id], references: [id])
 
+  
+  report_type ReportType
+  report_message String
+  report_status ReportStatus @default(pending)
+
+  // Indexes and unique constraints
   @@index([reporter_id])
   @@index([reported_id])
   @@index([report_type])
