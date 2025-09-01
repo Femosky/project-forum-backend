@@ -3,8 +3,8 @@ import { AuthRequest } from '../../middlewares/authMiddleware';
 import { ErrorResponse } from '../../models/interfaces/errorType';
 import prisma from '../../prismaConnection';
 import { PostStatus } from '@prisma/client';
-import { IdShortener } from '../../utils/IdShortener';
-import { SlugGenerator } from '../../utils/SlugGenerator';
+import { IdShortener } from '../services/IdShortener';
+import { SlugGenerator } from '../services/SlugGenerator';
 
 const router = Router();
 
@@ -53,7 +53,7 @@ router.post('/create-post', async (request: AuthRequest, response) => {
                 tags: tags || [],
                 slug,
                 ai_summary,
-                author: user.id,
+                author_id: user.id,
                 community_id,
             },
         });
@@ -128,4 +128,57 @@ router.post('remove-post', async (request: AuthRequest, response) => {
     }
 });
 
+// Comments
+
+router.post('/create-comment', async (request: AuthRequest, response) => {
+    const { community_id, post_id, content, is_anonymous, is_sponsored, parent_comment_id } = request.body;
+    const user = request.user;
+
+    if (!user) {
+        return response.status(401).json({ error: 'Unauthorized' } as ErrorResponse);
+    }
+
+    if (!community_id || !post_id || !content) {
+        return response.status(400).json({ error: 'Community ID, post ID and content are required' } as ErrorResponse);
+    }
+
+    try {
+        // Check if community exists
+        const community = await prisma.community.findUnique({
+            where: { id: community_id },
+        });
+
+        if (!community) {
+            return response.status(400).json({ error: 'Community not found' } as ErrorResponse);
+        }
+
+        // Check if post exists
+        const post = await prisma.post.findUnique({
+            where: { id: post_id },
+        });
+
+        if (!post) {
+            return response.status(400).json({ error: 'Post not found' } as ErrorResponse);
+        }
+
+        const comment = await prisma.comment.create({
+            data: {
+                content,
+                author_id: user.id,
+                post_id,
+                parent_comment_id,
+                is_anonymous: is_anonymous || false,
+                is_sponsored: is_sponsored || false,
+            },
+        });
+
+        if (!comment) {
+            return response.status(500).json({ error: 'Failed to create comment' } as ErrorResponse);
+        }
+
+        return response.status(200).json({ message: 'Comment created successfully', comment });
+    } catch (error) {
+        return response.status(500).json({ error: 'Failed to create comment', details: error } as ErrorResponse);
+    }
+});
 export default router;

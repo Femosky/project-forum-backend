@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { User } from '@prisma/client';
-import { DecodedToken, PasswordService } from '../utils/passwordService';
+import { DecodedToken, PasswordService } from '../routes/services/PasswordService';
 import prisma from '../prismaConnection';
 
 export type AuthRequest = Request & { user?: User };

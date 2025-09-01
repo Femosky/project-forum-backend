@@ -322,8 +322,8 @@ model Post {
   removed_at DateTime?
   removed_reason String?
 
-  author String
-  author_ref User @relation(fields: [author], references: [id])
+  author_id String
+  author_ref User @relation(fields: [author_id], references: [id])
 
   community_id String
   community_ref Community @relation(fields: [community_id], references: [id])
@@ -335,13 +335,13 @@ model Post {
   comments Comment[]
   saved_by User[] @relation("saved_posts")
 
-  @@index([author])
+  @@index([author_id])
   @@index([community_id])
   @@index([status])
   @@index([created_at])
   @@index([slug])
   
-  @@unique([author, slug])
+  @@unique([author_id, slug])
   @@unique([community_id, slug])
 }
 
@@ -355,11 +355,11 @@ model Comment {
   is_anonymous Boolean @default(false)
   is_sponsored Boolean @default(false)
   
-  author String
-  author_ref User @relation(fields: [author], references: [id])
+  author_id String
+  author_ref User @relation(fields: [author_id], references: [id])
 
-  post String
-  post_ref Post @relation(fields: [post], references: [id])
+  post_id String
+  post_ref Post @relation(fields: [post_id], references: [id])
 
   parent_comment_id String?
   parent_comment_ref Comment? @relation("parent_comment", fields: [parent_comment_id], references: [id])
@@ -369,8 +369,8 @@ model Comment {
   downvoters User[] @relation("downvoted_comments")
   reports Report[] @relation("reported_comments")
 
-  @@index([author])
-  @@index([post])
+  @@index([author_id])
+  @@index([post_id])
   @@index([parent_comment_id])
   @@index([status])
   @@index([created_at])

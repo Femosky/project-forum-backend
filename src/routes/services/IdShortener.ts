@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { customAlphabet } from 'nanoid';
-import { ErrorResponse } from '../models/interfaces/errorType';
+import { ErrorResponse } from '../../models/interfaces/errorType';
 
 export class IdShortener {
     private static prisma = new PrismaClient();

@@ -4,6 +4,7 @@ import { ErrorResponse } from '../../models/interfaces/errorType';
 import DateUtils from '../../utils/dateUtils';
 import { AuthRequest } from '../../middlewares/authMiddleware';
 import { Community, Moderator, User, ModeratorRole, PostStatus, CommunityStatus } from '@prisma/client';
+import { CommunityService } from '../services/CommunityService';
 
 const router = Router();
 
@@ -16,39 +17,51 @@ const router = Router();
     - Unarchive a community
 */
 
-function getSortOrder(sort: string) {
-    switch (sort) {
-        case 'newest':
-            return { created_at: 'desc' };
-        case 'oldest':
-            return { created_at: 'asc' };
-        case 'trending':
-            return {
-                upvoters: { _count: 'desc' },
-                created_at: 'desc',
-            };
-        case 'most_commented':
-            return {
-                comments: { _count: 'desc' },
-                created_at: 'desc',
-            };
-        default:
-            return { created_at: 'desc' };
+// Get community by name
+router.get('/:community_name', async (request, response) => {
+    const { community_name } = request.params;
+
+    try {
+        const community = await prisma.community.findUnique({
+            where: { name: community_name.toLowerCase() },
+            include: {
+                moderators: true,
+                _count: {
+                    select: { members: true, posts: true },
+                },
+            },
+        });
+        if (!community) {
+            return response.status(404).json({ error: 'Community not found' });
+        }
+
+        return response.status(200).json({ community });
+    } catch (error) {
+        return response.status(500).json({ error: 'Failed to get community', details: error } as ErrorResponse);
     }
+});
+
+interface PostPaginationResponse {
+    current_page: number;
+    total_pages: number;
+    total_posts: number;
+    has_next_page: boolean;
+    has_previous_page: boolean;
+    next_page: number;
+    previous_page: number;
 }
 
 // Get posts for a community with pagination
-router.get('/:community_name', async (request, response) => {
+router.get('/:community_name/posts', async (request, response) => {
     const { community_name } = request.params;
-    const { page = '1', limit = '10', sort_by = 'newest', sort_order = 'desc' } = request.query;
+    const { page = '1', limit = '10', sort_by = 'newest' } = request.query;
 
     try {
-        console.log('i is came here');
         const community = await prisma.community.findUnique({
             where: { name: community_name.toLowerCase() },
         });
         if (!community) {
-            return response.status(404).json({ error: 'Community not found' });
+            return response.status(404).json({ error: 'Community not found with this name' });
         }
 
         const pageNumber = parseInt(page as string);
@@ -59,7 +72,7 @@ router.get('/:community_name', async (request, response) => {
             where: { community_id: community.id },
             take: limitNumber,
             skip: offset,
-            orderBy: getSortOrder(sort_by as string) as any,
+            orderBy: CommunityService.getSortOrder(sort_by as string) as any,
             include: {
                 author_ref: {
                     select: { username: true, avatar_id: true },
@@ -71,7 +84,7 @@ router.get('/:community_name', async (request, response) => {
         });
 
         if (!posts) {
-            return response.status(404).json({ error: 'Posts not found' });
+            return response.status(404).json({ error: 'Community posts not found' });
         }
 
         const totalPosts = await prisma.post.count({
@@ -90,10 +103,10 @@ router.get('/:community_name', async (request, response) => {
                 has_previous_page: pageNumber > 1,
                 next_page: pageNumber + 1,
                 previous_page: pageNumber - 1,
-            },
+            } as PostPaginationResponse,
         });
     } catch (error) {
-        response.status(500).json({ error: 'Failed to get posts', details: error } as ErrorResponse);
+        response.status(500).json({ error: 'Failed to get community posts', details: error } as ErrorResponse);
     }
 });
 
