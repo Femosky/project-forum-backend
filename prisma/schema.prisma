@@ -55,6 +55,7 @@ enum PostStatus {
 enum CommentStatus {
   active
   archived
+  removed
   deleted
   hidden
   pending
@@ -321,6 +322,15 @@ model Community {
   // Community status
   status CommunityStatus @default(active)
 
+  // Pinned post details
+  pinned_post_at DateTime?
+  pinned_post_reason String?
+  pinned_post_by String?
+  pinned_post_by_user Moderator? @relation("post_pinned_post", fields: [pinned_post_by], references: [id])
+  
+  pinned_post_id String?
+  pinned_post_ref Post? @relation("post_pinned_post", fields: [pinned_post_id], references: [id])
+
   // Moderators
   moderators Moderator[] @relation("moderators")
 
@@ -382,8 +392,9 @@ model Moderator {
   moderators_added Moderator[] @relation("moderator_additions")
 
   // Pinned posts and comments
-  pinned_posts Post[] @relation("pinned_posts")
-  pinned_comments Comment[] @relation("pinned_comments")
+  // pinned_posts Post[] @relation("pinned_posts")
+  pinned_posts Community[] @relation("post_pinned_post")
+  pinned_comments Post[] @relation("post_pinned_comment")
 
   // Hidden posts and comments
   hidden_posts Post[] @relation("hidden_posts")
@@ -468,12 +479,17 @@ model Post {
   sponsored_by String?
   sponsored_by_user User? @relation("sponsored_posts", fields: [sponsored_by], references: [id])
 
-  // Pinned details
-  is_pinned Boolean @default(false)
-  pinned_at DateTime?
-  pinned_reason String?
-  pinned_by String?
-  pinned_by_user Moderator? @relation("pinned_posts", fields: [pinned_by], references: [id])
+  // Pinned post details
+  pinned_posts Community[] @relation("post_pinned_post")
+
+  // Pinned comment details
+  pinned_comment_at DateTime?
+  pinned_comment_reason String?
+  pinned_comment_by String?
+  pinned_comment_by_user Moderator? @relation("post_pinned_comment", fields: [pinned_comment_by], references: [id])
+  
+  pinned_comment_id String?
+  pinned_comment_ref Comment? @relation("post_pinned_comment", fields: [pinned_comment_id], references: [id])
 
   // Hidden details
   is_hidden Boolean @default(false)
@@ -544,6 +560,7 @@ model Comment {
   updated_at DateTime @updatedAt
 
   // Id fields
+  short_id String @unique
   author_id String
   author_ref User @relation(fields: [author_id], references: [id])
 
@@ -553,6 +570,9 @@ model Comment {
   parent_comment_id String?
   parent_comment_ref Comment? @relation("parent_comment", fields: [parent_comment_id], references: [id])
 
+  slug String?
+
+  // Saved by
   saved_by User[] @relation("saved_comments")
 
   // Comment details
@@ -570,12 +590,8 @@ model Comment {
   is_edited Boolean @default(false)
   edited_at DateTime?
 
-  // Pinned details
-  is_pinned Boolean @default(false)
-  pinned_at DateTime?
-  pinned_reason String?
-  pinned_by String?
-  pinned_by_user Moderator? @relation("pinned_comments", fields: [pinned_by], references: [id])
+  // Pinned by posts
+  pinned_by_posts Post[] @relation("post_pinned_comment")
 
   // Hidden details
   is_hidden Boolean @default(false)

@@ -4,8 +4,8 @@ import { ErrorResponse } from '../../models/interfaces/errorType';
 import DateUtils from '../../utils/dateUtils';
 import { AuthRequest } from '../../middlewares/authMiddleware';
 import { Community, Moderator, User, ModeratorRole, PostStatus, CommunityStatus } from '@prisma/client';
-import { CommunityService } from '../services/CommunityService';
-import { CommentService } from '../services/CommentService';
+import { CommunityService } from '../../services/CommunityService';
+import { CommentService } from '../../services/CommentService';
 
 const router = Router();
 
@@ -99,8 +99,8 @@ router.get('/:community_name/posts', async (request, response) => {
                 total_posts: totalPosts,
                 has_next_page: pageNumber < totalPages,
                 has_previous_page: pageNumber > 1,
-                next_page: pageNumber + 1,
-                previous_page: pageNumber - 1,
+                next_page: pageNumber < totalPages ? pageNumber + 1 : null,
+                previous_page: pageNumber > 1 ? pageNumber - 1 : null,
             } as PostPaginationResponse,
         });
     } catch (error) {

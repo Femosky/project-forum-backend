@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import prisma from '../../prismaConnection';
-import { DecodedToken, LONG_LIVED_TOKEN_EXPIRATION, PasswordService } from '../services/PasswordService';
-import { TokenPair } from '../services/PasswordService';
+import { DecodedToken, LONG_LIVED_TOKEN_EXPIRATION, PasswordService } from '../../services/PasswordService';
+import { TokenPair } from '../../services/PasswordService';
 import { UserInterface, UserStatus, UserType } from '../../models/interfaces/userType';
 import { UAParser } from 'ua-parser-js';
 import { User } from '@prisma/client';
