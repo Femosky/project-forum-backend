@@ -19,7 +19,7 @@ app.use(express.json());
 app.use('/auth', authRoutes);
 // app.use('/test', authenticateToken, testRoutes);
 
-// Public routes
+// Public routes: Starts with /community
 app.use('/community', communityPublicRoutes);
 app.use('/community', postPublicRoutes);
 app.use('/community', commentPublicRoutes);
@@ -27,8 +27,8 @@ app.use('/community', commentPublicRoutes);
 // Private routes
 app.use('/user', authenticateToken, userRoutes);
 app.use('/community', authenticateToken, communityPrivateRoutes);
-app.use('/community', authenticateToken, postPrivateRoutes);
-app.use('/community', authenticateToken, commentPrivateRoutes);
+app.use('/post', authenticateToken, postPrivateRoutes);
+app.use('/comment', authenticateToken, commentPrivateRoutes);
 
 app.get('/', (request, response) => {
     response.send('Welcome to the "Project Forum" API.');

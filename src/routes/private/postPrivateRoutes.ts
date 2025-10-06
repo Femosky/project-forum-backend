@@ -68,6 +68,236 @@ router.post('/create-post', async (request: AuthRequest, response) => {
     }
 });
 
+// Upvote a post
+router.post('/upvote', async (request: AuthRequest, response) => {
+    const { post_id } = request.body;
+    const user = request.user;
+
+    if (!user) {
+        return response.status(401).json({ error: 'Unauthorized' } as ErrorResponse);
+    }
+
+    if (!post_id) {
+        return response.status(400).json({ error: 'Post ID is required' } as ErrorResponse);
+    }
+
+    try {
+        // Check if already upvoted
+        const isUpvoted = await prisma.post.findFirst({
+            where: { id: post_id, upvoters: { some: { id: user.id } } },
+        });
+
+        if (isUpvoted) {
+            return response.status(200).json({ error: 'Post already upvoted' } as ErrorResponse);
+        }
+
+        // Check if post is downvoted
+        const isDownvoted = await prisma.post.findFirst({
+            where: { id: post_id, downvoters: { some: { id: user.id } } },
+        });
+
+        if (isDownvoted) {
+            // Remove downvote if it exists
+            const isDownvoteRemoved = await prisma.post.update({
+                where: { id: post_id },
+                data: { downvoters: { disconnect: { id: user.id } } },
+            });
+
+            if (!isDownvoteRemoved) {
+                return response.status(200).json({ error: 'Exisiting downvote unable to be removed' } as ErrorResponse);
+            }
+        }
+
+        const post = await prisma.post.update({
+            where: { id: post_id },
+            data: { upvoters: { connect: { id: user.id } } },
+            select: {
+                _count: {
+                    select: {
+                        upvoters: true,
+                        downvoters: true,
+                    },
+                },
+            },
+        });
+
+        if (!post) {
+            return response.status(500).json({ error: 'Failed to upvote post' } as ErrorResponse);
+        }
+
+        return response.status(200).json({ message: 'Post upvoted successfully', post });
+    } catch (error) {
+        return response.status(500).json({ error: 'Failed to upvote post', details: error } as ErrorResponse);
+    }
+});
+
+// Remove upvote from a post
+router.post('/remove-upvote', async (request: AuthRequest, response) => {
+    const { post_id } = request.body;
+    const user = request.user;
+
+    if (!user) {
+        return response.status(401).json({ error: 'Unauthorized' } as ErrorResponse);
+    }
+
+    if (!post_id) {
+        return response.status(400).json({ error: 'Post ID is required' } as ErrorResponse);
+    }
+
+    try {
+        // Check if upvote is already removed
+        const isUpvotedAlreadyRemoved = await prisma.post.findUnique({
+            where: { id: post_id, upvoters: { none: { id: user.id } } },
+        });
+
+        if (isUpvotedAlreadyRemoved) {
+            return response.status(200).json({ error: 'No upvote to be removed' } as ErrorResponse);
+        }
+
+        const post = await prisma.post.update({
+            where: { id: post_id },
+            data: { upvoters: { disconnect: { id: user.id } } },
+            select: {
+                _count: {
+                    select: {
+                        upvoters: true,
+                        downvoters: true,
+                    },
+                },
+            },
+        });
+
+        if (!post) {
+            return response.status(500).json({ error: 'Failed to remove upvote from post' } as ErrorResponse);
+        }
+
+        return response.status(200).json({ message: 'Upvote removed from post successfully', post });
+    } catch (error) {
+        return response
+            .status(500)
+            .json({ error: 'Failed to remove upvote from post', details: error } as ErrorResponse);
+    }
+});
+
+// Downvote a post
+router.post('/downvote', async (request: AuthRequest, response) => {
+    const { post_id } = request.body;
+    const user = request.user;
+
+    if (!user) {
+        return response.status(401).json({ error: 'Unauthorized' } as ErrorResponse);
+    }
+
+    if (!post_id) {
+        return response.status(400).json({ error: 'Post ID is required' } as ErrorResponse);
+    }
+
+    try {
+        // Check if already downvoted
+        const isDownvoted = await prisma.post.findFirst({
+            where: { id: post_id, downvoters: { some: { id: user.id } } },
+        });
+
+        if (isDownvoted) {
+            return response.status(200).json({ error: 'Post already downvoted' } as ErrorResponse);
+        }
+
+        // Check if post is upvoted
+        const isUpvoted = await prisma.post.findFirst({
+            where: { id: post_id, upvoters: { some: { id: user.id } } },
+        });
+
+        if (isUpvoted) {
+            // Remove upvote if it exists
+            const isUpvoteRemoved = await prisma.post.update({
+                where: { id: post_id },
+                data: { upvoters: { disconnect: { id: user.id } } },
+                select: {
+                    _count: {
+                        select: {
+                            upvoters: true,
+                            downvoters: true,
+                        },
+                    },
+                },
+            });
+
+            if (!isUpvoteRemoved) {
+                return response.status(200).json({ error: 'Exisiting upvote unable to be removed' } as ErrorResponse);
+            }
+        }
+
+        const post = await prisma.post.update({
+            where: { id: post_id },
+            data: { downvoters: { connect: { id: user.id } } },
+            select: {
+                _count: {
+                    select: {
+                        upvoters: true,
+                        downvoters: true,
+                    },
+                },
+            },
+        });
+
+        if (!post) {
+            return response.status(500).json({ error: 'Failed to downvote post' } as ErrorResponse);
+        }
+
+        return response.status(200).json({ message: 'Post downvoted successfully', post });
+    } catch (error) {
+        return response.status(500).json({ error: 'Failed to downvote post', details: error } as ErrorResponse);
+    }
+});
+
+// Remove downvote from a post
+router.post('/remove-downvote', async (request: AuthRequest, response) => {
+    const { post_id } = request.body;
+    const user = request.user;
+
+    if (!user) {
+        return response.status(401).json({ error: 'Unauthorized' } as ErrorResponse);
+    }
+
+    if (!post_id) {
+        return response.status(400).json({ error: 'Post ID is required' } as ErrorResponse);
+    }
+
+    try {
+        // Check if upvote is already removed
+        const isDownvotedAlreadyRemoved = await prisma.post.findUnique({
+            where: { id: post_id, downvoters: { none: { id: user.id } } },
+        });
+
+        if (isDownvotedAlreadyRemoved) {
+            return response.status(200).json({ error: 'No downvote to be removed' } as ErrorResponse);
+        }
+
+        const post = await prisma.post.update({
+            where: { id: post_id },
+            data: { downvoters: { disconnect: { id: user.id } } },
+            select: {
+                _count: {
+                    select: {
+                        upvoters: true,
+                        downvoters: true,
+                    },
+                },
+            },
+        });
+
+        if (!post) {
+            return response.status(500).json({ error: 'Failed to remove downvote from post' } as ErrorResponse);
+        }
+
+        return response.status(200).json({ message: 'Downvote removed from post successfully', post });
+    } catch (error) {
+        return response
+            .status(500)
+            .json({ error: 'Failed to remove downvote from post', details: error } as ErrorResponse);
+    }
+});
+
 router.post('remove-post', async (request: AuthRequest, response) => {
     const { community_id, postId, removed_reason } = request.body;
     const user = request.user;
