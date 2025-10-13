@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { CommentService } from '../../services/CommentService';
 import prisma from '../../prismaConnection';
-import { CommentPaginationResponse } from './postPublicRoutes';
+import PaginationUtils from '../../utils/paginationUtils';
 const router = Router();
 
 // Get comment
-// Get a child comments
+// Get child comments
 router.get('/:community_name/replies/:post_short_id/reply/:comment_short_id', async (request, response) => {
     const { post_short_id, comment_short_id } = request.params;
     const {
@@ -14,12 +14,21 @@ router.get('/:community_name/replies/:post_short_id/reply/:comment_short_id', as
         parent_limit = CommentService.DEFAULT_LIMIT,
     } = request.query;
 
-    const pageNumber = Math.max(1, parseInt(parent_page_number as string) || CommentService.DEFAULT_PAGE_NUMBER);
-    const limitNumber = Math.min(Math.max(1, parseInt(parent_limit as string) || CommentService.DEFAULT_LIMIT), 100);
-    const offset = (pageNumber - 1) * limitNumber;
+    const { pageNumber, limitNumber, offset } = PaginationUtils.calculatePaginationDetails(
+        'comment',
+        parent_page_number,
+        parent_limit
+    );
+
+    const parentComment = await prisma.comment.findUnique({
+        where: { short_id: comment_short_id },
+    });
+    if (!parentComment) {
+        return response.status(404).json({ error: 'Parent comment not found' });
+    }
 
     const comments = await prisma.comment.findMany({
-        where: { short_id: comment_short_id },
+        where: { parent_comment_id: parentComment.id },
         take: limitNumber,
         skip: offset,
         orderBy: CommentService.getSortOrder(sort_by as string) as any,
@@ -34,24 +43,14 @@ router.get('/:community_name/replies/:post_short_id/reply/:comment_short_id', as
     }
 
     const totalComments = await prisma.comment.count({
-        where: { parent_comment_id: comment_short_id },
+        where: { parent_comment_id: parentComment.id },
     });
 
     const totalPages = Math.ceil(totalComments / limitNumber);
 
     response.json({
         comments,
-        pagination: {
-            parent: {
-                current_page: pageNumber,
-                total_pages: totalPages,
-                total_comments: totalComments,
-                has_next_page: pageNumber < totalPages,
-                has_previous_page: pageNumber > 1,
-                next_page: pageNumber < totalPages ? pageNumber + 1 : null,
-                previous_page: pageNumber > 1 ? pageNumber - 1 : null,
-            },
-        } as CommentPaginationResponse,
+        pagination: PaginationUtils.preparePaginationResponse(pageNumber, totalPages, totalComments),
     });
 });
 

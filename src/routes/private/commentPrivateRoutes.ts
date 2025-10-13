@@ -4,8 +4,8 @@ import { ErrorResponse } from '../../models/interfaces/errorType';
 import prisma from '../../prismaConnection';
 import { CommentStatus, ReportType } from '@prisma/client';
 import { IdShortener } from '../../services/IdShortener';
-import { PostService } from '../../services/PostService';
 import { CommentService } from '../../services/CommentService';
+import PaginationUtils from '../../utils/paginationUtils';
 
 const router = Router();
 
@@ -786,9 +786,7 @@ router.get('/saved-comments', async (request: AuthRequest, response) => {
         return response.status(401).json({ error: 'Unauthorized' } as ErrorResponse);
     }
 
-    const pageNumber = Math.max(1, parseInt(page as string) || CommentService.DEFAULT_PAGE_NUMBER);
-    const limitNumber = Math.min(Math.max(1, parseInt(limit as string) || CommentService.DEFAULT_LIMIT), 100);
-    const offset = (pageNumber - 1) * limitNumber;
+    const { pageNumber, limitNumber, offset } = PaginationUtils.calculatePaginationDetails('comment', page, limit);
 
     try {
         const savedComments = await prisma.user.findUnique({
@@ -859,15 +857,7 @@ router.get('/saved-comments', async (request: AuthRequest, response) => {
         return response.status(200).json({
             message: 'Saved comments retrieved successfully',
             saved_comments: savedComments?.saved_comments || [],
-            pagination: {
-                current_page: pageNumber,
-                total_pages: totalPages,
-                total_posts: totalSavedComments,
-                has_next_page: pageNumber < totalPages,
-                has_previous_page: pageNumber > 1,
-                next_page: pageNumber < totalPages ? pageNumber + 1 : null,
-                previous_page: pageNumber > 1 ? pageNumber - 1 : null,
-            },
+            pagination: PaginationUtils.preparePaginationResponse(pageNumber, totalPages, totalSavedComments),
         });
     } catch (error) {
         return response

@@ -1,11 +1,8 @@
 import { Router } from 'express';
 import prisma from '../../prismaConnection';
 import { ErrorResponse } from '../../models/interfaces/errorType';
-import DateUtils from '../../utils/dateUtils';
-import { AuthRequest } from '../../middlewares/authMiddleware';
-import { Community, Moderator, User, ModeratorRole, PostStatus, CommunityStatus } from '@prisma/client';
-import { CommunityService } from '../../services/CommunityService';
-import { CommentService } from '../../services/CommentService';
+import PaginationUtils from '../../utils/paginationUtils';
+import { PostService } from '../../services/PostService';
 
 const router = Router();
 
@@ -39,20 +36,14 @@ router.get('/:community_name', async (request, response) => {
     }
 });
 
-interface PostPaginationResponse {
-    current_page: number;
-    total_pages: number;
-    total_posts: number;
-    has_next_page: boolean;
-    has_previous_page: boolean;
-    next_page: number;
-    previous_page: number;
-}
-
 // Get posts for a community with pagination
 router.get('/:community_name/posts', async (request, response) => {
     const { community_name } = request.params;
-    const { page = '1', limit = '10', sort_by = 'newest' } = request.query;
+    const {
+        page = PostService.DEFAULT_PAGE_NUMBER,
+        limit = PostService.DEFAULT_LIMIT,
+        sort_by = PostService.DEFAULT_SORT_BY,
+    } = request.query;
 
     try {
         const community = await prisma.community.findUnique({
@@ -62,15 +53,13 @@ router.get('/:community_name/posts', async (request, response) => {
             return response.status(404).json({ error: 'Community not found with this name' });
         }
 
-        const pageNumber = Math.max(1, parseInt(page as string) || CommentService.DEFAULT_PAGE_NUMBER);
-        const limitNumber = Math.min(Math.max(1, parseInt(limit as string) || CommentService.DEFAULT_LIMIT), 100);
-        const offset = (pageNumber - 1) * limitNumber;
+        const { pageNumber, limitNumber, offset } = PaginationUtils.calculatePaginationDetails('post', page, limit);
 
         const posts = await prisma.post.findMany({
             where: { community_id: community.id },
             take: limitNumber,
             skip: offset,
-            orderBy: CommunityService.getSortOrder(sort_by as string) as any,
+            orderBy: PostService.getSortOrder(sort_by as string) as any,
             include: {
                 author_ref: {
                     select: { username: true, avatar_id: true },
@@ -93,15 +82,7 @@ router.get('/:community_name/posts', async (request, response) => {
 
         response.json({
             posts,
-            pagination: {
-                current_page: pageNumber,
-                total_pages: totalPages,
-                total_posts: totalPosts,
-                has_next_page: pageNumber < totalPages,
-                has_previous_page: pageNumber > 1,
-                next_page: pageNumber < totalPages ? pageNumber + 1 : null,
-                previous_page: pageNumber > 1 ? pageNumber - 1 : null,
-            } as PostPaginationResponse,
+            pagination: PaginationUtils.preparePaginationResponse(pageNumber, totalPages, totalPosts),
         });
     } catch (error) {
         response.status(500).json({ error: 'Failed to get community posts', details: error } as ErrorResponse);

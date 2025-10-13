@@ -1,6 +1,6 @@
 import express from 'express';
 import { authenticateToken } from './middlewares/authMiddleware';
-import userRoutes from './routes/private/userRoutes';
+import userPrivateRoutes from './routes/private/userPrivateRoutes';
 import authRoutes from './routes/public/authRoutes';
 import testRoutes from './routes/testRoutes';
 import communityPublicRoutes from './routes/public/communityPublicRoutes';
@@ -9,6 +9,7 @@ import postPrivateRoutes from './routes/private/postPrivateRoutes';
 import postPublicRoutes from './routes/public/postPublicRoutes';
 import commentPrivateRoutes from './routes/private/commentPrivateRoutes';
 import commentPublicRoutes from './routes/public/commentPublicRoutes';
+import userPublicRoutes from './routes/public/userPublicRoutes';
 
 const PORT_NUMBER = 3000;
 
@@ -23,9 +24,10 @@ app.use('/auth', authRoutes);
 app.use('/community', communityPublicRoutes);
 app.use('/community', postPublicRoutes);
 app.use('/community', commentPublicRoutes);
+app.use('/user', userPublicRoutes);
 
 // Private routes
-app.use('/user', authenticateToken, userRoutes);
+app.use('/user', authenticateToken, userPrivateRoutes);
 app.use('/community', authenticateToken, communityPrivateRoutes);
 app.use('/post', authenticateToken, postPrivateRoutes);
 app.use('/comment', authenticateToken, commentPrivateRoutes);

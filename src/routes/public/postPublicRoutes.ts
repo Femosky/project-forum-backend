@@ -5,6 +5,7 @@ import { IdShortener } from '../../services/IdShortener';
 import { ErrorResponse } from '../../models/interfaces/errorType';
 import { PostService } from '../../services/PostService';
 import { CommentService } from '../../services/CommentService';
+import PaginationUtils from '../../utils/paginationUtils';
 
 const router = Router();
 
@@ -46,21 +47,6 @@ const router = Router();
 //     }
 // });
 
-interface CommentPaginationResponseDetails {
-    current_page: number;
-    total_pages: number;
-    total_comments: number;
-    has_next_page: boolean;
-    has_previous_page: boolean;
-    next_page: number;
-    previous_page: number;
-}
-
-export interface CommentPaginationResponse {
-    parent: CommentPaginationResponseDetails;
-    child?: CommentPaginationResponseDetails;
-}
-
 // Get comments for a post
 router.get('/:community_name/replies/:post_short_id', async (request, response) => {
     const { post_short_id } = request.params;
@@ -73,23 +59,16 @@ router.get('/:community_name/replies/:post_short_id', async (request, response) 
     } = request.query;
 
     try {
-        const pageNumber = Math.max(1, parseInt(parent_page_number as string) || CommentService.DEFAULT_PAGE_NUMBER);
-        const limitNumber = Math.min(
-            Math.max(1, parseInt(parent_limit as string) || CommentService.DEFAULT_LIMIT),
-            100
+        const { pageNumber, limitNumber, offset } = PaginationUtils.calculatePaginationDetails(
+            'post',
+            parent_page_number,
+            parent_limit
         );
-
-        const childPageNumber = Math.max(
-            1,
-            parseInt(child_page_number as string) || CommentService.DEFAULT_REPLY_PAGE_NUMBER
-        );
-        const childLimitNumber = Math.min(
-            Math.max(1, parseInt(child_limit as string) || CommentService.DEFAULT_REPLY_LIMIT),
-            50
-        );
-
-        const offset = (pageNumber - 1) * limitNumber;
-        const childOffset = (childPageNumber - 1) * childLimitNumber;
+        const {
+            pageNumber: childPageNumber,
+            limitNumber: childLimitNumber,
+            offset: childOffset,
+        } = PaginationUtils.calculatePaginationDetails('post', child_page_number, child_limit);
 
         const post = await prisma.post.findUnique({
             where: { short_id: post_short_id },
@@ -120,40 +99,19 @@ router.get('/:community_name/replies/:post_short_id', async (request, response) 
             return response.status(404).json({ error: 'Comments not found' });
         }
 
-        const totalParentComments = await prisma.comment.count({
+        const totalComments = await prisma.comment.count({
             where: { post_id: post.id, parent_comment_id: null },
         });
-        const totalChildComments = await prisma.comment.count({
-            where: { post_id: post.id, parent_comment_id: { not: null } },
-        });
 
-        const totalParentPages = Math.ceil(totalParentComments / limitNumber);
-        const totalChildPages = Math.ceil(totalChildComments / childLimitNumber);
+        const totalPages = Math.ceil(totalComments / limitNumber);
 
         response.json({
             comments,
-            pagination: {
-                parent: {
-                    current_page: pageNumber,
-                    total_pages: totalParentPages,
-                    total_comments: totalParentComments,
-                    has_next_page: pageNumber < totalParentPages,
-                    has_previous_page: pageNumber > 1,
-                    next_page: pageNumber < totalParentPages ? pageNumber + 1 : null,
-                    previous_page: pageNumber > 1 ? pageNumber - 1 : null,
-                },
-                child: {
-                    current_page: childPageNumber,
-                    total_pages: totalChildPages,
-                    total_comments: totalChildComments,
-                    has_next_page: childPageNumber < totalChildPages,
-                    has_previous_page: childPageNumber > 1,
-                    next_page: childPageNumber < totalChildPages ? childPageNumber + 1 : null,
-                    previous_page: childPageNumber > 1 ? childPageNumber - 1 : null,
-                },
-            } as CommentPaginationResponse,
+            pagination: PaginationUtils.preparePaginationResponse(pageNumber, totalPages, totalComments),
         });
-    } catch (error) {}
+    } catch (error) {
+        return response.status(500).json({ error: 'Failed to get comments', details: error } as ErrorResponse);
+    }
 });
 
 export default router;
