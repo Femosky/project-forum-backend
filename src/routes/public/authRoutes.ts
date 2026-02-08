@@ -1,12 +1,12 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../../prismaConnection';
-import { DecodedToken, PasswordService } from '../../services/PasswordService';
+import { DecodedJWTToken, DecodedTokenWithUser, PasswordService } from '../../services/PasswordService';
 import { TokenPair } from '../../services/PasswordService';
-import { UserInterface, UserStatus, UserType } from '../../models/interfaces/userType';
 import { UAParser } from 'ua-parser-js';
 import { User } from '@prisma/client';
 import { ErrorResponse } from '../../models/interfaces/errorType';
 import { DeviceDetailsUtils } from '../../utils/DeviceDetailsUtils';
+import { AuthRequest } from '../../middlewares/authMiddleware';
 
 const router = Router();
 
@@ -72,26 +72,18 @@ async function generateTokens(user: User): Promise<TokenPair | ErrorResponse> {
 
 async function loginUser(request: Request, response: Response) {
     const { email, username, password } = request.body;
-    const accessToken = request.cookies.access_token;
     const refreshToken = request.cookies.refresh_token;
 
-    if (accessToken && refreshToken) {
-        console.log('User already logged in.');
-        console.log(accessToken, refreshToken);
-    } else {
-        console.log('User not logged in.');
-    }
-
-    if (!email && !username) {
-        console.log(email, username);
-        return response.status(400).json({ error: 'Email or username is required.' } as ErrorResponse);
-    }
-
-    if (!password) {
-        return response.status(400).json({ error: 'Password is required.' } as ErrorResponse);
-    }
-
     try {
+        // Validate request body
+        if (!email && !username) {
+            return response.status(400).json({ error: 'Email or username is required.' } as ErrorResponse);
+        }
+
+        if (!password) {
+            return response.status(400).json({ error: 'Password is required.' } as ErrorResponse);
+        }
+
         // Find user by email or username
         let user: User | null = null;
 
@@ -118,29 +110,21 @@ async function loginUser(request: Request, response: Response) {
         }
 
         // Check if user is already logged in via refresh token
-        const loginSessionDetails = await getLoginSessionDetails(request);
+        if (refreshToken) {
+            const decoded: DecodedJWTToken | null = await PasswordService.verifyRefreshToken(refreshToken, user.id);
+            if (decoded) {
+                return response.json({ error: 'User already logged in.' });
+            }
+        }
 
-        const loginSessions = await prisma.loginSession.findMany({
-            where: { user_id: user.id, is_active: true },
-        });
+        // Get login session details
+        // const loginSessionDetails = await getLoginSessionDetails(request);
 
-        const userIPInformation = await DeviceDetailsUtils.getUserIPInformation(request);
+        // const loginSessions = await prisma.loginSession.findMany({
+        //     where: { user_id: user.id, is_active: true },
+        // });
 
-        // if (loginSessions.length > 0) {
-        //     for (const loginSession of loginSessions) {
-        //         if (
-        //             loginSession.device_type === loginSessionDetails.device &&
-        //             loginSession.browser === loginSessionDetails.browser &&
-        //             loginSession.os === loginSessionDetails.os &&
-        //             loginSession.user_agent === loginSessionDetails.userAgent &&
-        //             loginSession.ip_address === loginSessionDetails.ipAddress
-        //         ) {
-        //             return response.json({
-        //                 error: { message: 'User already logged in.', loginSessions, loginSession, userIPInformation },
-        //             });
-        //         }
-        //     }
-        // }
+        // const userIPInformation = await DeviceDetailsUtils.getUserIPInformation(request);
 
         // Generate tokens
         const tokens: TokenPair | ErrorResponse = await generateTokens(user);
@@ -156,9 +140,9 @@ async function loginUser(request: Request, response: Response) {
 
         const { password_hash, ...safeUser } = user;
 
-        const isProduction = process.env.NODE_ENV === 'production';
+        // const isProduction = process.env.NODE_ENV === 'production';
 
-        response.cookie('access_token', tokens.access_token, {
+        response.cookie(PasswordService.ACCESS_TOKEN_NAME, tokens.access_token, {
             httpOnly: true,
             // secure: false,
             // sameSite: 'lax',
@@ -166,7 +150,7 @@ async function loginUser(request: Request, response: Response) {
             // maxAge: PasswordService.ACCESS_TOKEN_EXPIRATION,
         });
 
-        response.cookie('refresh_token', tokens.refresh_token, {
+        response.cookie(PasswordService.REFRESH_TOKEN_NAME, tokens.refresh_token, {
             httpOnly: true,
             // secure: false,
             // sameSite: 'lax',
@@ -174,7 +158,7 @@ async function loginUser(request: Request, response: Response) {
             // maxAge: PasswordService.REFRESH_TOKEN_EXPIRATION,
         });
 
-        response.json({ success: true, user: safeUser, tokens });
+        response.json({ success: true, user: safeUser });
     } catch (error) {
         response.status(500).json({ error: 'Failed to login.', details: error } as ErrorResponse);
     }
@@ -237,25 +221,42 @@ async function signupUser(request: Request, response: Response) {
     }
 }
 
-async function refreshToken(request: Request, response: Response) {
-    const { permanent_token } = request.body;
+async function refreshToken(request: AuthRequest, response: Response) {
+    const refreshToken = request.cookies.refresh_token;
+    const user = request.user as User;
+
+    if (!user) {
+        return response.status(401).json({ error: 'Unauthorized, user not authenticated.' });
+    }
 
     try {
+        if (!refreshToken) {
+            return response.status(401).json({ error: 'No refresh token provided.' });
+        }
+
         // Verify refresh token and get token id
-        const decoded: DecodedToken | null = await PasswordService.verifyRefreshToken(permanent_token);
+        const decoded: DecodedJWTToken | null = await PasswordService.verifyRefreshToken(refreshToken, user.id);
         if (!decoded) {
-            return response.status(401).json({ error: 'Invalid refresh token.' });
+            return response.status(401).json({ error: 'Invalid refresh token.' }); // Could add reason later
         }
 
         // Get new short lived token
-        const newShortLivedToken = await PasswordService.generateAccessToken(decoded.authTokenId);
-        if (!newShortLivedToken) {
-            return response.status(500).json({ error: 'Could not generate short lived token.' });
+        const newAccessToken = await PasswordService.generateAccessToken(decoded.authTokenId);
+        if (!newAccessToken) {
+            return response.status(500).json({ error: 'Could not generate new access token.' });
         }
 
-        response.json({ accessToken: newShortLivedToken });
+        response.cookie(PasswordService.ACCESS_TOKEN_NAME, newAccessToken, {
+            httpOnly: true,
+            // secure: false,
+            // sameSite: 'lax',
+            // path: '/',
+            // maxAge: PasswordService.ACCESS_TOKEN_EXPIRATION,
+        });
+
+        response.json({ success: true, message: 'New access token refreshed successfully.' });
     } catch (error) {
-        response.status(500).json({ error: 'Internal server error.', details: error } as ErrorResponse);
+        response.status(500).json({ error: 'Failed to refresh token.', details: error } as ErrorResponse);
     }
 }
 
@@ -284,10 +285,14 @@ async function createLoginSession(user: User, tokens: TokenPair, request: any) {
     const { userAgent, browser, os, device, ipAddress } = await getLoginSessionDetails(request);
     const longLivedExpiry = PasswordService.getTokenExpiry(tokens.refresh_token);
 
+    if (!longLivedExpiry) {
+        throw new Error('Failed to create login session, refresh token expired/invalid.');
+    }
+
     return await prisma.loginSession.create({
         data: {
             user_id: user.id,
-            expires_at: longLivedExpiry || new Date(Date.now() + PasswordService.REFRESH_TOKEN_EXPIRATION * 1000),
+            expires_at: longLivedExpiry,
             device_type: device,
             browser: browser,
             os: os,

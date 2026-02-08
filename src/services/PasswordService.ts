@@ -1,5 +1,9 @@
 import * as bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import prisma from '../prismaConnection';
+import ms from 'ms';
+import { User } from '@prisma/client';
+
 const SALT_ROUNDS = 10;
 
 export type TokenPair = {
@@ -8,13 +12,20 @@ export type TokenPair = {
     refresh_token: string;
 };
 
-export type DecodedToken = {
+export type DecodedJWTToken = {
     authTokenId: string;
 };
 
+export type DecodedTokenWithUser = {
+    authTokenId: string;
+    user: User;
+};
+
 export class PasswordService {
-    static ACCESS_TOKEN_EXPIRATION: number = 60 * 15; // 15 minutes in seconds
-    static REFRESH_TOKEN_EXPIRATION: number = 60 * 60 * 24 * 365; // 1 year in seconds
+    static ACCESS_TOKEN_NAME = 'access_token';
+    static REFRESH_TOKEN_NAME = 'refresh_token';
+    static ACCESS_TOKEN_EXPIRATION: ms.StringValue = '15m'; // 15 minutes in seconds
+    static REFRESH_TOKEN_EXPIRATION: ms.StringValue = '1y'; // 1 year in seconds
 
     static async hashPassword(password: string): Promise<string> {
         return await bcrypt.hash(password, SALT_ROUNDS);
@@ -48,29 +59,73 @@ export class PasswordService {
         return { auth_token_id: authTokenId, access_token, refresh_token } as TokenPair;
     }
 
-    // verify access/short-lived token and return token id
-    static async verifyAccessToken(accessToken: string): Promise<DecodedToken | null> {
+    // Verify jwt token
+    static async verifyJWTToken(token: string): Promise<DecodedJWTToken | null> {
         const secret = this.getJWTSecret();
-        if (!secret) {
-            return null;
-        }
+        if (!secret) return null;
 
-        return jwt.verify(accessToken, secret) as DecodedToken;
+        const decodedToken = jwt.verify(token, secret) as DecodedJWTToken;
+        if (!decodedToken) return null;
+
+        return decodedToken;
+    }
+
+    // verify access/short-lived token and return token id
+    static async verifyAccessToken(accessToken: string, refreshToken: string): Promise<DecodedTokenWithUser | null> {
+        const secret = this.getJWTSecret();
+        if (!secret) return null;
+
+        const decodedAccessToken = await this.verifyJWTToken(accessToken);
+
+        if (!decodedAccessToken) return null;
+
+        const authToken = await prisma.authToken.findUnique({
+            where: { id: decodedAccessToken.authTokenId },
+            include: { user: true },
+        });
+
+        if (!authToken) return null;
+
+        if (!authToken.valid) return null;
+
+        if (authToken.refresh_token !== refreshToken) return null;
+
+        return { authTokenId: authToken.id, user: authToken.user } as DecodedTokenWithUser;
     }
 
     // verify refresh/long-lived token and return token id
-    static async verifyRefreshToken(refreshToken: string): Promise<DecodedToken | null> {
+    static async verifyRefreshToken(refreshToken: string, userId: string): Promise<DecodedJWTToken | null> {
         const secret = this.getJWTSecret();
         if (!secret) {
             return null;
         }
 
         try {
-            return jwt.verify(refreshToken, secret) as DecodedToken;
+            const decoded = await this.verifyJWTToken(refreshToken);
+            if (!decoded) {
+                return null;
+            }
+
+            const authTokens = await prisma.authToken.findMany({
+                where: { user_id: userId, valid: true },
+            });
+
+            if (authTokens.length < 1) {
+                return null;
+            }
+
+            const isTokenValid = authTokens.some((token) => token.refresh_token === refreshToken);
+            if (!isTokenValid) {
+                return null;
+            }
+
+            return decoded;
         } catch (error) {
             return null;
         }
     }
+
+    // Generate access
 
     // Decode JWT without verification to get expiry
     static decodeToken(token: string): any {

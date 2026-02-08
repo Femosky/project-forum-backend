@@ -1,35 +1,33 @@
 import { Request, Response, NextFunction } from 'express';
 import { User } from '@prisma/client';
-import { DecodedToken, PasswordService } from '../services/PasswordService';
+import { DecodedTokenWithUser, PasswordService } from '../services/PasswordService';
 import prisma from '../prismaConnection';
 
 export type AuthRequest = Request & { user?: User };
 
+// Authenticate access token
 export async function authenticateToken(request: AuthRequest, response: Response, next: NextFunction) {
-    const authHeader = request.headers['authorization'];
-    const accessToken = authHeader?.split(' ')[1];
+    // const authHeader = request.headers['authorization'];
+    // const accessToken = authHeader?.split(' ')[1];
+    const accessToken = request.cookies.access_token;
+    const refreshToken = request.cookies.refresh_token;
 
-    if (!accessToken) {
-        return response.status(401).json({ error: 'Unauthorized, no access token provided.' });
+    if (!accessToken && !refreshToken) {
+        return response.status(401).json({ error: 'Unauthorized, no access token or refresh token provided.' });
     }
 
     try {
-        const decodedToken: DecodedToken | null = await PasswordService.verifyAccessToken(accessToken);
+        // Verify access token
+        const decodedToken: DecodedTokenWithUser | null = await PasswordService.verifyAccessToken(
+            accessToken,
+            refreshToken
+        );
 
         if (!decodedToken) {
             return response.status(401).json({ error: 'Unauthorized, invalid access token.' });
         }
 
-        const token = await prisma.authToken.findUnique({
-            where: { id: decodedToken.authTokenId },
-            include: { user: true },
-        });
-
-        if (!token) {
-            return response.status(401).json({ error: 'Unauthorized, invalid access token.' });
-        }
-
-        request.user = token.user as User;
+        request.user = decodedToken.user as User;
         next();
     } catch (error) {
         return response.status(500).json({ error: { message: 'Failed to authenticate token.', stack: error } });
