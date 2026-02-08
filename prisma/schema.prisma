@@ -3,13 +3,12 @@
 
 generator client {
   provider = "prisma-client-js"
-  // output   = "../src/generated/prisma"
+  // output   = "../generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
-  // provider = "sqlite"
-  url      = env("DATABASE_URL")
+  url      = env("DATABASE_URL") // Ignore this. Will Upgrade to Prisma 7.3.0 when proper documentation is available.
 }
 
 /*
@@ -297,6 +296,9 @@ model LoginSession {
   // Trusted details
   is_trusted Boolean @default(false)
   last_activity DateTime @default(now())
+
+  // Auth tokens
+  auth_tokens AuthToken[] @relation("auth_tokens")
 
   // Indexes and unique constraints
   @@index([user_id, is_active])
@@ -666,13 +668,15 @@ model AuthToken {
   user_id String
   user User @relation(fields: [user_id], references: [id])
 
+  login_session_id String?
+  login_session LoginSession? @relation("auth_tokens", fields: [login_session_id], references: [id])
+  
   // Token details
+  refresh_token String?
   valid Boolean @default(true)
-  short_lived_token String?
-  long_lived_token String?
   
 
-  @@index([valid])
+  @@index([user_id])
 }
 
 model Report {

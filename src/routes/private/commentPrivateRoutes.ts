@@ -10,7 +10,7 @@ import PaginationUtils from '../../utils/paginationUtils';
 const router = Router();
 
 // Create a comment
-router.post('/create-comment', async (request: AuthRequest, response) => {
+router.post('/create', async (request: AuthRequest, response) => {
     const { community_id, post_id, content, is_anonymous, is_sponsored, parent_comment_id } = request.body;
     const user = request.user;
 

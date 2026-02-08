@@ -12,7 +12,6 @@ const router = Router();
     - Get posts for a community with pagination
 */
 
-// Get community by name
 router.get('/:community_name', async (request, response) => {
     const { community_name } = request.params;
 
@@ -37,6 +36,7 @@ router.get('/:community_name', async (request, response) => {
 });
 
 // Get posts for a community with pagination
+
 router.get('/:community_name/posts', async (request, response) => {
     const { community_name } = request.params;
     const {

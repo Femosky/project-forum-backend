@@ -7,17 +7,17 @@ export type AuthRequest = Request & { user?: User };
 
 export async function authenticateToken(request: AuthRequest, response: Response, next: NextFunction) {
     const authHeader = request.headers['authorization'];
-    const shortLivedToken = authHeader?.split(' ')[1];
+    const accessToken = authHeader?.split(' ')[1];
 
-    if (!shortLivedToken) {
-        return response.status(401).json({ error: 'Unauthorized, no short lived token provided.' });
+    if (!accessToken) {
+        return response.status(401).json({ error: 'Unauthorized, no access token provided.' });
     }
 
     try {
-        const decodedToken: DecodedToken | null = await PasswordService.verifyShortLivedToken(shortLivedToken);
+        const decodedToken: DecodedToken | null = await PasswordService.verifyAccessToken(accessToken);
 
         if (!decodedToken) {
-            return response.status(401).json({ error: 'Unauthorized, invalid short lived token.' });
+            return response.status(401).json({ error: 'Unauthorized, invalid access token.' });
         }
 
         const token = await prisma.authToken.findUnique({
@@ -26,7 +26,7 @@ export async function authenticateToken(request: AuthRequest, response: Response
         });
 
         if (!token) {
-            return response.status(401).json({ error: 'Unauthorized, invalid short lived token.' });
+            return response.status(401).json({ error: 'Unauthorized, invalid access token.' });
         }
 
         request.user = token.user as User;

@@ -1,20 +1,40 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import prisma from '../../prismaConnection';
-import { DecodedToken, LONG_LIVED_TOKEN_EXPIRATION, PasswordService } from '../../services/PasswordService';
+import { DecodedToken, PasswordService } from '../../services/PasswordService';
 import { TokenPair } from '../../services/PasswordService';
 import { UserInterface, UserStatus, UserType } from '../../models/interfaces/userType';
 import { UAParser } from 'ua-parser-js';
 import { User } from '@prisma/client';
 import { ErrorResponse } from '../../models/interfaces/errorType';
+import { DeviceDetailsUtils } from '../../utils/DeviceDetailsUtils';
 
 const router = Router();
 
-enum TokenType {
-    API = 'api',
-    EMAIL = 'email',
+// Login a user
+router.post('/login', async (request, response) => {
+    await loginUser(request, response);
+});
+
+// Register a new user
+router.post('/signup', async (request, response) => {
+    await signupUser(request, response);
+});
+
+// Refresh a short lived token
+router.post('/refresh-token', async (request, response) => {
+    await refreshToken(request, response);
+});
+
+interface LoginSessionDetails {
+    userAgent: string | null;
+    browser: string | null | undefined;
+    os: string | null | undefined;
+    device: string | null | undefined;
+    ipAddress: string | null | undefined;
+    error?: unknown;
 }
 
-async function generateTokens(user: User, response: any): Promise<TokenPair | ErrorResponse> {
+async function generateTokens(user: User): Promise<TokenPair | ErrorResponse> {
     // Create AuthToken
     const authToken = await prisma.authToken.create({
         data: {
@@ -38,8 +58,7 @@ async function generateTokens(user: User, response: any): Promise<TokenPair | Er
     const isAuthTokenUpdated = await prisma.authToken.update({
         where: { id: authToken.id },
         data: {
-            short_lived_token: tokens.short_lived_token,
-            long_lived_token: tokens.long_lived_token,
+            refresh_token: tokens.refresh_token,
         },
     });
 
@@ -51,9 +70,17 @@ async function generateTokens(user: User, response: any): Promise<TokenPair | Er
     return tokens;
 }
 
-// Login a user
-router.post('/login', async (request, response) => {
+async function loginUser(request: Request, response: Response) {
     const { email, username, password } = request.body;
+
+    if (!email && !username) {
+        console.log(email, username);
+        return response.status(400).json({ error: 'Email or username is required.' } as ErrorResponse);
+    }
+
+    if (!password) {
+        return response.status(400).json({ error: 'Password is required.' } as ErrorResponse);
+    }
 
     try {
         // Find user by email or username
@@ -81,98 +108,74 @@ router.post('/login', async (request, response) => {
             return response.json({ error: 'Invalid password.' });
         }
 
+        // Check if user is already logged in via refresh token
+        const loginSessionDetails = await getLoginSessionDetails(request);
+
+        const loginSessions = await prisma.loginSession.findMany({
+            where: { user_id: user.id, is_active: true },
+        });
+
+        const userIPInformation = await DeviceDetailsUtils.getUserIPInformation(request);
+
+        if (loginSessions.length > 0) {
+            for (const loginSession of loginSessions) {
+                if (
+                    loginSession.device_type === loginSessionDetails.device &&
+                    loginSession.browser === loginSessionDetails.browser &&
+                    loginSession.os === loginSessionDetails.os &&
+                    loginSession.user_agent === loginSessionDetails.userAgent &&
+                    loginSession.ip_address === loginSessionDetails.ipAddress
+                ) {
+                    return response.json({
+                        error: { message: 'User already logged in.', loginSessions, loginSession, userIPInformation },
+                    });
+                }
+            }
+        }
+
         // Generate tokens
-        const tokens: TokenPair | ErrorResponse = await generateTokens(user, response);
+        const tokens: TokenPair | ErrorResponse = await generateTokens(user);
 
         if ('error' in tokens) {
             return response.status(500).json({ error: tokens.error });
         }
 
-        const { password_hash, ...userWithoutPassword } = user;
+        const loginSession = await createLoginSession(user as User, tokens, request);
+        if (!loginSession) {
+            return response.status(500).json({ error: 'Failed to create login session' } as ErrorResponse);
+        }
 
-        response.json({
-            message: 'Login successful.',
-            success: true,
-            tokens: {
-                short_lived_token: tokens.short_lived_token,
-                long_lived_token: tokens.long_lived_token,
-            } as TokenPair,
-            user: userWithoutPassword,
+        const { password_hash, ...safeUser } = user;
+
+        const isProduction = process.env.NODE_ENV === 'production';
+
+        response.cookie('access_token', tokens.access_token, {
+            httpOnly: true,
+            // secure: false,
+            // sameSite: 'lax',
+            // path: '/',
+            // maxAge: PasswordService.ACCESS_TOKEN_EXPIRATION,
         });
+
+        response.cookie('refresh_token', tokens.refresh_token, {
+            httpOnly: true,
+            // secure: false,
+            // sameSite: 'lax',
+            // path: '/',
+            // maxAge: PasswordService.REFRESH_TOKEN_EXPIRATION,
+        });
+
+        response.json({ success: true, user: safeUser, tokens });
     } catch (error) {
         response.status(500).json({ error: 'Failed to login.', details: error } as ErrorResponse);
     }
-});
-
-// Refresh a short lived token
-router.post('/refresh-token', async (request, response) => {
-    const { permanent_token } = request.body;
-
-    try {
-        // Verify refresh token and get token id
-        const decoded: DecodedToken | null = await PasswordService.verifyRefreshToken(permanent_token);
-        if (!decoded) {
-            return response.status(401).json({ error: 'Invalid refresh token.' });
-        }
-
-        // Get new short lived token
-        const newShortLivedToken = await PasswordService.generateAccessToken(decoded.authTokenId);
-        if (!newShortLivedToken) {
-            return response.status(500).json({ error: 'Could not generate short lived token.' });
-        }
-
-        const isAuthTokenUpdated = await prisma.authToken.update({
-            where: { id: decoded.authTokenId },
-            data: {
-                short_lived_token: newShortLivedToken,
-            },
-        });
-
-        if (!isAuthTokenUpdated) {
-            return response.status(500).json({ error: 'Could not update auth token.' });
-        }
-
-        response.json({ accessToken: newShortLivedToken });
-    } catch (error) {
-        response.status(500).json({ error: 'Internal server error.', details: error } as ErrorResponse);
-    }
-});
-
-interface LoginSessionDetails {
-    userAgent: string | null;
-    browser: string | null | undefined;
-    os: string | null | undefined;
-    device: string | null | undefined;
-    ipAddress: string | null | undefined;
-    error?: unknown;
 }
 
-async function getLoginSessionDetails(request: any): Promise<LoginSessionDetails> {
-    try {
-        const parser = new UAParser();
-        const result = parser.getResult();
-        const userAgent = result.ua;
-        const browser = result.browser.name;
-        const os = result.os.name;
-        const device = result.device.type;
-        const ipAddress =
-            request.headers.get('x-forwarded-for') ||
-            request.headers.get('x-real-ip') ||
-            'unknown' ||
-            (request as any).ip;
-
-        return { userAgent, browser, os, device, ipAddress };
-    } catch (error) {
-        return { userAgent: null, browser: null, os: null, device: null, ipAddress: null, error: error as string };
-    }
-}
-
-// Register a new user
-router.post('/create-user', async (request, response) => {
+async function signupUser(request: Request, response: Response) {
     const { email, username, password } = request.body;
 
     if (!email || !username || !password) {
-        return response.status(400).json({ error: 'Missing required fields' });
+        return response.status(400).json({ error: 'Email, username and password are required' } as ErrorResponse);
     }
 
     try {
@@ -181,7 +184,7 @@ router.post('/create-user', async (request, response) => {
         });
 
         if (isEmailTaken) {
-            return response.status(400).json({ error: 'Email already in use' });
+            return response.status(400).json({ error: 'Email already in use' } as ErrorResponse);
         }
 
         const isUsernameTaken = await prisma.user.findUnique({
@@ -189,7 +192,7 @@ router.post('/create-user', async (request, response) => {
         });
 
         if (isUsernameTaken) {
-            return response.status(400).json({ error: 'Username already in use' });
+            return response.status(400).json({ error: 'Username already in use' } as ErrorResponse);
         }
 
         const hashedPassword = await PasswordService.hashPassword(password);
@@ -216,40 +219,73 @@ router.post('/create-user', async (request, response) => {
         });
 
         if (!user) {
-            return response.status(400).json({ error: 'Failed to create user' });
+            return response.status(400).json({ error: 'Failed to create user' } as ErrorResponse);
         }
 
-        // Generate tokens
-        const tokens: TokenPair | ErrorResponse = await generateTokens(user as User, response);
-
-        if ('error' in tokens) {
-            return response.status(500).json({ error: tokens.error });
-        }
-
-        // Create login session
-        const { userAgent, browser, os, device, ipAddress } = await getLoginSessionDetails(request);
-        const longLivedExpiry = PasswordService.getTokenExpiry(tokens.long_lived_token);
-
-        const loginSession = await prisma.loginSession.create({
-            data: {
-                user_id: user.id,
-                expires_at: longLivedExpiry || LONG_LIVED_TOKEN_EXPIRATION,
-                device_type: device,
-                browser: browser,
-                os: os,
-                user_agent: userAgent,
-                ip_address: ipAddress,
-            },
-        });
-
-        if (!loginSession) {
-            return response.status(500).json({ error: 'Failed to create login session' });
-        }
-
-        response.json({ message: 'Successfully created user', success: true, user, loginSession, tokens });
+        await loginUser(request, response);
     } catch (error) {
-        response.status(500).json({ error: 'Failed to create user', details: error });
+        response.status(500).json({ error: 'Failed to create user', details: error } as ErrorResponse);
     }
-});
+}
+
+async function refreshToken(request: Request, response: Response) {
+    const { permanent_token } = request.body;
+
+    try {
+        // Verify refresh token and get token id
+        const decoded: DecodedToken | null = await PasswordService.verifyRefreshToken(permanent_token);
+        if (!decoded) {
+            return response.status(401).json({ error: 'Invalid refresh token.' });
+        }
+
+        // Get new short lived token
+        const newShortLivedToken = await PasswordService.generateAccessToken(decoded.authTokenId);
+        if (!newShortLivedToken) {
+            return response.status(500).json({ error: 'Could not generate short lived token.' });
+        }
+
+        response.json({ accessToken: newShortLivedToken });
+    } catch (error) {
+        response.status(500).json({ error: 'Internal server error.', details: error } as ErrorResponse);
+    }
+}
+
+async function getLoginSessionDetails(request: any): Promise<LoginSessionDetails> {
+    try {
+        const parser = new UAParser();
+        const result = parser.getResult();
+        const userAgent = result.ua;
+        const browser = result.browser.name;
+        const os = result.os.name;
+        const device = result.device.type;
+        const ipAddress =
+            request.headers.get('x-forwarded-for') ||
+            request.headers.get('x-real-ip') ||
+            'unknown' ||
+            (request as any).ip;
+
+        return { userAgent, browser, os, device, ipAddress };
+    } catch (error) {
+        return { userAgent: null, browser: null, os: null, device: null, ipAddress: null, error: error as string };
+    }
+}
+
+async function createLoginSession(user: User, tokens: TokenPair, request: any) {
+    // Create login session
+    const { userAgent, browser, os, device, ipAddress } = await getLoginSessionDetails(request);
+    const longLivedExpiry = PasswordService.getTokenExpiry(tokens.refresh_token);
+
+    return await prisma.loginSession.create({
+        data: {
+            user_id: user.id,
+            expires_at: longLivedExpiry || new Date(Date.now() + PasswordService.REFRESH_TOKEN_EXPIRATION * 1000),
+            device_type: device,
+            browser: browser,
+            os: os,
+            user_agent: userAgent,
+            ip_address: ipAddress,
+        },
+    });
+}
 
 export default router;

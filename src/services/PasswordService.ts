@@ -3,18 +3,19 @@ import jwt from 'jsonwebtoken';
 const SALT_ROUNDS = 10;
 
 export type TokenPair = {
-    short_lived_token: string;
-    long_lived_token: string;
+    auth_token_id: string | null | undefined;
+    access_token: string;
+    refresh_token: string;
 };
 
 export type DecodedToken = {
     authTokenId: string;
 };
 
-export const SHORT_LIVED_TOKEN_EXPIRATION = '1h';
-export const LONG_LIVED_TOKEN_EXPIRATION = '1y';
-
 export class PasswordService {
+    static ACCESS_TOKEN_EXPIRATION: number = 60 * 15; // 15 minutes in seconds
+    static REFRESH_TOKEN_EXPIRATION: number = 60 * 60 * 24 * 365; // 1 year in seconds
+
     static async hashPassword(password: string): Promise<string> {
         return await bcrypt.hash(password, SALT_ROUNDS);
     }
@@ -33,7 +34,7 @@ export class PasswordService {
             return null;
         }
 
-        return jwt.sign({ authTokenId }, secret, { expiresIn: SHORT_LIVED_TOKEN_EXPIRATION });
+        return jwt.sign({ authTokenId }, secret, { expiresIn: this.ACCESS_TOKEN_EXPIRATION });
     }
 
     static async generateTokens(authTokenId: string): Promise<TokenPair | null> {
@@ -42,22 +43,22 @@ export class PasswordService {
             return null;
         }
 
-        const short_lived_token = jwt.sign({ authTokenId }, secret, { expiresIn: SHORT_LIVED_TOKEN_EXPIRATION });
-        const long_lived_token = jwt.sign({ authTokenId }, secret, { expiresIn: LONG_LIVED_TOKEN_EXPIRATION });
-        return { short_lived_token, long_lived_token } as TokenPair;
+        const access_token = jwt.sign({ authTokenId }, secret, { expiresIn: this.ACCESS_TOKEN_EXPIRATION });
+        const refresh_token = jwt.sign({ authTokenId }, secret, { expiresIn: this.REFRESH_TOKEN_EXPIRATION });
+        return { auth_token_id: authTokenId, access_token, refresh_token } as TokenPair;
     }
 
-    // verify short lived token and return token id
-    static async verifyShortLivedToken(shortLivedToken: string): Promise<DecodedToken | null> {
+    // verify access/short-lived token and return token id
+    static async verifyAccessToken(accessToken: string): Promise<DecodedToken | null> {
         const secret = this.getJWTSecret();
         if (!secret) {
             return null;
         }
 
-        return jwt.verify(shortLivedToken, secret) as DecodedToken;
+        return jwt.verify(accessToken, secret) as DecodedToken;
     }
 
-    // verify refresh token and return token id
+    // verify refresh/long-lived token and return token id
     static async verifyRefreshToken(refreshToken: string): Promise<DecodedToken | null> {
         const secret = this.getJWTSecret();
         if (!secret) {
@@ -65,7 +66,7 @@ export class PasswordService {
         }
 
         try {
-            return (await jwt.verify(refreshToken, secret)) as DecodedToken;
+            return jwt.verify(refreshToken, secret) as DecodedToken;
         } catch (error) {
             return null;
         }

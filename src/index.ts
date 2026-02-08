@@ -10,11 +10,14 @@ import postPublicRoutes from './routes/public/postPublicRoutes';
 import commentPrivateRoutes from './routes/private/commentPrivateRoutes';
 import commentPublicRoutes from './routes/public/commentPublicRoutes';
 import userPublicRoutes from './routes/public/userPublicRoutes';
+import cors from 'cors';
 
-const PORT_NUMBER = 3000;
+const PORT_NUMBER = 3001;
 
 const app = express();
 app.use(express.json());
+// app.use(cors());
+app.use(cors({ origin: 'http://localhost:3000', credentials: true }));
 
 // Auth routes
 app.use('/auth', authRoutes);
