@@ -7,7 +7,7 @@ import { User } from '@prisma/client';
 const SALT_ROUNDS = 10;
 
 export type TokenPair = {
-    auth_token_id: string | null | undefined;
+    auth_token_id: string;
     access_token: string;
     refresh_token: string;
 };

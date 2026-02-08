@@ -13,6 +13,7 @@ export async function authenticateToken(request: AuthRequest, response: Response
     const refreshToken = request.cookies.refresh_token;
 
     if (!accessToken && !refreshToken) {
+        console.log('Unauthorized, no access token or refresh token provided MIDDLEWARE.');
         return response.status(401).json({ error: 'Unauthorized, no access token or refresh token provided.' });
     }
 

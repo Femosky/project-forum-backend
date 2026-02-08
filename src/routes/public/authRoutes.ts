@@ -6,7 +6,7 @@ import { UAParser } from 'ua-parser-js';
 import { User } from '@prisma/client';
 import { ErrorResponse } from '../../models/interfaces/errorType';
 import { DeviceDetailsUtils } from '../../utils/DeviceDetailsUtils';
-import { AuthRequest } from '../../middlewares/authMiddleware';
+import { authenticateToken, AuthRequest } from '../../middlewares/authMiddleware';
 
 const router = Router();
 
@@ -15,13 +15,68 @@ router.post('/login', async (request, response) => {
     await loginUser(request, response);
 });
 
+// Logout a user
+router.post('/logout', authenticateToken, async (request: AuthRequest, response) => {
+    const user = request.user as User;
+    try {
+        if (!user) {
+            console.log('User not authenticated.');
+            return response.status(400).json({ error: 'User already logged out. Not authenticated.' } as ErrorResponse);
+        }
+
+        // Find active auth token
+        const authToken = await prisma.authToken.findFirst({
+            where: { user_id: user.id, valid: true },
+            select: {
+                id: true,
+                login_session_id: true,
+            },
+        });
+
+        if (!authToken || !authToken.login_session_id) {
+            console.log('No active auth token or login session found.');
+            return response
+                .status(400)
+                .json({ error: 'No active auth token or login session found.' } as ErrorResponse);
+        }
+
+        // Invalidate auth token
+        const authTokenUpdated = await prisma.authToken.update({
+            where: { id: authToken.id },
+            data: {
+                valid: false,
+            },
+        });
+
+        if (!authTokenUpdated) {
+            console.log('Failed to invalidate auth token.');
+            return response.status(400).json({ error: 'Failed to invalidate auth token.' } as ErrorResponse);
+        }
+
+        // Invalidate login session
+        const loginSession = await prisma.loginSession.update({
+            where: { id: authToken.login_session_id as string },
+            data: { is_active: false, expires_at: new Date() },
+        });
+
+        if (!loginSession) {
+            console.log('Failed to invalidate login session.');
+            return response.status(400).json({ error: 'Failed to invalidate login session.' } as ErrorResponse);
+        }
+
+        response.status(200).json({ success: true, message: 'Logged out successfully.' });
+    } catch (error) {
+        response.status(500).json({ error: 'Failed to logout.', details: error } as ErrorResponse);
+    }
+});
+
 // Register a new user
 router.post('/signup', async (request, response) => {
     await signupUser(request, response);
 });
 
 // Refresh a short lived token
-router.post('/refresh-token', async (request, response) => {
+router.post('/refresh-token', authenticateToken, async (request: AuthRequest, response) => {
     await refreshToken(request, response);
 });
 
@@ -118,13 +173,13 @@ async function loginUser(request: Request, response: Response) {
         }
 
         // Get login session details
-        // const loginSessionDetails = await getLoginSessionDetails(request);
+        const loginSessionDetails = await getLoginSessionDetails(request);
 
         // const loginSessions = await prisma.loginSession.findMany({
         //     where: { user_id: user.id, is_active: true },
         // });
 
-        // const userIPInformation = await DeviceDetailsUtils.getUserIPInformation(request);
+        const userIPInformation = await DeviceDetailsUtils.getUserIPInformation(request);
 
         // Generate tokens
         const tokens: TokenPair | ErrorResponse = await generateTokens(user);
@@ -133,9 +188,24 @@ async function loginUser(request: Request, response: Response) {
             return response.status(500).json({ error: tokens.error });
         }
 
+        // Create login session
         const loginSession = await createLoginSession(user as User, tokens, request);
         if (!loginSession) {
             return response.status(500).json({ error: 'Failed to create login session' } as ErrorResponse);
+        }
+
+        // Connect auth token to login session
+        const authTokenUpdated = await prisma.authToken.update({
+            where: { id: tokens.auth_token_id },
+            data: {
+                login_session_id: loginSession.id,
+            },
+        });
+
+        if (!authTokenUpdated) {
+            return response
+                .status(500)
+                .json({ error: 'Failed to connect auth token to login session' } as ErrorResponse);
         }
 
         const { password_hash, ...safeUser } = user;
