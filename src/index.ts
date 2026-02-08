@@ -1,4 +1,5 @@
 import express from 'express';
+import cookieParser from 'cookie-parser';
 import { authenticateToken } from './middlewares/authMiddleware';
 import userPrivateRoutes from './routes/private/userPrivateRoutes';
 import authRoutes from './routes/public/authRoutes';
@@ -16,6 +17,7 @@ const PORT_NUMBER = 3001;
 
 const app = express();
 app.use(express.json());
+app.use(cookieParser());
 // app.use(cors());
 app.use(cors({ origin: 'http://localhost:3000', credentials: true }));
 

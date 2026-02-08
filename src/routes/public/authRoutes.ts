@@ -72,6 +72,15 @@ async function generateTokens(user: User): Promise<TokenPair | ErrorResponse> {
 
 async function loginUser(request: Request, response: Response) {
     const { email, username, password } = request.body;
+    const accessToken = request.cookies.access_token;
+    const refreshToken = request.cookies.refresh_token;
+
+    if (accessToken && refreshToken) {
+        console.log('User already logged in.');
+        console.log(accessToken, refreshToken);
+    } else {
+        console.log('User not logged in.');
+    }
 
     if (!email && !username) {
         console.log(email, username);
@@ -117,21 +126,21 @@ async function loginUser(request: Request, response: Response) {
 
         const userIPInformation = await DeviceDetailsUtils.getUserIPInformation(request);
 
-        if (loginSessions.length > 0) {
-            for (const loginSession of loginSessions) {
-                if (
-                    loginSession.device_type === loginSessionDetails.device &&
-                    loginSession.browser === loginSessionDetails.browser &&
-                    loginSession.os === loginSessionDetails.os &&
-                    loginSession.user_agent === loginSessionDetails.userAgent &&
-                    loginSession.ip_address === loginSessionDetails.ipAddress
-                ) {
-                    return response.json({
-                        error: { message: 'User already logged in.', loginSessions, loginSession, userIPInformation },
-                    });
-                }
-            }
-        }
+        // if (loginSessions.length > 0) {
+        //     for (const loginSession of loginSessions) {
+        //         if (
+        //             loginSession.device_type === loginSessionDetails.device &&
+        //             loginSession.browser === loginSessionDetails.browser &&
+        //             loginSession.os === loginSessionDetails.os &&
+        //             loginSession.user_agent === loginSessionDetails.userAgent &&
+        //             loginSession.ip_address === loginSessionDetails.ipAddress
+        //         ) {
+        //             return response.json({
+        //                 error: { message: 'User already logged in.', loginSessions, loginSession, userIPInformation },
+        //             });
+        //         }
+        //     }
+        // }
 
         // Generate tokens
         const tokens: TokenPair | ErrorResponse = await generateTokens(user);
