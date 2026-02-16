@@ -6,6 +6,38 @@ import { Community, Moderator, User, ModeratorRole, PostStatus, CommunityStatus 
 
 const router = Router();
 
+router.get('/get/communities', async (request: AuthRequest, response) => {
+    const user = request.user;
+
+    if (!user) {
+        return response.status(401).json({ error: 'Unauthorized' } as ErrorResponse);
+    }
+
+    try {
+        const communities = await prisma.user.findMany({
+            where: { id: user.id },
+            select: {
+                joined_communities: {
+                    select: {
+                        id: true,
+                        name: true,
+                        image_url: true,
+                        description: true,
+                    },
+                },
+            },
+        });
+
+        if (!communities) {
+            return response.status(404).json({ error: 'Communities not found' } as ErrorResponse);
+        }
+
+        return response.status(200).json({ communities: communities[0].joined_communities });
+    } catch (error) {
+        return response.status(500).json({ error: 'Failed to get communities', details: error } as ErrorResponse);
+    }
+});
+
 router.post('/join', async (request: AuthRequest, response) => {
     const { community_id, request_message } = request.body;
     const user = request.user;
