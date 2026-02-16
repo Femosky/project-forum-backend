@@ -64,6 +64,9 @@ router.get('/:community_name/posts', async (request, response) => {
                 author_ref: {
                     select: { username: true, avatar_id: true },
                 },
+                community_ref: {
+                    select: { name: true },
+                },
                 _count: {
                     select: { comments: true, upvoters: true, downvoters: true },
                 },

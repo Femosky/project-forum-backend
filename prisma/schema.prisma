@@ -531,9 +531,6 @@ model Post {
   @@index([status])
   @@index([created_at])
   @@index([slug])
-  
-  @@unique([author_id, slug])
-  @@unique([community_id, slug])
 }
 
 model CommentView {

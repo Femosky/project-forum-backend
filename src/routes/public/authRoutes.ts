@@ -10,34 +10,61 @@ import { authenticateToken, AuthRequest } from '../../middlewares/authMiddleware
 
 const router = Router();
 
+// Is user authenticated
+router.get('/is-authenticated', async (request: AuthRequest, response) => {
+    const refreshToken = request.cookies.refresh_token;
+
+    try {
+        if (!refreshToken) {
+            return response.status(400).json({ error: 'User is not authenticated.' } as ErrorResponse);
+        }
+
+        const decoded: DecodedJWTToken | null = await PasswordService.verifyRefreshToken(refreshToken);
+
+        if (!decoded) {
+            return response.status(400).json({ error: 'User is not authenticated.' } as ErrorResponse);
+        }
+
+        return response.json({ message: 'User already logged in.' });
+    } catch (error) {
+        return response
+            .status(500)
+            .json({ error: 'Failed to check if user is authenticated.', details: error } as ErrorResponse);
+    }
+});
 // Login a user
 router.post('/login', async (request, response) => {
     await loginUser(request, response);
 });
 
+function clearCookies(response: Response) {
+    response.clearCookie(PasswordService.ACCESS_TOKEN_NAME);
+    response.clearCookie(PasswordService.REFRESH_TOKEN_NAME);
+}
+
 // Logout a user
-router.post('/logout', authenticateToken, async (request: AuthRequest, response) => {
-    const user = request.user as User;
+router.get('/logout', async (request: AuthRequest, response) => {
+    const refreshToken = request.cookies.refresh_token;
+
     try {
-        if (!user) {
-            console.log('User not authenticated.');
-            return response.status(400).json({ error: 'User already logged out. Not authenticated.' } as ErrorResponse);
+        if (!refreshToken) {
+            throw new Error('Refresh token not provided.');
+        }
+        console.log('HIT LOGOUT ROUTE?');
+
+        const decoded: DecodedJWTToken | null = await PasswordService.verifyRefreshToken(refreshToken);
+        if (!decoded) {
+            clearCookies(response);
+            throw new Error('Invalid refresh token.');
         }
 
         // Find active auth token
         const authToken = await prisma.authToken.findFirst({
-            where: { user_id: user.id, valid: true },
-            select: {
-                id: true,
-                login_session_id: true,
-            },
+            where: { id: decoded.authTokenId, valid: true },
         });
 
-        if (!authToken || !authToken.login_session_id) {
-            console.log('No active auth token or login session found.');
-            return response
-                .status(400)
-                .json({ error: 'No active auth token or login session found.' } as ErrorResponse);
+        if (!authToken) {
+            throw new Error('No active auth token found.');
         }
 
         // Invalidate auth token
@@ -49,8 +76,7 @@ router.post('/logout', authenticateToken, async (request: AuthRequest, response)
         });
 
         if (!authTokenUpdated) {
-            console.log('Failed to invalidate auth token.');
-            return response.status(400).json({ error: 'Failed to invalidate auth token.' } as ErrorResponse);
+            throw new Error('Failed to invalidate auth token.');
         }
 
         // Invalidate login session
@@ -61,8 +87,11 @@ router.post('/logout', authenticateToken, async (request: AuthRequest, response)
 
         if (!loginSession) {
             console.log('Failed to invalidate login session.');
-            return response.status(400).json({ error: 'Failed to invalidate login session.' } as ErrorResponse);
+            throw new Error('Failed to invalidate login session.');
         }
+
+        // Clear cookies
+        clearCookies(response);
 
         response.status(200).json({ success: true, message: 'Logged out successfully.' });
     } catch (error) {
@@ -76,7 +105,7 @@ router.post('/signup', async (request, response) => {
 });
 
 // Refresh a short lived token
-router.post('/refresh-token', authenticateToken, async (request: AuthRequest, response) => {
+router.get('/refresh-token', async (request, response) => {
     await refreshToken(request, response);
 });
 
@@ -166,7 +195,7 @@ async function loginUser(request: Request, response: Response) {
 
         // Check if user is already logged in via refresh token
         if (refreshToken) {
-            const decoded: DecodedJWTToken | null = await PasswordService.verifyRefreshToken(refreshToken, user.id);
+            const decoded: DecodedJWTToken | null = await PasswordService.verifyRefreshToken(refreshToken);
             if (decoded) {
                 return response.json({ error: 'User already logged in.' });
             }
@@ -291,13 +320,8 @@ async function signupUser(request: Request, response: Response) {
     }
 }
 
-async function refreshToken(request: AuthRequest, response: Response) {
+async function refreshToken(request: Request, response: Response) {
     const refreshToken = request.cookies.refresh_token;
-    const user = request.user as User;
-
-    if (!user) {
-        return response.status(401).json({ error: 'Unauthorized, user not authenticated.' });
-    }
 
     try {
         if (!refreshToken) {
@@ -305,7 +329,7 @@ async function refreshToken(request: AuthRequest, response: Response) {
         }
 
         // Verify refresh token and get token id
-        const decoded: DecodedJWTToken | null = await PasswordService.verifyRefreshToken(refreshToken, user.id);
+        const decoded: DecodedJWTToken | null = await PasswordService.verifyRefreshToken(refreshToken);
         if (!decoded) {
             return response.status(401).json({ error: 'Invalid refresh token.' }); // Could add reason later
         }

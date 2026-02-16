@@ -29,41 +29,39 @@ router.post('/create-post', async (request: AuthRequest, response) => {
         });
 
         if (!community) {
-            return response.status(400).json({ error: 'Community not found' } as ErrorResponse);
+            throw new Error('Community not found');
         }
 
         // Generate short ID
         const shortId = await IdShortener.generatePostShortId();
 
         if (typeof shortId !== 'string') {
-            return response.status(500).json(shortId as ErrorResponse);
+            throw new Error(shortId.error);
         }
 
         // Generate slug
         const slug = await SlugGenerator.generateSlug(title);
+        console.log('shortId', shortId);
 
-        // Create post
-        const isPostCreated = await prisma.post.create({
+        // Create post (Prisma create throws on failure; it never returns null)
+        await prisma.post.create({
             data: {
                 short_id: shortId,
                 title,
                 content,
                 is_anonymous: is_anonymous || false,
                 is_sponsored: is_sponsored || false,
-                tags: tags || [],
+                tags: Array.isArray(tags) ? tags : [],
                 slug,
-                ai_summary,
+                ai_summary: ai_summary ?? null,
                 author_id: user.id,
                 community_id,
             },
         });
 
-        if (!isPostCreated) {
-            return response.status(500).json({ error: 'Failed to create post' } as ErrorResponse);
-        }
-
         return response.status(200).json({ message: 'Post created successfully' });
     } catch (error) {
+        console.error('Create post failed:', error);
         return response.status(500).json({ error: 'Failed to create post', details: error } as ErrorResponse);
     }
 });

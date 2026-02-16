@@ -17,9 +17,20 @@ export type DecodedJWTToken = {
 };
 
 export type DecodedTokenWithUser = {
-    authTokenId: string;
-    user: User;
+    authTokenId?: string;
+    user?: User;
+    error?: AccessTokenErrors;
 };
+
+export enum AccessTokenErrors {
+    INVALID_SECRET = 'Invalid secret.',
+    INVALID_OR_EXPIRED_ACCESS_TOKEN = 'Invalid or expired access token.',
+    ACCESS_TOKEN_EXPIRED = 'Access token expired.',
+    INVALID_AUTH_TOKEN = 'Invalid auth token.',
+    AUTH_TOKEN_EXPIRED = 'Auth token expired.',
+    INVALID_REFRESH_TOKEN = 'Invalid refresh token.',
+    REFRESH_TOKEN_NOT_MATCHING = 'Refresh token does not match.',
+}
 
 export class PasswordService {
     static ACCESS_TOKEN_NAME = 'access_token';
@@ -64,37 +75,53 @@ export class PasswordService {
         const secret = this.getJWTSecret();
         if (!secret) return null;
 
-        const decodedToken = jwt.verify(token, secret) as DecodedJWTToken;
-        if (!decodedToken) return null;
-
-        return decodedToken;
+        try {
+            // jwt.verify throws (e.g. JsonWebTokenError: jwt expired, invalid signature) — it does not return null
+            const decodedToken = jwt.verify(token, secret) as DecodedJWTToken;
+            return decodedToken ?? null;
+        } catch {
+            console.log('HIT PASSWORD SERVICE VERIFY JWT TOKEN?');
+            return null;
+        }
     }
 
     // verify access/short-lived token and return token id
-    static async verifyAccessToken(accessToken: string, refreshToken: string): Promise<DecodedTokenWithUser | null> {
+    static async verifyAccessToken(accessToken: string, refreshToken: string): Promise<DecodedTokenWithUser> {
         const secret = this.getJWTSecret();
-        if (!secret) return null;
+        if (!secret) return { error: AccessTokenErrors.INVALID_SECRET } as DecodedTokenWithUser;
 
+        const decodedRefreshToken = await this.verifyJWTToken(refreshToken);
+        if (!decodedRefreshToken) return { error: AccessTokenErrors.INVALID_REFRESH_TOKEN } as DecodedTokenWithUser;
         const decodedAccessToken = await this.verifyJWTToken(accessToken);
-
-        if (!decodedAccessToken) return null;
+        if (!decodedAccessToken)
+            return { error: AccessTokenErrors.INVALID_OR_EXPIRED_ACCESS_TOKEN } as DecodedTokenWithUser;
 
         const authToken = await prisma.authToken.findUnique({
             where: { id: decodedAccessToken.authTokenId },
             include: { user: true },
         });
 
-        if (!authToken) return null;
+        if (!authToken) return { error: AccessTokenErrors.INVALID_AUTH_TOKEN } as DecodedTokenWithUser;
 
-        if (!authToken.valid) return null;
+        if (!authToken.valid)
+            return {
+                authTokenId: authToken.id,
+                user: authToken.user,
+                error: AccessTokenErrors.AUTH_TOKEN_EXPIRED,
+            } as DecodedTokenWithUser;
 
-        if (authToken.refresh_token !== refreshToken) return null;
+        if (authToken.refresh_token !== refreshToken)
+            return {
+                authTokenId: authToken.id,
+                user: authToken.user,
+                error: AccessTokenErrors.REFRESH_TOKEN_NOT_MATCHING,
+            } as DecodedTokenWithUser;
 
         return { authTokenId: authToken.id, user: authToken.user } as DecodedTokenWithUser;
     }
 
     // verify refresh/long-lived token and return token id
-    static async verifyRefreshToken(refreshToken: string, userId: string): Promise<DecodedJWTToken | null> {
+    static async verifyRefreshToken(refreshToken: string): Promise<DecodedJWTToken | null> {
         const secret = this.getJWTSecret();
         if (!secret) {
             return null;
@@ -106,18 +133,11 @@ export class PasswordService {
                 return null;
             }
 
-            const authTokens = await prisma.authToken.findMany({
-                where: { user_id: userId, valid: true },
+            const authToken = await prisma.authToken.findUnique({
+                where: { id: decoded.authTokenId },
             });
 
-            if (authTokens.length < 1) {
-                return null;
-            }
-
-            const isTokenValid = authTokens.some((token) => token.refresh_token === refreshToken);
-            if (!isTokenValid) {
-                return null;
-            }
+            if (!authToken || !authToken.valid) return null;
 
             return decoded;
         } catch (error) {

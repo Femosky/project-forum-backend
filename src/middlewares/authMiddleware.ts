@@ -19,13 +19,10 @@ export async function authenticateToken(request: AuthRequest, response: Response
 
     try {
         // Verify access token
-        const decodedToken: DecodedTokenWithUser | null = await PasswordService.verifyAccessToken(
-            accessToken,
-            refreshToken
-        );
+        const decodedToken: DecodedTokenWithUser = await PasswordService.verifyAccessToken(accessToken, refreshToken);
 
-        if (!decodedToken) {
-            return response.status(401).json({ error: 'Unauthorized, invalid access token.' });
+        if (decodedToken.error) {
+            return response.status(401).json({ error: decodedToken.error });
         }
 
         request.user = decodedToken.user as User;
