@@ -35,6 +35,8 @@ export enum AccessTokenErrors {
 export class PasswordService {
     static ACCESS_TOKEN_NAME = 'access_token';
     static REFRESH_TOKEN_NAME = 'refresh_token';
+    static SESSION_COOKIE_NAME = 'session_id';
+
     static ACCESS_TOKEN_EXPIRATION: ms.StringValue = '15m'; // 15 minutes in seconds
     static REFRESH_TOKEN_EXPIRATION: ms.StringValue = '1y'; // 1 year in seconds
 

@@ -3,7 +3,7 @@ import prisma from '../../prismaConnection';
 import { DecodedJWTToken, DecodedTokenWithUser, PasswordService } from '../../services/PasswordService';
 import { TokenPair } from '../../services/PasswordService';
 import { UAParser } from 'ua-parser-js';
-import { User } from '@prisma/client';
+import { LoginSession, User } from '@prisma/client';
 import { ErrorResponse } from '../../models/interfaces/errorType';
 import { DeviceDetailsUtils } from '../../utils/DeviceDetailsUtils';
 import { authenticateToken, AuthRequest } from '../../middlewares/authMiddleware';
@@ -40,6 +40,7 @@ router.post('/login', async (request, response) => {
 function clearCookies(response: Response) {
     response.clearCookie(PasswordService.ACCESS_TOKEN_NAME);
     response.clearCookie(PasswordService.REFRESH_TOKEN_NAME);
+    response.clearCookie(PasswordService.SESSION_COOKIE_NAME);
 }
 
 // Logout a user
@@ -157,6 +158,7 @@ async function generateTokens(user: User): Promise<TokenPair | ErrorResponse> {
 async function loginUser(request: Request, response: Response) {
     const { email, username, password } = request.body;
     const refreshToken = request.cookies.refresh_token;
+    const sessionId = request.cookies.session_id;
 
     try {
         // Validate request body
@@ -194,10 +196,22 @@ async function loginUser(request: Request, response: Response) {
         }
 
         // Check if user is already logged in via refresh token
-        if (refreshToken) {
+        if (refreshToken && sessionId) {
             const decoded: DecodedJWTToken | null = await PasswordService.verifyRefreshToken(refreshToken);
             if (decoded) {
                 return response.json({ error: 'User already logged in.' });
+            }
+
+            const loginSession = await prisma.loginSession.findUnique({
+                where: { id: sessionId },
+            });
+
+            if (!loginSession) {
+                return response.status(400).json({ error: 'Invalid session ID.' } as ErrorResponse);
+            } else if (loginSession.user_id !== user.id) {
+                return response.status(400).json({ error: 'Invalid session ID.' } as ErrorResponse);
+            } else if (loginSession.is_active && loginSession.expires_at < new Date()) {
+                return response.status(400).json({ error: 'User is already logged in.' } as ErrorResponse);
             }
         }
 
@@ -241,6 +255,26 @@ async function loginUser(request: Request, response: Response) {
 
         // const isProduction = process.env.NODE_ENV === 'production';
 
+        const isCookiesSet = await setCookies(response, tokens, loginSession);
+
+        if (isCookiesSet) {
+            return response
+                .status(500)
+                .json({ error: isCookiesSet.error, details: isCookiesSet.details } as ErrorResponse);
+        }
+
+        response.json({ success: true, user: safeUser });
+    } catch (error) {
+        response.status(500).json({ error: 'Failed to login.', details: error } as ErrorResponse);
+    }
+}
+
+async function setCookies(
+    response: Response,
+    tokens: TokenPair,
+    loginSession: LoginSession
+): Promise<null | ErrorResponse> {
+    try {
         response.cookie(PasswordService.ACCESS_TOKEN_NAME, tokens.access_token, {
             httpOnly: true,
             // secure: false,
@@ -257,9 +291,17 @@ async function loginUser(request: Request, response: Response) {
             // maxAge: PasswordService.REFRESH_TOKEN_EXPIRATION,
         });
 
-        response.json({ success: true, user: safeUser });
+        response.cookie(PasswordService.SESSION_COOKIE_NAME, loginSession.id, {
+            httpOnly: true,
+            // secure: false,
+            // sameSite: 'lax',
+            // path: '/',
+            // maxAge: PasswordService.SESSION_COOKIE_EXPIRATION,
+        });
+
+        return null;
     } catch (error) {
-        response.status(500).json({ error: 'Failed to login.', details: error } as ErrorResponse);
+        return { error: 'Failed to set cookies.', details: error } as ErrorResponse;
     }
 }
 

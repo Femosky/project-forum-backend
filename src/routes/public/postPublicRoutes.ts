@@ -9,7 +9,7 @@ import PaginationUtils from '../../utils/paginationUtils';
 
 const router = Router();
 
-// Get comments for a post
+// Get post details with limited comments
 
 router.get('/:community_name/replies/:post_short_id', async (request, response) => {
     const { post_short_id } = request.params;
@@ -35,6 +35,11 @@ router.get('/:community_name/replies/:post_short_id', async (request, response) 
 
         const post = await prisma.post.findUnique({
             where: { short_id: post_short_id },
+            include: {
+                author_ref: { select: { username: true, avatar_id: true } },
+                community_ref: { select: { name: true } },
+                _count: { select: { comments: true, upvoters: true, downvoters: true } },
+            },
         });
         if (!post) {
             return response.status(404).json({ error: 'Post not found' });
@@ -69,6 +74,7 @@ router.get('/:community_name/replies/:post_short_id', async (request, response) 
         const totalPages = Math.ceil(totalComments / limitNumber);
 
         response.json({
+            post,
             comments,
             pagination: PaginationUtils.preparePaginationResponse(pageNumber, totalPages, totalComments),
         });
