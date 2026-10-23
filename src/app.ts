@@ -1,69 +1,104 @@
 import { env } from './config/env';
-import express from 'express';
+import { randomUUID } from 'node:crypto';
+import express, { Router } from 'express';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
-import { rateLimit } from 'express-rate-limit';
-import { authenticateToken } from './middlewares/authMiddleware';
-import userPrivateRoutes from './routes/private/userPrivateRoutes';
-import authRoutes from './routes/public/authRoutes';
-import communityPublicRoutes from './routes/public/communityPublicRoutes';
-import communityPrivateRoutes from './routes/private/communityPrivateRoutes';
-import postPrivateRoutes from './routes/private/postPrivateRoutes';
-import postPublicRoutes from './routes/public/postPublicRoutes';
-import commentPrivateRoutes from './routes/private/commentPrivateRoutes';
-import commentPublicRoutes from './routes/public/commentPublicRoutes';
-import userPublicRoutes from './routes/public/userPublicRoutes';
-import { errorHandler, notFoundHandler } from './utils/errorUtils';
+import { pinoHttp } from 'pino-http';
+import logger from './lib/logger';
+import { MemoryStore } from 'express-rate-limit';
+import { limiter } from './lib/rateLimit';
+import { errorHandler, notFoundHandler } from './lib/errors';
+import { optionalAuth } from './middlewares/auth';
+import authRoutes from './modules/auth/routes';
+import communityRoutes from './modules/communities/routes';
+import postRoutes from './modules/posts/routes';
+import commentRoutes from './modules/comments/routes';
+import userRoutes from './modules/users/routes';
+import feedRoutes from './modules/feed/routes';
+import searchRoutes from './modules/search/routes';
+import moderationRoutes from './modules/moderation/routes';
+import legacyRoutes from './legacy/routes';
 
 const app = express();
 
 // Behind a hosting proxy, so request.ip and rate limiting see the real client IP
 app.set('trust proxy', 1);
 
+// Request logs with an id per request. A caller's X-Request-Id is kept if it looks sane, so logs can be joined up.
+app.use(
+    pinoHttp({
+        logger,
+        genReqId: (request, response) => {
+            const incoming = request.headers['x-request-id'];
+            const id = typeof incoming === 'string' && /^[\w-]{8,64}$/.test(incoming) ? incoming : randomUUID();
+            response.setHeader('X-Request-Id', id);
+            return id;
+        },
+        customLogLevel: (request, response, error) =>
+            error || response.statusCode >= 500 ? 'error' : response.statusCode >= 400 ? 'warn' : 'info',
+        serializers: {
+            req: (request) => ({ id: request.id, method: request.method, url: request.url }),
+            res: (response) => ({ statusCode: response.statusCode }),
+        },
+    })
+);
+
 app.use(helmet());
-app.use(cors({ origin: env.WEB_ORIGINS, credentials: true }));
+app.use(cors({ origin: env.WEB_ORIGINS, credentials: true, exposedHeaders: ['X-Request-Id'] }));
 app.use(express.json({ limit: '100kb' }));
 app.use(cookieParser());
 
-// In-memory rate limits (single instance). Move to a shared store if the API ever runs on more than one instance.
-const authLimiter = rateLimit({
+// Rate limits. Auth and write limits are stored in Postgres (RATE_LIMIT_STORE) so they hold across instances;
+// the read limit only slows down aggressive scrapers, so it stays in memory.
+const authLimiter = limiter({
+    name: 'auth',
     windowMs: 15 * 60 * 1000,
     limit: 20,
-    standardHeaders: 'draft-8',
-    legacyHeaders: false,
-    skip: () => env.NODE_ENV === 'test',
-    message: { error: 'Too many attempts, please try again later.' },
+    message: 'Too many attempts, please try again later.',
 });
-
-const writeLimiter = rateLimit({
+const writeLimiter = limiter({
+    name: 'write',
     windowMs: 60 * 1000,
     limit: 60,
-    standardHeaders: 'draft-8',
-    legacyHeaders: false,
-    skip: (request) => request.method === 'GET' || env.NODE_ENV === 'test',
-    message: { error: 'Too many requests, please slow down.' },
+    skipGet: true,
+    message: 'Too many requests, please slow down.',
+});
+const readLimiter = limiter({
+    name: 'read',
+    windowMs: 60 * 1000,
+    limit: 300,
+    message: 'Too many requests, please slow down.',
+    store: new MemoryStore(),
 });
 
-// Auth routes
+// --- v1 API ---
+const v1 = Router();
+v1.use(readLimiter);
+for (const path of ['/auth/signup', '/auth/login', '/auth/forgot-password', '/auth/reset-password', '/auth/google', '/auth/verify-email']) {
+    v1.use(path, authLimiter);
+}
+// Identify the caller before the write limiter so limits are per account where possible
+v1.use(optionalAuth, writeLimiter);
+v1.use('/auth', authRoutes);
+v1.use('/feed', feedRoutes);
+v1.use('/communities', communityRoutes);
+v1.use('/posts', postRoutes);
+v1.use('/comments', commentRoutes);
+v1.use('/users', userRoutes);
+v1.use('/search', searchRoutes);
+v1.use(moderationRoutes);
+v1.get('/health', (request, response) => {
+    response.json({ status: 'ok' });
+});
+app.use('/v1', v1);
+
+// --- Deprecated pre-v1 routes the current web app still uses ---
 app.use('/auth/login', authLimiter);
-app.use('/auth/signup', authLimiter);
-app.use('/auth', authRoutes);
-
-// Public routes: Starts with /community
-app.use('/community', communityPublicRoutes);
-app.use('/community', postPublicRoutes);
-app.use('/community', commentPublicRoutes);
-app.use('/user', userPublicRoutes);
-
-// Private routes
-app.use('/user', authenticateToken, writeLimiter, userPrivateRoutes);
-app.use('/community', authenticateToken, writeLimiter, communityPrivateRoutes);
-app.use('/post', authenticateToken, writeLimiter, postPrivateRoutes);
-app.use('/comment', authenticateToken, writeLimiter, commentPrivateRoutes);
+app.use(legacyRoutes);
 
 app.get('/', (request, response) => {
-    response.send('Welcome to the "Project Forum" API.');
+    response.send('Welcome to the "Project Forum" API. See /v1.');
 });
 
 app.use(notFoundHandler);
