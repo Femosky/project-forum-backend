@@ -15,6 +15,9 @@ export default defineConfig({
             DATABASE_URL: testDatabaseUrl,
             JWT_SECRET: 'test-secret-that-is-at-least-32-characters-long',
             WEB_ORIGIN: 'http://localhost:3000',
+            RATE_LIMIT_STORE: 'postgres',
+            JOBS_ENABLED: 'false',
+            LINK_PREVIEWS_ENABLED: 'false',
         },
     },
 });

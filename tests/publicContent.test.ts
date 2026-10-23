@@ -1,95 +1,149 @@
 import { describe, expect, it } from 'vitest';
 import prisma from '../src/prismaConnection';
-import { api, createComment, createCommunity, createPost, signUp } from './helpers';
+import { hotRank } from '../src/lib/ranking';
+import { api, createComment, createCommunity, createPost, makeModerator, signUp } from './helpers';
 
 // Regression tests for roadmap bugs 2, 8 and 9
 
 describe('anonymous content (bug 2)', () => {
-    it('never exposes the author of anonymous posts and comments', async () => {
+    it('never exposes the author of anonymous posts and comments to the public', async () => {
         const alice = await signUp('alice');
-        const community = await createCommunity(alice.agent, 'lounge');
-        const post = await createPost(alice.agent, community.id, { title: 'secret', is_anonymous: true });
-        await createComment(alice.agent, post.id, { content: 'anon comment', is_anonymous: true });
+        await createCommunity(alice.agent, 'lounge');
+        const post = await createPost(alice.agent, 'lounge', { title: 'secret', is_anonymous: true });
+        await createComment(alice.agent, post.id, { body: 'anon comment', is_anonymous: true });
 
-        const list = await api().get('/community/lounge/posts');
-        const listed = list.body.posts.find((p: { title: string }) => p.title === 'secret');
-        expect(listed.author_ref).toBeNull();
-        expect(listed.author_id).toBeNull();
-
-        const detail = await api().get(`/community/lounge/replies/${post.short_id}`);
-        expect(detail.body.post.author_ref).toBeNull();
-        expect(detail.body.comments[0].author_ref).toBeNull();
-        expect(JSON.stringify(detail.body)).not.toContain(alice.user.id);
+        const responses = [
+            await api().get('/v1/feed'),
+            await api().get('/v1/communities/lounge/posts'),
+            await api().get(`/v1/posts/${post.short_id}`),
+            await api().get(`/v1/posts/${post.short_id}/comments`),
+            await api().get('/community/lounge/posts'),
+            await api().get(`/community/lounge/replies/${post.short_id}`),
+        ];
+        for (const response of responses) {
+            expect(response.status).toBe(200);
+            expect(JSON.stringify(response.body)).not.toContain(alice.user.id);
+            expect(JSON.stringify(response.body)).not.toContain('"alice"');
+        }
+        expect(responses[2].body.post.author).toBeNull();
+        expect(responses[3].body.comments[0].author).toBeNull();
     });
 
-    it("leaves anonymous posts off the author's public profile", async () => {
+    it('shows the author to themselves and to moderators, but not to other members', async () => {
         const alice = await signUp('alice');
-        const community = await createCommunity(alice.agent, 'lounge');
-        await createPost(alice.agent, community.id, { title: 'public' });
-        await createPost(alice.agent, community.id, { title: 'secret', is_anonymous: true });
+        const bob = await signUp('bob');
+        const carol = await signUp('carol');
+        const community = await createCommunity(bob.agent, 'lounge');
+        await makeModerator(bob.user.id, community.id);
+        const post = await createPost(alice.agent, 'lounge', { is_anonymous: true });
 
-        const profile = await api().get('/user/alice/posts');
-        expect(profile.body.posts.map((p: { title: string }) => p.title)).toEqual(['public']);
-        expect(profile.body.pagination.total_items).toBe(1);
+        expect((await alice.agent.get(`/v1/posts/${post.id}`)).body.post.author.username).toBe('alice');
+        expect((await bob.agent.get(`/v1/posts/${post.id}`)).body.post.author.username).toBe('alice');
+        expect((await carol.agent.get(`/v1/posts/${post.id}`)).body.post.author).toBeNull();
+    });
+
+    it("leaves anonymous posts and comments off the author's public profile", async () => {
+        const alice = await signUp('alice');
+        await createCommunity(alice.agent, 'lounge');
+        const post = await createPost(alice.agent, 'lounge', { title: 'public' });
+        await createPost(alice.agent, 'lounge', { title: 'secret', is_anonymous: true });
+        await createComment(alice.agent, post.id, { body: 'named' });
+        await createComment(alice.agent, post.id, { body: 'hidden', is_anonymous: true });
+
+        const posts = await api().get('/v1/users/alice/posts');
+        expect(posts.body.posts.map((p: { title: string }) => p.title)).toEqual(['public']);
+        const comments = await api().get('/v1/users/alice/comments');
+        expect(comments.body.comments.map((c: { body: string }) => c.body)).toEqual(['named']);
     });
 });
 
 describe('sorting (bug 8)', () => {
-    it('applies newest and oldest sort orders', async () => {
+    it('applies new, top and hot sorts on indexed columns', async () => {
         const alice = await signUp('alice');
-        const community = await createCommunity(alice.agent, 'lounge');
-        const first = await createPost(alice.agent, community.id, { title: 'first' });
-        await prisma.post.update({ where: { id: first.id }, data: { created_at: new Date('2026-01-01') } });
-        await createPost(alice.agent, community.id, { title: 'second' });
+        const bob = await signUp('bob');
+        await createCommunity(alice.agent, 'lounge');
+        const old = await createPost(alice.agent, 'lounge', { title: 'old but loved' });
+        // 3 hours old with 10 net votes
+        const createdAt = new Date(Date.now() - 3 * 60 * 60 * 1000);
+        await prisma.post.update({
+            where: { id: old.id },
+            data: { created_at: createdAt, upvote_count: 10, score: 10, hot_rank: hotRank(10, createdAt) },
+        });
+        const fresh = await createPost(alice.agent, 'lounge', { title: 'fresh' });
+        await bob.agent.put(`/v1/posts/${fresh.id}/vote`).send({ value: 1 });
 
-        const newest = await api().get('/community/lounge/posts?sort_by=newest');
-        expect(newest.body.posts.map((p: { title: string }) => p.title)).toEqual(['second', 'first']);
+        const titles = async (query: string) =>
+            (await api().get(`/v1/communities/lounge/posts?${query}`)).body.posts.map((p: { title: string }) => p.title);
 
-        const oldest = await api().get('/community/lounge/posts?sort_by=oldest');
-        expect(oldest.body.posts.map((p: { title: string }) => p.title)).toEqual(['first', 'second']);
+        expect(await titles('sort=new')).toEqual(['fresh', 'old but loved']);
+        expect(await titles('sort=top&t=day')).toEqual(['old but loved', 'fresh']);
+        // 10x the votes is worth 12.5 hours of age, so the 3-hour-old post with 10 votes still leads
+        expect(await titles('sort=hot')).toEqual(['old but loved', 'fresh']);
+
+        // The old sort_by values still work on the legacy route
+        const legacy = await api().get('/community/lounge/posts?sort_by=oldest');
+        expect(legacy.body.posts.map((p: { title: string }) => p.title)).toEqual(['old but loved', 'fresh']);
     });
 });
 
 describe('status filters (bug 9)', () => {
-    it('hides hidden and removed posts from lists and detail pages', async () => {
+    it('hides removed, deleted and pending posts from lists and detail pages', async () => {
         const alice = await signUp('alice');
-        const community = await createCommunity(alice.agent, 'lounge');
-        const visible = await createPost(alice.agent, community.id, { title: 'visible' });
-        const hidden = await createPost(alice.agent, community.id, { title: 'hidden' });
-        await prisma.post.update({ where: { id: hidden.id }, data: { status: 'hidden' } });
+        await createCommunity(alice.agent, 'lounge');
+        const visible = await createPost(alice.agent, 'lounge', { title: 'visible' });
+        for (const status of ['removed', 'deleted', 'pending'] as const) {
+            const post = await createPost(alice.agent, 'lounge', { title: status });
+            await prisma.post.update({ where: { id: post.id }, data: { status } });
+            expect((await api().get(`/v1/posts/${post.short_id}`)).status).toBe(404);
+            expect((await api().get(`/community/lounge/replies/${post.short_id}`)).status).toBe(404);
+        }
 
-        const list = await api().get('/community/lounge/posts');
+        const list = await api().get('/v1/communities/lounge/posts');
         expect(list.body.posts.map((p: { title: string }) => p.title)).toEqual(['visible']);
-        expect(list.body.pagination.total_items).toBe(1);
-
-        expect((await api().get(`/community/lounge/replies/${hidden.short_id}`)).status).toBe(404);
-        expect((await api().get(`/community/lounge/replies/${visible.short_id}`)).status).toBe(200);
+        expect((await api().get('/community/lounge/posts')).body.pagination.total_items).toBe(1);
+        expect((await api().get(`/v1/posts/${visible.short_id}`)).status).toBe(200);
     });
 
     it('shows a deleted comment as a placeholder so its replies keep their place', async () => {
         const alice = await signUp('alice');
         const bob = await signUp('bob');
-        const community = await createCommunity(alice.agent, 'lounge');
-        const post = await createPost(alice.agent, community.id);
-        const parent = await createComment(alice.agent, post.id, { content: 'will be deleted' });
-        await createComment(bob.agent, post.id, { content: 'reply', parent_comment_id: parent.id });
-        await alice.agent.post('/comment/delete-comment').send({ comment_id: parent.id });
+        await createCommunity(alice.agent, 'lounge');
+        const post = await createPost(alice.agent, 'lounge');
+        const parent = await createComment(alice.agent, post.id, { body: 'will be deleted' });
+        await createComment(bob.agent, post.id, { body: 'reply', parent_id: parent.id });
+        await alice.agent.delete(`/v1/comments/${parent.id}`);
 
-        const detail = await api().get(`/community/lounge/replies/${post.short_id}`);
-        const [comment] = detail.body.comments;
-        expect(comment.content).toBe('[deleted]');
-        expect(comment.author_ref).toBeNull();
-        expect(comment.child_comments[0].content).toBe('reply');
+        const thread = await api().get(`/v1/posts/${post.short_id}/comments`);
+        const [comment] = thread.body.comments;
+        expect(comment.body).toBe('[deleted]');
+        expect(comment.author).toBeNull();
+        expect(comment.replies[0].body).toBe('reply');
+
+        const legacy = await api().get(`/community/lounge/replies/${post.short_id}`);
+        expect(legacy.body.comments[0].content).toBe('[deleted]');
+        expect(legacy.body.comments[0].child_comments[0].content).toBe('reply');
     });
 
-    it('drops hidden comments entirely', async () => {
+    it('shows removed comments as placeholders to the public but lets moderators read them', async () => {
         const alice = await signUp('alice');
-        const community = await createCommunity(alice.agent, 'lounge');
-        const post = await createPost(alice.agent, community.id);
-        const comment = await createComment(alice.agent, post.id);
-        await prisma.comment.update({ where: { id: comment.id }, data: { status: 'hidden' } });
+        const bob = await signUp('bob');
+        await createCommunity(alice.agent, 'lounge');
+        const post = await createPost(alice.agent, 'lounge');
+        const comment = await createComment(bob.agent, post.id, { body: 'rude' });
+        await alice.agent.post(`/v1/comments/${comment.id}/moderation`).send({ action: 'remove' });
 
-        const detail = await api().get(`/community/lounge/replies/${post.short_id}`);
-        expect(detail.body.comments).toEqual([]);
+        expect((await api().get(`/v1/posts/${post.id}/comments`)).body.comments[0].body).toBe('[removed]');
+        expect((await alice.agent.get(`/v1/posts/${post.id}/comments`)).body.comments[0].body).toBe('rude');
+    });
+
+    it('drops pending comments entirely', async () => {
+        const alice = await signUp('alice');
+        await createCommunity(alice.agent, 'lounge');
+        const post = await createPost(alice.agent, 'lounge');
+        const comment = await createComment(alice.agent, post.id);
+        await prisma.comment.update({ where: { id: comment.id }, data: { status: 'pending' } });
+
+        expect((await api().get(`/v1/posts/${post.id}/comments`)).body.comments).toEqual([]);
+        expect((await api().get(`/community/lounge/replies/${post.short_id}`)).body.comments).toEqual([]);
     });
 });
