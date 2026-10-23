@@ -4,6 +4,7 @@ import { AuthRequest } from '../../middlewares/authMiddleware';
 import { CommentService } from '../../services/CommentService';
 import { PostService } from '../../services/PostService';
 import PaginationUtils from '../../utils/paginationUtils';
+import { VISIBLE_POST_STATUSES } from '../../utils/ContentSerializer';
 import { ErrorResponse } from '../../models/interfaces/errorType';
 import { AVATAR_OPTIONS } from '../../models/interfaces/avatar';
 
@@ -60,6 +61,7 @@ router.get('/:username/posts', async (request: AuthRequest, response) => {
             where: { username: username.toLowerCase() },
             include: {
                 posts: {
+                    where: { is_anonymous: false, status: { in: VISIBLE_POST_STATUSES } },
                     take: limitNumber,
                     skip: offset,
                     orderBy: PostService.getSortOrder(sort_by as string) as any,
@@ -76,7 +78,7 @@ router.get('/:username/posts', async (request: AuthRequest, response) => {
         }
 
         const totalPosts = await prisma.post.count({
-            where: { author_id: user.id },
+            where: { author_id: user.id, is_anonymous: false, status: { in: VISIBLE_POST_STATUSES } },
         });
 
         const totalPages = Math.ceil(totalPosts / limitNumber);

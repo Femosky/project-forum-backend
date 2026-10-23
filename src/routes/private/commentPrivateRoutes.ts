@@ -6,6 +6,7 @@ import { CommentStatus, PostStatus, ReportType } from '@prisma/client';
 import { IdShortener } from '../../services/IdShortener';
 import { CommentService } from '../../services/CommentService';
 import PaginationUtils from '../../utils/paginationUtils';
+import { toPublicComment } from '../../utils/ContentSerializer';
 import { ModeratorService } from '../../services/ModeratorService';
 
 const router = Router();
@@ -876,7 +877,7 @@ router.get('/saved-comments', async (request: AuthRequest, response) => {
 
         return response.status(200).json({
             message: 'Saved comments retrieved successfully',
-            saved_comments: savedComments?.saved_comments || [],
+            saved_comments: (savedComments?.saved_comments || []).map((comment) => toPublicComment(comment)),
             pagination: PaginationUtils.preparePaginationResponse(pageNumber, totalPages, totalSavedComments),
         });
     } catch (error) {

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import prisma from '../../prismaConnection';
 import { ErrorResponse } from '../../models/interfaces/errorType';
 import PaginationUtils from '../../utils/paginationUtils';
+import { toPublicPost, VISIBLE_POST_STATUSES } from '../../utils/ContentSerializer';
 import { PostService } from '../../services/PostService';
 
 const router = Router();
@@ -56,7 +57,7 @@ router.get('/:community_name/posts', async (request, response) => {
         const { pageNumber, limitNumber, offset } = PaginationUtils.calculatePaginationDetails('post', page, limit);
 
         const posts = await prisma.post.findMany({
-            where: { community_id: community.id },
+            where: { community_id: community.id, status: { in: VISIBLE_POST_STATUSES } },
             take: limitNumber,
             skip: offset,
             orderBy: PostService.getSortOrder(sort_by as string) as any,
@@ -78,13 +79,13 @@ router.get('/:community_name/posts', async (request, response) => {
         }
 
         const totalPosts = await prisma.post.count({
-            where: { community_id: community.id },
+            where: { community_id: community.id, status: { in: VISIBLE_POST_STATUSES } },
         });
 
         const totalPages = Math.ceil(totalPosts / limitNumber);
 
         response.json({
-            posts,
+            posts: posts.map((post) => toPublicPost(post)),
             pagination: PaginationUtils.preparePaginationResponse(pageNumber, totalPages, totalPosts),
         });
     } catch (error) {
