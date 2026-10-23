@@ -7,7 +7,8 @@
         "build": "prisma generate && tsc -p .",
         "start": "node build/index.js",
         "typecheck": "tsc --noEmit -p .",
-        "migrate:deploy": "prisma migrate deploy"
+        "migrate:deploy": "prisma migrate deploy",
+        "test": "vitest run"
     },
     "prisma": {
         "seed": "ts-node prisma/seed.ts"
@@ -38,15 +39,18 @@
         "@types/express": "^5.0.3",
         "@types/jsonwebtoken": "^9.0.10",
         "@types/node": "^24.3.0",
+        "@types/supertest": "^7.2.1",
         "@types/swagger-jsdoc": "^6.0.4",
         "@types/swagger-ui-express": "^4.1.8",
         "bcrypt": "^6.0.0",
         "nodemon": "^3.1.10",
         "pg": "^8.18.0",
         "prisma": "^6.14.0",
+        "supertest": "^7.3.1",
         "swagger-jsdoc": "^6.2.8",
         "swagger-ui-express": "^5.0.1",
         "ts-node": "^10.9.2",
-        "typescript": "^5.9.2"
+        "typescript": "^5.9.2",
+        "vitest": "^5.0.5"
     }
 }
