@@ -15,33 +15,21 @@ export class CommentService {
     static readonly DEFAULT_REPLY_PAGE_NUMBER = 1;
     static readonly DEFAULT_REPLY_LIMIT = 2;
 
-    static async getSortOrder(sort: string) {
+    static getSortOrder(sort: string) {
         switch (sort) {
             case this.SortBy.NEWEST:
-                return { created_at: 'desc' };
+                return [{ created_at: 'desc' }];
             case this.SortBy.OLDEST:
-                return { created_at: 'asc' };
+                return [{ created_at: 'asc' }];
             case this.SortBy.MOST_UPVOTED:
-                return {
-                    upvoters: { _count: 'desc' },
-                    created_at: 'desc',
-                };
+                return [{ upvoters: { _count: 'desc' } }, { created_at: 'desc' }];
             case this.SortBy.MOST_DOWNVOTED:
-                return {
-                    downvoters: { _count: 'desc' },
-                    created_at: 'desc',
-                };
+                return [{ downvoters: { _count: 'desc' } }, { created_at: 'desc' }];
             case this.SortBy.MOST_COMMENTED:
-                return {
-                    comments: { _count: 'desc' },
-                    created_at: 'desc',
-                };
+                return [{ child_comments: { _count: 'desc' } }, { created_at: 'desc' }];
             default:
                 // Default to most upvoted
-                return {
-                    upvoters: { _count: 'desc' },
-                    created_at: 'desc',
-                };
+                return [{ upvoters: { _count: 'desc' } }, { created_at: 'desc' }];
         }
     }
 }
