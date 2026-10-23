@@ -4,6 +4,7 @@ import { ErrorResponse } from '../../models/interfaces/errorType';
 import PaginationUtils from '../../utils/paginationUtils';
 import { toPublicPost, VISIBLE_POST_STATUSES } from '../../utils/ContentSerializer';
 import { PostService } from '../../services/PostService';
+import { sendServerError } from '../../utils/errorUtils';
 
 const router = Router();
 
@@ -32,7 +33,7 @@ router.get('/:community_name', async (request, response) => {
 
         return response.status(200).json({ community });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to get community', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to get community', error);
     }
 });
 
@@ -89,7 +90,7 @@ router.get('/:community_name/posts', async (request, response) => {
             pagination: PaginationUtils.preparePaginationResponse(pageNumber, totalPages, totalPosts),
         });
     } catch (error) {
-        response.status(500).json({ error: 'Failed to get community posts', details: error } as ErrorResponse);
+        sendServerError(response, 'Failed to get community posts', error);
     }
 });
 

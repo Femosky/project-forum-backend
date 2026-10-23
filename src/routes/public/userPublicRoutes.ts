@@ -7,6 +7,7 @@ import PaginationUtils from '../../utils/paginationUtils';
 import { VISIBLE_POST_STATUSES } from '../../utils/ContentSerializer';
 import { ErrorResponse } from '../../models/interfaces/errorType';
 import { AVATAR_OPTIONS } from '../../models/interfaces/avatar';
+import { sendServerError } from '../../utils/errorUtils';
 
 const router = Router();
 
@@ -37,7 +38,7 @@ router.get('/:username', async (request, response) => {
 
         return response.status(200).json({ user });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to get user', details: error });
+        return sendServerError(response, 'Failed to get user', error);
     }
 });
 
@@ -88,7 +89,7 @@ router.get('/:username/posts', async (request: AuthRequest, response) => {
             pagination: PaginationUtils.preparePaginationResponse(pageNumber, totalPages, totalPosts),
         });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to get user posts', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to get user posts', error);
     }
 });
 

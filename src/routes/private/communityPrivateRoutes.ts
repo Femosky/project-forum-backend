@@ -3,6 +3,7 @@ import { AuthRequest } from '../../middlewares/authMiddleware';
 import { ErrorResponse } from '../../models/interfaces/errorType';
 import prisma from '../../prismaConnection';
 import { Community, Moderator, User, ModeratorRole, PostStatus, CommunityStatus } from '@prisma/client';
+import { sendServerError } from '../../utils/errorUtils';
 
 const router = Router();
 
@@ -34,7 +35,7 @@ router.get('/get/communities', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ communities: communities[0].joined_communities });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to get communities', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to get communities', error);
     }
 });
 
@@ -127,7 +128,7 @@ router.post('/join', async (request: AuthRequest, response) => {
             return response.status(200).json({ message: 'User joined community successfully' });
         }
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to join community', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to join community', error);
     }
 });
 
@@ -176,7 +177,7 @@ router.post('/create-community', async (request: AuthRequest, response) => {
         }
 
         // Check if user is at least 30 days old
-        // if (!DateUtils.isAgeGreaterThan30Days(user)) {
+        // if (!DateUtils.isAccountOlderThan30Days(user)) {
         //     return response.status(400).json({ error: 'User must be at least 30 days old' } as ErrorResponse);
         // }
 
@@ -207,7 +208,7 @@ router.post('/create-community', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Community created successfully', community });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to create community', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to create community', error);
     }
 });
 
@@ -260,7 +261,7 @@ router.delete('/delete-community', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Community deleted or marked as deleted successfully' });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to delete community', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to delete community', error);
     }
 });
 
@@ -322,7 +323,7 @@ router.post('/archive-community', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Community archived successfully' });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to archive community', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to archive community', error);
     }
 });
 
@@ -369,9 +370,7 @@ router.post('/join-request-response', async (request: AuthRequest, response) => 
 
         return response.status(200).json({ message: 'Community join request responded successfully' });
     } catch (error) {
-        return response
-            .status(500)
-            .json({ error: 'Failed to respond to community join request', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to respond to community join request', error);
     }
 });
 
@@ -422,7 +421,7 @@ router.post('/leave-community', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'User left community successfully' });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to leave community', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to leave community', error);
     }
 });
 
@@ -480,7 +479,7 @@ router.post('/remove-member', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Member removed from community successfully' });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to remove member', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to remove member', error);
     }
 });
 
@@ -540,7 +539,7 @@ router.post('/add-moderator', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Moderator added to community successfully' });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to add moderator', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to add moderator', error);
     }
 });
 
@@ -604,7 +603,7 @@ router.post('/remove-moderator', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Moderator removed from community successfully' });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to remove moderator', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to remove moderator', error);
     }
 });
 
@@ -670,7 +669,7 @@ router.post('/update-moderator-role', async (request: AuthRequest, response) => 
 
         return response.status(200).json({ message: 'Moderator role updated successfully' });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to update moderator role', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to update moderator role', error);
     }
 });
 
@@ -727,9 +726,7 @@ router.post('/update-community-status', async (request: AuthRequest, response) =
 
         return response.status(200).json({ message: 'Community status updated successfully' });
     } catch (error) {
-        return response
-            .status(500)
-            .json({ error: 'Failed to update community status', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to update community status', error);
     }
 });
 

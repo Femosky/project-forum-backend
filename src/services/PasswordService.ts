@@ -82,7 +82,6 @@ export class PasswordService {
             const decodedToken = jwt.verify(token, secret) as DecodedJWTToken;
             return decodedToken ?? null;
         } catch {
-            console.log('HIT PASSWORD SERVICE VERIFY JWT TOKEN?');
             return null;
         }
     }

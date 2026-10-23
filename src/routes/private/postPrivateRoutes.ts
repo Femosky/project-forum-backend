@@ -6,6 +6,7 @@ import { PostStatus } from '@prisma/client';
 import { IdShortener } from '../../services/IdShortener';
 import { SlugGenerator } from '../../services/SlugGenerator';
 import { ModeratorService } from '../../services/ModeratorService';
+import { sendServerError } from '../../utils/errorUtils';
 
 const router = Router();
 
@@ -42,7 +43,6 @@ router.post('/create-post', async (request: AuthRequest, response) => {
 
         // Generate slug
         const slug = await SlugGenerator.generateSlug(title);
-        console.log('shortId', shortId);
 
         // Create post (Prisma create throws on failure; it never returns null)
         await prisma.post.create({
@@ -62,7 +62,7 @@ router.post('/create-post', async (request: AuthRequest, response) => {
         return response.status(200).json({ message: 'Post created successfully' });
     } catch (error) {
         console.error('Create post failed:', error);
-        return response.status(500).json({ error: 'Failed to create post', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to create post', error);
     }
 });
 
@@ -125,7 +125,7 @@ router.post('/upvote', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Post upvoted successfully', post });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to upvote post', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to upvote post', error);
     }
 });
 
@@ -171,9 +171,7 @@ router.post('/remove-upvote', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Upvote removed from post successfully', post });
     } catch (error) {
-        return response
-            .status(500)
-            .json({ error: 'Failed to remove upvote from post', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to remove upvote from post', error);
     }
 });
 
@@ -244,7 +242,7 @@ router.post('/downvote', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Post downvoted successfully', post });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to downvote post', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to downvote post', error);
     }
 });
 
@@ -290,9 +288,7 @@ router.post('/remove-downvote', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Downvote removed from post successfully', post });
     } catch (error) {
-        return response
-            .status(500)
-            .json({ error: 'Failed to remove downvote from post', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to remove downvote from post', error);
     }
 });
 
@@ -351,7 +347,7 @@ router.post('/remove-post', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Post has been marked asremoved from community successfully' });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to remove post', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to remove post', error);
     }
 });
 
