@@ -2,16 +2,17 @@ import { Router } from 'express';
 import { AuthRequest } from '../../middlewares/authMiddleware';
 import { ErrorResponse } from '../../models/interfaces/errorType';
 import prisma from '../../prismaConnection';
-import { CommentStatus, ReportType } from '@prisma/client';
+import { CommentStatus, PostStatus, ReportType } from '@prisma/client';
 import { IdShortener } from '../../services/IdShortener';
 import { CommentService } from '../../services/CommentService';
 import PaginationUtils from '../../utils/paginationUtils';
+import { ModeratorService } from '../../services/ModeratorService';
 
 const router = Router();
 
 // Create a comment
 router.post('/create', async (request: AuthRequest, response) => {
-    const { community_id, post_id, content, is_anonymous, is_sponsored, parent_comment_id } = request.body;
+    const { post_id, content, is_anonymous, parent_comment_id } = request.body;
     const user = request.user;
 
     if (!user) {
@@ -19,7 +20,7 @@ router.post('/create', async (request: AuthRequest, response) => {
     }
 
     if (!post_id || !content) {
-        return response.status(400).json({ error: 'Community ID, post ID and content are required' } as ErrorResponse);
+        return response.status(400).json({ error: 'Post ID and content are required' } as ErrorResponse);
     }
 
     try {
@@ -37,8 +38,19 @@ router.post('/create', async (request: AuthRequest, response) => {
             where: { id: post_id },
         });
 
-        if (!post) {
+        if (!post || post.status !== PostStatus.active) {
             return response.status(400).json({ error: 'Post not found' } as ErrorResponse);
+        }
+
+        // Parent comment must belong to the same post
+        if (parent_comment_id) {
+            const parentComment = await prisma.comment.findUnique({
+                where: { id: parent_comment_id },
+            });
+
+            if (!parentComment || parentComment.post_id !== post_id || parentComment.status !== CommentStatus.active) {
+                return response.status(400).json({ error: 'Parent comment not found' } as ErrorResponse);
+            }
         }
 
         // Generate short ID
@@ -56,7 +68,6 @@ router.post('/create', async (request: AuthRequest, response) => {
                 post_id,
                 parent_comment_id,
                 is_anonymous: is_anonymous || false,
-                is_sponsored: is_sponsored || false,
             },
         });
 
@@ -314,6 +325,18 @@ router.post('/edit-comment', async (request: AuthRequest, response) => {
     }
 
     try {
+        const existingComment = await prisma.comment.findUnique({
+            where: { id: comment_id },
+        });
+
+        if (!existingComment || existingComment.status === CommentStatus.deleted) {
+            return response.status(404).json({ error: 'Comment not found' } as ErrorResponse);
+        }
+
+        if (existingComment.author_id !== user.id) {
+            return response.status(403).json({ error: 'You can only edit your own comments' } as ErrorResponse);
+        }
+
         const comment = await prisma.comment.update({
             where: { id: comment_id },
             data: { content, is_edited: true, edited_at: new Date() },
@@ -343,6 +366,18 @@ router.post('/delete-comment', async (request: AuthRequest, response) => {
     }
 
     try {
+        const existingComment = await prisma.comment.findUnique({
+            where: { id: comment_id },
+        });
+
+        if (!existingComment || existingComment.status === CommentStatus.deleted) {
+            return response.status(404).json({ error: 'Comment not found' } as ErrorResponse);
+        }
+
+        if (existingComment.author_id !== user.id) {
+            return response.status(403).json({ error: 'You can only delete your own comments' } as ErrorResponse);
+        }
+
         const comment = await prisma.comment.update({
             where: { id: comment_id },
             data: { status: CommentStatus.deleted, is_deleted: true, deleted_at: new Date() },
@@ -360,31 +395,31 @@ router.post('/delete-comment', async (request: AuthRequest, response) => {
 
 // Pin a comment
 router.post('/pin-comment', async (request: AuthRequest, response) => {
-    const { community_id, moderator_id, post_id, comment_id, reason } = request.body;
+    const { post_id, comment_id, reason } = request.body;
     const user = request.user;
 
     if (!user) {
         return response.status(401).json({ error: 'Unauthorized' } as ErrorResponse);
     }
 
-    if (!comment_id) {
-        return response.status(400).json({ error: 'Comment ID is required' } as ErrorResponse);
+    if (!comment_id || !post_id) {
+        return response.status(400).json({ error: 'Comment ID and post ID are required' } as ErrorResponse);
     }
 
     try {
-        const community = await prisma.community.findUnique({
-            where: { id: community_id },
-            include: {
-                moderators: true,
-            },
+        const comment = await prisma.comment.findUnique({
+            where: { id: comment_id },
+            include: { post_ref: { select: { community_id: true } } },
         });
 
-        const moderators = community?.moderators.filter((moderator) => moderator.id === moderator_id);
+        if (!comment || comment.post_id !== post_id) {
+            return response.status(400).json({ error: 'Comment not found' } as ErrorResponse);
+        }
 
-        if (!moderators) {
-            return response.status(400).json({ error: 'Moderator not found' } as ErrorResponse);
-        } else if (moderators.length < 1) {
-            return response.status(400).json({ error: 'Moderator is not a member of the community' } as ErrorResponse);
+        const moderator = await ModeratorService.getActiveModerator(user.id, comment.post_ref.community_id);
+
+        if (!moderator) {
+            return response.status(403).json({ error: 'You are not a moderator of this community' } as ErrorResponse);
         }
 
         const post = await prisma.post.update({
@@ -393,7 +428,7 @@ router.post('/pin-comment', async (request: AuthRequest, response) => {
                 pinned_comment_id: comment_id,
                 pinned_comment_reason: reason,
                 pinned_comment_at: new Date(),
-                pinned_comment_by: moderators[0].id,
+                pinned_comment_by: moderator.id,
             },
         });
 
@@ -409,7 +444,7 @@ router.post('/pin-comment', async (request: AuthRequest, response) => {
 
 // Unpin a comment
 router.post('/unpin-comment', async (request: AuthRequest, response) => {
-    const { community_id, moderator_id, post_id } = request.body;
+    const { post_id } = request.body;
     const user = request.user;
 
     if (!user) {
@@ -421,19 +456,18 @@ router.post('/unpin-comment', async (request: AuthRequest, response) => {
     }
 
     try {
-        const community = await prisma.community.findUnique({
-            where: { id: community_id },
-            include: {
-                moderators: true,
-            },
+        const existingPost = await prisma.post.findUnique({
+            where: { id: post_id },
         });
 
-        const moderators = community?.moderators.filter((moderator) => moderator.id === moderator_id);
+        if (!existingPost) {
+            return response.status(400).json({ error: 'Post not found' } as ErrorResponse);
+        }
 
-        if (!moderators) {
-            return response.status(400).json({ error: 'Moderator not found' } as ErrorResponse);
-        } else if (moderators.length < 1) {
-            return response.status(400).json({ error: 'Moderator is not a member of the community' } as ErrorResponse);
+        const moderator = await ModeratorService.getActiveModerator(user.id, existingPost.community_id);
+
+        if (!moderator) {
+            return response.status(403).json({ error: 'You are not a moderator of this community' } as ErrorResponse);
         }
 
         const post = await prisma.post.update({
@@ -458,33 +492,31 @@ router.post('/unpin-comment', async (request: AuthRequest, response) => {
 
 // Remove a comment
 router.post('/remove-comment', async (request: AuthRequest, response) => {
-    const { community_id, moderator_id, post_id, comment_id, reason } = request.body;
+    const { comment_id, reason } = request.body;
     const user = request.user;
 
     if (!user) {
         return response.status(401).json({ error: 'Unauthorized' } as ErrorResponse);
     }
 
-    if (!comment_id || !post_id || !community_id || !moderator_id || !reason) {
-        return response.status(400).json({
-            error: 'Comment ID, post ID, community ID, moderator ID and reason are required',
-        } as ErrorResponse);
+    if (!comment_id || !reason) {
+        return response.status(400).json({ error: 'Comment ID and reason are required' } as ErrorResponse);
     }
 
     try {
-        const community = await prisma.community.findUnique({
-            where: { id: community_id },
-            include: {
-                moderators: true,
-            },
+        const existingComment = await prisma.comment.findUnique({
+            where: { id: comment_id },
+            include: { post_ref: { select: { community_id: true } } },
         });
 
-        const moderators = community?.moderators.filter((moderator) => moderator.id === moderator_id);
+        if (!existingComment) {
+            return response.status(400).json({ error: 'Comment not found' } as ErrorResponse);
+        }
 
-        if (!moderators) {
-            return response.status(400).json({ error: 'Moderator not found' } as ErrorResponse);
-        } else if (moderators.length < 1) {
-            return response.status(400).json({ error: 'Moderator is not a member of the community' } as ErrorResponse);
+        const moderator = await ModeratorService.getActiveModerator(user.id, existingComment.post_ref.community_id);
+
+        if (!moderator) {
+            return response.status(403).json({ error: 'You are not a moderator of this community' } as ErrorResponse);
         }
 
         const comment = await prisma.comment.update({
@@ -493,7 +525,7 @@ router.post('/remove-comment', async (request: AuthRequest, response) => {
                 status: CommentStatus.removed,
                 is_removed: true,
                 removed_at: new Date(),
-                removed_by: moderators[0].id,
+                removed_by: moderator.id,
                 removed_reason: reason,
             },
         });
@@ -510,37 +542,31 @@ router.post('/remove-comment', async (request: AuthRequest, response) => {
 
 // Hide a comment
 router.post('/hide-comment', async (request: AuthRequest, response) => {
-    const { community_id, moderator_id, post_id, comment_id, reason } = request.body;
+    const { comment_id, reason } = request.body;
     const user = request.user;
 
     if (!user) {
         return response.status(401).json({ error: 'Unauthorized' } as ErrorResponse);
     }
 
-    if (!comment_id || !post_id || !community_id || !moderator_id || !reason) {
-        return response.status(400).json({
-            error: 'Comment ID, post ID, community ID, moderator ID and reason are required',
-        } as ErrorResponse);
-    }
-
-    if (!comment_id) {
-        return response.status(400).json({ error: 'Comment ID is required' } as ErrorResponse);
+    if (!comment_id || !reason) {
+        return response.status(400).json({ error: 'Comment ID and reason are required' } as ErrorResponse);
     }
 
     try {
-        const community = await prisma.community.findUnique({
-            where: { id: community_id },
-            include: {
-                moderators: true,
-            },
+        const existingComment = await prisma.comment.findUnique({
+            where: { id: comment_id },
+            include: { post_ref: { select: { community_id: true } } },
         });
 
-        const moderators = community?.moderators.filter((moderator) => moderator.id === moderator_id);
+        if (!existingComment) {
+            return response.status(400).json({ error: 'Comment not found' } as ErrorResponse);
+        }
 
-        if (!moderators) {
-            return response.status(400).json({ error: 'Moderator not found' } as ErrorResponse);
-        } else if (moderators.length < 1) {
-            return response.status(400).json({ error: 'Moderator is not a member of the community' } as ErrorResponse);
+        const moderator = await ModeratorService.getActiveModerator(user.id, existingComment.post_ref.community_id);
+
+        if (!moderator) {
+            return response.status(403).json({ error: 'You are not a moderator of this community' } as ErrorResponse);
         }
 
         const comment = await prisma.comment.update({
@@ -549,7 +575,7 @@ router.post('/hide-comment', async (request: AuthRequest, response) => {
                 status: CommentStatus.hidden,
                 is_hidden: true,
                 hidden_at: new Date(),
-                hidden_by: moderators[0].id,
+                hidden_by: moderator.id,
                 hidden_reason: reason,
             },
         });
@@ -566,17 +592,11 @@ router.post('/hide-comment', async (request: AuthRequest, response) => {
 
 // Unhide a comment
 router.post('/unhide-comment', async (request: AuthRequest, response) => {
-    const { community_id, moderator_id, post_id, comment_id } = request.body;
+    const { comment_id } = request.body;
     const user = request.user;
 
     if (!user) {
         return response.status(401).json({ error: 'Unauthorized' } as ErrorResponse);
-    }
-
-    if (!comment_id || !post_id || !community_id || !moderator_id) {
-        return response.status(400).json({
-            error: 'Comment ID, post ID, community ID, and moderator ID are required',
-        } as ErrorResponse);
     }
 
     if (!comment_id) {
@@ -584,19 +604,19 @@ router.post('/unhide-comment', async (request: AuthRequest, response) => {
     }
 
     try {
-        const community = await prisma.community.findUnique({
-            where: { id: community_id },
-            include: {
-                moderators: true,
-            },
+        const existingComment = await prisma.comment.findUnique({
+            where: { id: comment_id },
+            include: { post_ref: { select: { community_id: true } } },
         });
 
-        const moderators = community?.moderators.filter((moderator) => moderator.id === moderator_id);
+        if (!existingComment) {
+            return response.status(400).json({ error: 'Comment not found' } as ErrorResponse);
+        }
 
-        if (!moderators) {
-            return response.status(400).json({ error: 'Moderator not found' } as ErrorResponse);
-        } else if (moderators.length < 1) {
-            return response.status(400).json({ error: 'Moderator is not a member of the community' } as ErrorResponse);
+        const moderator = await ModeratorService.getActiveModerator(user.id, existingComment.post_ref.community_id);
+
+        if (!moderator) {
+            return response.status(403).json({ error: 'You are not a moderator of this community' } as ErrorResponse);
         }
 
         const comment = await prisma.comment.update({
