@@ -5,13 +5,14 @@ import prisma from '../../prismaConnection';
 import { PostStatus } from '@prisma/client';
 import { IdShortener } from '../../services/IdShortener';
 import { SlugGenerator } from '../../services/SlugGenerator';
+import { ModeratorService } from '../../services/ModeratorService';
 
 const router = Router();
 
 // Posts
 
 router.post('/create-post', async (request: AuthRequest, response) => {
-    const { community_id, title, content, is_anonymous, is_sponsored, tags, ai_summary } = request.body;
+    const { community_id, title, content, is_anonymous, tags, ai_summary } = request.body;
     const user = request.user;
 
     if (!user) {
@@ -50,7 +51,6 @@ router.post('/create-post', async (request: AuthRequest, response) => {
                 title,
                 content,
                 is_anonymous: is_anonymous || false,
-                is_sponsored: is_sponsored || false,
                 tags: Array.isArray(tags) ? tags : [],
                 slug,
                 ai_summary: ai_summary ?? null,
@@ -296,7 +296,7 @@ router.post('/remove-downvote', async (request: AuthRequest, response) => {
     }
 });
 
-router.post('remove-post', async (request: AuthRequest, response) => {
+router.post('/remove-post', async (request: AuthRequest, response) => {
     const { community_id, postId, removed_reason } = request.body;
     const user = request.user;
 
@@ -318,20 +318,18 @@ router.post('remove-post', async (request: AuthRequest, response) => {
             return response.status(400).json({ error: 'Community not found' } as ErrorResponse);
         }
 
-        // Check if user is a moderator of the community
-        const isUserModerator = await prisma.community.findFirst({
-            where: { id: community_id, moderators: { some: { user_id: user.id } } },
-        });
+        // Check if user is an active moderator of the community
+        const moderator = await ModeratorService.getActiveModerator(user.id, community_id);
 
-        if (!isUserModerator) {
-            return response.status(400).json({ error: 'User is not a moderator of the community' } as ErrorResponse);
+        if (!moderator) {
+            return response.status(403).json({ error: 'User is not a moderator of the community' } as ErrorResponse);
         }
 
         const isPostExists = await prisma.post.findUnique({
             where: { id: postId },
         });
 
-        if (!isPostExists) {
+        if (!isPostExists || isPostExists.community_id !== community_id) {
             return response.status(400).json({ error: 'Post not found' } as ErrorResponse);
         }
 
@@ -343,6 +341,7 @@ router.post('remove-post', async (request: AuthRequest, response) => {
                 is_removed: true,
                 removed_at: new Date(),
                 removed_reason,
+                removed_by: moderator.id,
             },
         });
 
