@@ -95,10 +95,6 @@ Everything lives under `/v1`. Requests and responses are JSON. Auth is cookie-ba
 | GET | `/search?q=&type=posts\|communities&page=` | Postgres full-text search; supports `"phrases"` and `-exclusions` |
 | GET | `/search/autocomplete?q=` | Community and username prefixes |
 
-## Deprecated routes
-
-The pre-v1 routes the current web app calls (`/auth/login`, `/auth/logout`, `/auth/refresh-token`, `/community/:name`, `/community/:name/posts`, `/community/:name/replies/...`, `/community/get/communities`, `/comment/create`) still work with their old shapes, served from `src/legacy/routes.ts`. They go away once the web app moves to `/v1`.
-
 ## Operations
 
 - **Rate limits**: auth 20 per 15 minutes per IP, writes 60 per minute per account, reads 300 per minute per IP. Auth and write counters live in Postgres (`RATE_LIMIT_STORE=postgres`, the default), so they hold across instances without Redis.

@@ -17,8 +17,6 @@ describe('anonymous content (bug 2)', () => {
             await api().get('/v1/communities/lounge/posts'),
             await api().get(`/v1/posts/${post.short_id}`),
             await api().get(`/v1/posts/${post.short_id}/comments`),
-            await api().get('/community/lounge/posts'),
-            await api().get(`/community/lounge/replies/${post.short_id}`),
         ];
         for (const response of responses) {
             expect(response.status).toBe(200);
@@ -79,10 +77,6 @@ describe('sorting (bug 8)', () => {
         expect(await titles('sort=top&t=day')).toEqual(['old but loved', 'fresh']);
         // 10x the votes is worth 12.5 hours of age, so the 3-hour-old post with 10 votes still leads
         expect(await titles('sort=hot')).toEqual(['old but loved', 'fresh']);
-
-        // The old sort_by values still work on the legacy route
-        const legacy = await api().get('/community/lounge/posts?sort_by=oldest');
-        expect(legacy.body.posts.map((p: { title: string }) => p.title)).toEqual(['old but loved', 'fresh']);
     });
 });
 
@@ -95,12 +89,10 @@ describe('status filters (bug 9)', () => {
             const post = await createPost(alice.agent, 'lounge', { title: status });
             await prisma.post.update({ where: { id: post.id }, data: { status } });
             expect((await api().get(`/v1/posts/${post.short_id}`)).status).toBe(404);
-            expect((await api().get(`/community/lounge/replies/${post.short_id}`)).status).toBe(404);
         }
 
         const list = await api().get('/v1/communities/lounge/posts');
         expect(list.body.posts.map((p: { title: string }) => p.title)).toEqual(['visible']);
-        expect((await api().get('/community/lounge/posts')).body.pagination.total_items).toBe(1);
         expect((await api().get(`/v1/posts/${visible.short_id}`)).status).toBe(200);
     });
 
@@ -118,10 +110,6 @@ describe('status filters (bug 9)', () => {
         expect(comment.body).toBe('[deleted]');
         expect(comment.author).toBeNull();
         expect(comment.replies[0].body).toBe('reply');
-
-        const legacy = await api().get(`/community/lounge/replies/${post.short_id}`);
-        expect(legacy.body.comments[0].content).toBe('[deleted]');
-        expect(legacy.body.comments[0].child_comments[0].content).toBe('reply');
     });
 
     it('shows removed comments as placeholders to the public but lets moderators read them', async () => {
@@ -144,6 +132,5 @@ describe('status filters (bug 9)', () => {
         await prisma.comment.update({ where: { id: comment.id }, data: { status: 'pending' } });
 
         expect((await api().get(`/v1/posts/${post.id}/comments`)).body.comments).toEqual([]);
-        expect((await api().get(`/community/lounge/replies/${post.short_id}`)).body.comments).toEqual([]);
     });
 });
