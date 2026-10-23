@@ -12,7 +12,8 @@ import { assertCommentable, createComment, listPostComments } from '../comments/
 import { notifyForComment } from '../notifications/service';
 import { postViewerState, votePost } from '../votes/service';
 import { commentsQuery, createCommentSchema, createPostSchema, updatePostSchema, voteSchema } from './schema';
-import { createPost, findVisiblePost, serializePosts } from './service';
+import { createPost, findVisiblePost, relatedPosts, serializePosts } from './service';
+import { indexNowJob, postPath } from '../seo/jobs';
 
 const router = Router();
 
@@ -46,7 +47,9 @@ router.post('/', requireAuth, async (request: AuthRequest, response) => {
     });
 
     const context = await viewerContext(request.viewer);
-    response.status(201).json({ post: toPublicPost(post, context) });
+    const created = toPublicPost(post, context);
+    if (created.is_indexable) await indexNowJob.enqueue({ paths: [postPath(post)] });
+    response.status(201).json({ post: created });
 });
 
 const linkQuery = z.object({ url: z.string().trim().min(1).max(2048) });
@@ -79,6 +82,14 @@ router.get('/:id', optionalAuth, async (request: AuthRequest, response) => {
     const post = await findVisiblePost(String(request.params.id), request.viewer?.user, context);
     const { votes, saved } = await postViewerState(context?.userId, [post.id]);
     response.json({ post: toPublicPost(post, context, votes, saved) });
+});
+
+// Internal links for the post page: "Related threads" (full-text match on this post's title, any public community)
+// and "More from this community" (its top posts this month). Light rows only, since the page shows just titles.
+router.get('/:id/related', optionalAuth, async (request: AuthRequest, response) => {
+    const context = await viewerContext(request.viewer);
+    const post = await findVisiblePost(String(request.params.id), request.viewer?.user, context);
+    response.json(await relatedPosts(post));
 });
 
 router.patch('/:id', requireAuth, async (request: AuthRequest, response) => {

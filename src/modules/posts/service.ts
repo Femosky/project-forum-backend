@@ -114,3 +114,43 @@ export async function createPost(input: CreatePostInput) {
     if (post.url) await linkPreviewJob.enqueue({ postId: post.id, url: post.url });
     return post;
 }
+
+const RELATED_LIMIT = 5;
+
+type RelatedRow = { short_id: string; slug: string; title: string; community: string; score: number; comment_count: number };
+
+export async function relatedPosts(post: { id: string; title: string; community_id: string; community: { visibility: string } }) {
+    // Any word of the title may match (OR), ranked by how well; the title's own lexemes are quoted so punctuation
+    // in them can't break the query
+    const related = await prisma.$queryRaw<RelatedRow[]>`
+        WITH q AS (
+            SELECT to_tsquery('english', string_agg(quote_literal(lexeme), ' | ')) AS query
+            FROM unnest(tsvector_to_array(to_tsvector('english', ${post.title}))) AS lexeme
+        )
+        SELECT p."short_id", p."slug", p."title", c."name" AS community, p."score", p."comment_count"
+        FROM q, "Post" p JOIN "Community" c ON c."id" = p."community_id"
+        WHERE q.query IS NOT NULL AND p."id" <> ${post.id}::uuid
+          AND p."status" IN ('active', 'locked') AND c."status" = 'active' AND c."visibility" = 'public'
+          AND p."search_vector" @@ q.query
+        ORDER BY ts_rank_cd(p."search_vector", q.query) DESC, p."hot_rank" DESC
+        LIMIT ${RELATED_LIMIT}`;
+
+    const relatedIds = related.map((row) => row.short_id);
+    const more = await prisma.post.findMany({
+        where: {
+            community_id: post.community_id,
+            id: { not: post.id },
+            short_id: { notIn: relatedIds },
+            status: { in: LISTED_POST_STATUSES },
+            created_at: { gte: topWindowStart('month') },
+        },
+        orderBy: [{ score: 'desc' }, { id: 'desc' }],
+        take: RELATED_LIMIT,
+        select: { short_id: true, slug: true, title: true, score: true, comment_count: true, community: { select: { name: true } } },
+    });
+
+    return {
+        related,
+        more_from_community: more.map(({ community, ...row }) => ({ ...row, community: community.name })),
+    };
+}

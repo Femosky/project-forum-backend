@@ -39,7 +39,8 @@ Everything lives under `/v1`. Requests and responses are JSON. Auth is cookie-ba
 | POST | `/posts` | `community, type: text\|link, title (3-300), body (≤40k), url?, is_anonymous?, is_nsfw?, flair_id?` |
 | GET | `/posts/duplicates?url=` | Up to 5 earlier posts of the same link in public communities (tracking parameters, `www.` and trailing slashes ignored) |
 | GET | `/posts/link-preview?url=` | Signed in: `{ preview: { title, description, image, site } \| null }` for the composer |
-| GET | `/posts/:id` | |
+| GET | `/posts/:id` | `is_indexable` says whether the page should be indexed (see SEO below) |
+| GET | `/posts/:id/related` | `{ related, more_from_community }`: up to 5 light rows each (`short_id, slug, title, community, score, comment_count`) |
 | PATCH | `/posts/:id` | Author only: `body, is_nsfw, flair_id`. Titles can't change |
 | DELETE | `/posts/:id` | Author only |
 | PUT | `/posts/:id/vote` | `{ value: 1 \| 0 \| -1 }`. Returns the new counts |
@@ -107,6 +108,17 @@ Created when someone comments on your post (`post_reply`), replies to your comme
 | GET | `/?cursor=` | Newest first: `{ notifications: [{ id, type, created_at, read_at, actor, post: { short_id, slug, title, community }, comment: { short_id, excerpt } }], next_cursor, unread_count }`. Deleted or removed comments drop out |
 | GET | `/unread-count` | `{ count }`, for polling |
 | POST | `/read` | `{ ids? }`; no ids marks everything read. Returns the new `{ count }` |
+
+## SEO `/v1/seo`
+
+Data for the web app's sitemaps; the web app caches it.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/sitemap` | `{ posts, communities, users }`, each a list of `{ page, lastmod }` chunks of up to 50,000 URLs |
+| GET | `/sitemap/:kind/:page` | `kind` is `posts` (`community, short_id, slug, lastmod`), `communities` (`name, lastmod`) or `users` (`username, lastmod`) |
+
+A post is indexable when it is active or locked in a public community, isn't a very short text post (under 40 characters of title and body) without replies, and, if its author's account was under a day old when posting, has a reply or an upvote. Users are listed when they have at least one indexable, non-anonymous post. With `INDEXNOW_KEY` set, new indexable posts are pinged to IndexNow (Bing, Yandex); the web app must serve the same key at `/indexnow-key.txt`.
 
 ## Operations
 

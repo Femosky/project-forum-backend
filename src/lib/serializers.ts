@@ -1,5 +1,6 @@
 import { ContentStatus, Prisma } from '@prisma/client';
 import { canModerate, ViewerContext } from '../modules/communities/access';
+import { isIndexable } from './indexing';
 
 // The only way posts and comments leave the API. Anonymous authors are hidden from everyone except the author
 // and moderators of that community; deleted and removed comments become placeholders.
@@ -7,8 +8,9 @@ import { canModerate, ViewerContext } from '../modules/communities/access';
 export const authorSelect = { username: true, display_name: true, avatar_id: true, status: true } as const;
 
 export const postInclude = {
-    author: { select: authorSelect },
-    community: { select: { id: true, name: true, display_name: true, image_url: true, visibility: true } },
+    // created_at feeds the indexing rule (posts by brand-new accounts wait for engagement); it is not sent out
+    author: { select: { ...authorSelect, created_at: true } },
+    community: { select: { id: true, name: true, display_name: true, image_url: true, visibility: true, status: true } },
     flair: { select: { id: true, name: true, color: true } },
 } satisfies Prisma.PostInclude;
 
@@ -55,6 +57,8 @@ export function toPublicPost(post: PostRow, context: ViewerContext, votes?: Vote
         downvote_count: post.downvote_count,
         score: post.score,
         comment_count: post.comment_count,
+        // Whether search engines should index this post's page (see lib/indexing.ts)
+        is_indexable: isIndexable(post),
         community: { id: post.community.id, name: post.community.name, display_name: post.community.display_name, image_url: post.community.image_url },
         author: revealAuthor ? publicAuthor(post.author) : null,
         viewer: context
