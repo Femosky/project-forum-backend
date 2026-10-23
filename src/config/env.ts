@@ -39,6 +39,13 @@ const envSchema = z.object({
 
     // Cloudflare Turnstile. Without a secret, challenges are skipped.
     TURNSTILE_SECRET_KEY: z.string().optional(),
+
+    // IndexNow (Bing, Yandex and others): new posts are pinged so they're crawled within minutes. The web app serves
+    // the same key at /indexnow-key.txt. Without a key nothing is sent.
+    INDEXNOW_KEY: z
+        .string()
+        .regex(/^[a-zA-Z0-9-]{8,128}$/, 'INDEXNOW_KEY must be 8-128 letters, digits or dashes')
+        .optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
