@@ -57,6 +57,7 @@ router.get('/:community_name/replies/:post_short_id', async (request, response) 
                     skip: childOffset,
                     include: {
                         author_ref: { select: { username: true, avatar_id: true } },
+                        _count: { select: { child_comments: true, upvoters: true, downvoters: true } },
                     },
                 },
                 _count: { select: { child_comments: true, upvoters: true, downvoters: true } },

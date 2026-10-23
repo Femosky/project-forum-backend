@@ -18,19 +18,19 @@ router.post('/create', async (request: AuthRequest, response) => {
         return response.status(401).json({ error: 'Unauthorized' } as ErrorResponse);
     }
 
-    if (!community_id || !post_id || !content) {
+    if (!post_id || !content) {
         return response.status(400).json({ error: 'Community ID, post ID and content are required' } as ErrorResponse);
     }
 
     try {
-        // Check if community exists
-        const community = await prisma.community.findUnique({
-            where: { id: community_id },
-        });
+        // // Check if community exists
+        // const community = await prisma.community.findUnique({
+        //     where: { id: community_id },
+        // });
 
-        if (!community) {
-            return response.status(400).json({ error: 'Community not found' } as ErrorResponse);
-        }
+        // if (!community) {
+        //     return response.status(400).json({ error: 'Community not found' } as ErrorResponse);
+        // }
 
         // Check if post exists
         const post = await prisma.post.findUnique({
