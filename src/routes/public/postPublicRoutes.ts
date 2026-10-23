@@ -6,6 +6,7 @@ import { ErrorResponse } from '../../models/interfaces/errorType';
 import { PostService } from '../../services/PostService';
 import { CommentService } from '../../services/CommentService';
 import PaginationUtils from '../../utils/paginationUtils';
+import { toPublicComment, toPublicPost, VISIBLE_COMMENT_STATUSES, VISIBLE_POST_STATUSES } from '../../utils/ContentSerializer';
 
 const router = Router();
 
@@ -41,22 +42,24 @@ router.get('/:community_name/replies/:post_short_id', async (request, response) 
                 _count: { select: { comments: true, upvoters: true, downvoters: true } },
             },
         });
-        if (!post) {
+        if (!post || !VISIBLE_POST_STATUSES.includes(post.status)) {
             return response.status(404).json({ error: 'Post not found' });
         }
 
         const comments = await prisma.comment.findMany({
-            where: { post_id: post.id, parent_comment_id: null },
+            where: { post_id: post.id, parent_comment_id: null, status: { in: VISIBLE_COMMENT_STATUSES } },
             take: limitNumber,
             skip: offset,
             orderBy: CommentService.getSortOrder(sort_by as string) as any,
             include: {
                 author_ref: { select: { username: true, avatar_id: true } },
                 child_comments: {
+                    where: { status: { in: VISIBLE_COMMENT_STATUSES } },
                     take: childLimitNumber,
                     skip: childOffset,
                     include: {
                         author_ref: { select: { username: true, avatar_id: true } },
+                        _count: { select: { child_comments: true, upvoters: true, downvoters: true } },
                     },
                 },
                 _count: { select: { child_comments: true, upvoters: true, downvoters: true } },
@@ -68,14 +71,14 @@ router.get('/:community_name/replies/:post_short_id', async (request, response) 
         }
 
         const totalComments = await prisma.comment.count({
-            where: { post_id: post.id, parent_comment_id: null },
+            where: { post_id: post.id, parent_comment_id: null, status: { in: VISIBLE_COMMENT_STATUSES } },
         });
 
         const totalPages = Math.ceil(totalComments / limitNumber);
 
         response.json({
-            post,
-            comments,
+            post: toPublicPost(post),
+            comments: comments.map((comment) => toPublicComment(comment)),
             pagination: PaginationUtils.preparePaginationResponse(pageNumber, totalPages, totalComments),
         });
     } catch (error) {

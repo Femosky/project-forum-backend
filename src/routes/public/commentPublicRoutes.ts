@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { CommentService } from '../../services/CommentService';
 import prisma from '../../prismaConnection';
 import PaginationUtils from '../../utils/paginationUtils';
+import { toPublicComment, VISIBLE_COMMENT_STATUSES, VISIBLE_POST_STATUSES } from '../../utils/ContentSerializer';
 const router = Router();
 
 // Get comment
@@ -22,13 +23,19 @@ router.get('/:community_name/replies/:post_short_id/reply/:comment_short_id', as
 
     const parentComment = await prisma.comment.findUnique({
         where: { short_id: comment_short_id },
+        include: { post_ref: { select: { short_id: true, status: true } } },
     });
-    if (!parentComment) {
+    if (
+        !parentComment ||
+        !VISIBLE_COMMENT_STATUSES.includes(parentComment.status) ||
+        parentComment.post_ref.short_id !== post_short_id ||
+        !VISIBLE_POST_STATUSES.includes(parentComment.post_ref.status)
+    ) {
         return response.status(404).json({ error: 'Parent comment not found' });
     }
 
     const comments = await prisma.comment.findMany({
-        where: { parent_comment_id: parentComment.id },
+        where: { parent_comment_id: parentComment.id, status: { in: VISIBLE_COMMENT_STATUSES } },
         take: limitNumber,
         skip: offset,
         orderBy: CommentService.getSortOrder(sort_by as string) as any,
@@ -43,13 +50,13 @@ router.get('/:community_name/replies/:post_short_id/reply/:comment_short_id', as
     }
 
     const totalComments = await prisma.comment.count({
-        where: { parent_comment_id: parentComment.id },
+        where: { parent_comment_id: parentComment.id, status: { in: VISIBLE_COMMENT_STATUSES } },
     });
 
     const totalPages = Math.ceil(totalComments / limitNumber);
 
     response.json({
-        comments,
+        comments: comments.map((comment) => toPublicComment(comment)),
         pagination: PaginationUtils.preparePaginationResponse(pageNumber, totalPages, totalComments),
     });
 });
