@@ -1,7 +1,10 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { badRequest, forbidden, parse } from '../../lib/http';
-import { postInclude, toPublicComment, toPublicPost } from '../../lib/serializers';
+import { LISTED_POST_STATUSES, postInclude, toPublicComment, toPublicPost } from '../../lib/serializers';
+import { urlKey } from '../../lib/urls';
+import { fetchLinkPreview } from '../../lib/linkPreview';
 import { isTurnstileEnabled, requireTurnstile } from '../../lib/turnstile';
 import { AuthRequest, optionalAuth, requireAuth, viewerOf } from '../../middlewares/auth';
 import { assertCanParticipate, findCommunity, viewerContext } from '../communities/access';
@@ -9,7 +12,7 @@ import { assertCommentable, createComment, listPostComments } from '../comments/
 import { notifyForComment } from '../notifications/service';
 import { postViewerState, votePost } from '../votes/service';
 import { commentsQuery, createCommentSchema, createPostSchema, updatePostSchema, voteSchema } from './schema';
-import { createPost, findVisiblePost } from './service';
+import { createPost, findVisiblePost, serializePosts } from './service';
 
 const router = Router();
 
@@ -44,6 +47,31 @@ router.post('/', requireAuth, async (request: AuthRequest, response) => {
 
     const context = await viewerContext(request.viewer);
     response.status(201).json({ post: toPublicPost(post, context) });
+});
+
+const linkQuery = z.object({ url: z.string().trim().min(1).max(2048) });
+
+// Earlier posts of the same link in public communities, so the composer can say "this was already posted in..."
+router.get('/duplicates', optionalAuth, async (request: AuthRequest, response) => {
+    const { url } = parse(linkQuery, request.query);
+    const key = urlKey(url);
+    if (!key) return response.json({ posts: [] });
+    const rows = await prisma.post.findMany({
+        where: { url_key: key, status: { in: LISTED_POST_STATUSES }, community: { visibility: 'public', status: 'active' } },
+        orderBy: { created_at: 'desc' },
+        take: 5,
+        include: postInclude,
+    });
+    response.json({ posts: await serializePosts(rows, await viewerContext(request.viewer)) });
+});
+
+// A preview card for a link while composing (signed in only, so this isn't a free fetch-anything proxy).
+// The fetcher refuses private addresses, caps size and time, and an unreachable page is just no preview.
+router.get('/link-preview', requireAuth, async (request: AuthRequest, response) => {
+    const { url } = parse(linkQuery, request.query);
+    if (!urlKey(url)) throw badRequest('Enter a full link, starting with https://', 'invalid_url');
+    const preview = await fetchLinkPreview(url).catch(() => null);
+    response.json({ preview });
 });
 
 router.get('/:id', optionalAuth, async (request: AuthRequest, response) => {
