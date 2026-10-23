@@ -95,3 +95,28 @@ describe('related posts', () => {
         expect(response.body.more_from_community[0]).toMatchObject({ community: 'lounge', slug: 'best-suya-spots' });
     });
 });
+
+describe('page status for crawlers', () => {
+    it('gives canonical paths for live pages, gone for deleted ones and missing for unknown or private', async () => {
+        const alice = await signUp('alice');
+        await createCommunity(alice.agent, 'lounge');
+        await createCommunity(alice.agent, 'secret', { visibility: 'private' });
+        const post = await createPost(alice.agent, 'lounge', { title: 'Renting a flat in Yaba', body: LONG_BODY });
+        const hidden = await createPost(alice.agent, 'secret', { title: 'Hidden', body: LONG_BODY });
+
+        const status = (query: string) => api().get(`/v1/seo/status?${query}`).then((response) => response.body);
+
+        expect(await status(`type=post&id=${post.short_id.toUpperCase()}`)).toEqual({ state: 'live', path: `/c/lounge/${post.short_id}/renting-a-flat-in-yaba` });
+        expect(await status(`type=post&id=${hidden.short_id}`)).toEqual({ state: 'missing' });
+        expect(await status('type=post&id=nothere1')).toEqual({ state: 'missing' });
+        await alice.agent.delete(`/v1/posts/${post.id}`);
+        expect(await status(`type=post&id=${post.short_id}`)).toEqual({ state: 'gone' });
+
+        expect(await status('type=community&id=Lounge')).toEqual({ state: 'live', path: '/c/lounge' });
+        expect(await status('type=community&id=nope')).toEqual({ state: 'missing' });
+        expect(await status('type=user&id=alice')).toEqual({ state: 'live', path: '/u/alice' });
+        await prisma.user.update({ where: { id: alice.user.id }, data: { status: 'deleted' } });
+        expect(await status('type=user&id=alice')).toEqual({ state: 'gone' });
+        expect((await api().get('/v1/seo/status?type=thing&id=x')).status).toBe(400);
+    });
+});

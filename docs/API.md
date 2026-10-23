@@ -116,6 +116,7 @@ Data for the web app's sitemaps; the web app caches it.
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/sitemap` | `{ posts, communities, users }`, each a list of `{ page, lastmod }` chunks of up to 50,000 URLs |
+| GET | `/status?type=post\|community\|user&id=` | `{ state: 'live', path }`, `{ state: 'gone' }` (deleted or removed) or `{ state: 'missing' }`, so the web app can answer crawlers with 301/404/410 |
 | GET | `/sitemap/:kind/:page` | `kind` is `posts` (`community, short_id, slug, lastmod`), `communities` (`name, lastmod`) or `users` (`username, lastmod`) |
 
 A post is indexable when it is active or locked in a public community, isn't a very short text post (under 40 characters of title and body) without replies, and, if its author's account was under a day old when posting, has a reply or an upvote. Users are listed when they have at least one indexable, non-anonymous post. With `INDEXNOW_KEY` set, new indexable posts are pinged to IndexNow (Bing, Yandex); the web app must serve the same key at `/indexnow-key.txt`.

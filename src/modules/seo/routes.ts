@@ -4,6 +4,8 @@ import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { notFound, parse } from '../../lib/http';
 import { INDEXABLE_POST_SQL } from '../../lib/indexing';
+import { idOrShortId } from '../../lib/ids';
+import { postPath } from './jobs';
 
 // Data for the web app's sitemaps. Sitemaps hold at most 50,000 URLs each, so every list is split into numbered
 // chunks in a stable order (oldest first: a chunk only changes when its posts are edited or new ones fill the last
@@ -79,6 +81,44 @@ router.get('/sitemap/:kind/:page', async (request, response) => {
 
     if (urls.length === 0 && page > 1) throw notFound('No such sitemap page');
     response.json({ urls });
+});
+
+// What a crawler should get for a page, so the web app can answer bots with real status codes (301 to the
+// canonical URL, 404, or 410 for content that was deleted or removed) before rendering anything.
+// "live" pages answer with their canonical path; private-community posts look missing, as they do to guests.
+const statusQuery = z.object({
+    type: z.enum(['post', 'community', 'user']),
+    id: z.string().trim().min(1).max(100),
+});
+
+type PageState = { state: 'live'; path: string } | { state: 'gone' } | { state: 'missing' };
+
+async function pageState(type: 'post' | 'community' | 'user', id: string): Promise<PageState> {
+    if (type === 'post') {
+        const where = idOrShortId(id) as Prisma.PostWhereUniqueInput;
+        const post = await prisma.post.findUnique({
+            where,
+            select: { short_id: true, slug: true, status: true, community: { select: { name: true, status: true, visibility: true } } },
+        });
+        if (!post || post.status === 'pending' || post.community.visibility !== 'public') return { state: 'missing' };
+        if (post.status === 'deleted' || post.status === 'removed' || post.community.status === 'deleted') return { state: 'gone' };
+        return { state: 'live', path: postPath(post) };
+    }
+    if (type === 'community') {
+        const community = await prisma.community.findUnique({ where: { name: id.toLowerCase() }, select: { name: true, status: true } });
+        if (!community) return { state: 'missing' };
+        if (community.status === 'deleted') return { state: 'gone' };
+        return { state: 'live', path: `/c/${community.name}` };
+    }
+    const user = await prisma.user.findUnique({ where: { username: id.toLowerCase() }, select: { username: true, status: true } });
+    if (!user) return { state: 'missing' };
+    if (user.status === 'deleted') return { state: 'gone' };
+    return { state: 'live', path: `/u/${user.username}` };
+}
+
+router.get('/status', async (request, response) => {
+    const { type, id } = parse(statusQuery, request.query);
+    response.json(await pageState(type, id));
 });
 
 export default router;
