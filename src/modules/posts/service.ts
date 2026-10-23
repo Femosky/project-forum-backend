@@ -6,6 +6,7 @@ import { notFound } from '../../lib/http';
 import { hotRank, TopWindow, topWindowStart } from '../../lib/ranking';
 import { LISTED_POST_STATUSES, postInclude, PostRow, toPublicPost } from '../../lib/serializers';
 import { slugify } from '../../lib/slug';
+import { urlKey } from '../../lib/urls';
 import { assertCanView, canModerate, ViewerContext } from '../communities/access';
 import { postViewerState } from '../votes/service';
 import { linkPreviewJob } from './jobs';
@@ -96,6 +97,7 @@ export async function createPost(input: CreatePostInput) {
                     title: input.title,
                     body: input.body,
                     url: input.url ?? null,
+                    url_key: input.url ? urlKey(input.url) : null,
                     is_anonymous: input.is_anonymous,
                     is_nsfw: input.is_nsfw,
                     flair_id: input.flair_id ?? null,

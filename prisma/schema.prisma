@@ -344,6 +344,8 @@ model Post {
   title        String
   body         String   @default("")
   url          String?
+  // The url with tracking parameters, fragment, "www." and trailing slash removed, for duplicate checks
+  url_key      String?
   // { title, description, image, site } filled in by the link-preview job
   link_preview Json?
   ai_summary   String?
@@ -376,6 +378,7 @@ model Post {
   // Feed indexes. Status is left out on purpose: almost every post is listed, so scanning in rank order and
   // filtering status (and community visibility) stops after one page, while a status column in the index
   // (filtered with IN) would force a sort.
+  @@index([url_key, created_at(sort: Desc)])
   @@index([community_id, hot_rank(sort: Desc), id(sort: Desc)])
   @@index([community_id, created_at(sort: Desc), id(sort: Desc)])
   @@index([community_id, score(sort: Desc), id(sort: Desc)])

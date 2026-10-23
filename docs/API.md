@@ -37,6 +37,8 @@ Everything lives under `/v1`. Requests and responses are JSON. Auth is cookie-ba
 |---|---|---|
 | GET | `/feed?sort=hot\|new\|top&t=hour\|day\|week\|month\|year\|all&scope=home\|all` | Signed in: joined communities (falls back to all). Guests: all public communities |
 | POST | `/posts` | `community, type: text\|link, title (3-300), body (≤40k), url?, is_anonymous?, is_nsfw?, flair_id?` |
+| GET | `/posts/duplicates?url=` | Up to 5 earlier posts of the same link in public communities (tracking parameters, `www.` and trailing slashes ignored) |
+| GET | `/posts/link-preview?url=` | Signed in: `{ preview: { title, description, image, site } \| null }` for the composer |
 | GET | `/posts/:id` | |
 | PATCH | `/posts/:id` | Author only: `body, is_nsfw, flair_id`. Titles can't change |
 | DELETE | `/posts/:id` | Author only |
