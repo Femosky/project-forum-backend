@@ -61,6 +61,7 @@ router.post('/join', async (request: AuthRequest, response) => {
 
         const isUserAlreadyMember = await prisma.community.findFirst({
             where: {
+                id: community_id,
                 members: {
                     some: { id: user.id },
                 },
@@ -170,7 +171,7 @@ router.post('/create-community', async (request: AuthRequest, response) => {
         // Check for spaces or special characters in name
         const communityNameError = validateCommunityName(name);
 
-        if (!communityNameError) {
+        if (communityNameError) {
             return response.status(400).json({ error: communityNameError } as ErrorResponse);
         }
 
