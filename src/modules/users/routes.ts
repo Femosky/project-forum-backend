@@ -78,16 +78,65 @@ router.get('/me/saved', requireAuth, async (request: AuthRequest, response) => {
         },
         orderBy: [{ created_at: 'desc' }, { comment_id: 'desc' }],
         take: query.limit + 1,
-        include: { comment: { include: { ...commentInclude, post: { select: { community_id: true, short_id: true, title: true } } } } },
+        include: {
+            comment: {
+                include: {
+                    ...commentInclude,
+                    post: { select: { community_id: true, short_id: true, slug: true, title: true, community: { select: { name: true } } } },
+                },
+            },
+        },
     });
     const { items, next_cursor } = paginate(rows.map((row) => ({ ...row, id: row.comment_id })), query.limit, 'created_at');
     const { votes, saved } = await commentViewerState(user.id, items.map((row) => row.comment_id));
     response.json({
         comments: items.map((row) => ({
             ...toPublicComment(row.comment, row.comment.post.community_id, context, votes, saved),
-            post: { short_id: row.comment.post.short_id, title: row.comment.post.title },
+            post: {
+                short_id: row.comment.post.short_id,
+                slug: row.comment.post.slug,
+                title: row.comment.post.title,
+                community: row.comment.post.community.name,
+            },
         })),
         next_cursor,
+    });
+});
+
+// Everything the account has written or chosen, as one JSON download (anonymous posts included: they're yours)
+router.get('/me/export', requireAuth, async (request: AuthRequest, response) => {
+    const { user } = viewerOf(request);
+    const [posts, comments, postVotes, commentVotes, savedPosts, savedComments, memberships, sessions] = await Promise.all([
+        prisma.post.findMany({
+            where: { author_id: user.id },
+            orderBy: { created_at: 'asc' },
+            select: {
+                short_id: true, type: true, title: true, body: true, url: true, is_anonymous: true, status: true,
+                created_at: true, edited_at: true, community: { select: { name: true } },
+            },
+        }),
+        prisma.comment.findMany({
+            where: { author_id: user.id },
+            orderBy: { created_at: 'asc' },
+            select: { short_id: true, body: true, is_anonymous: true, status: true, created_at: true, edited_at: true, post: { select: { short_id: true } } },
+        }),
+        prisma.postVote.findMany({ where: { user_id: user.id }, select: { value: true, created_at: true, post: { select: { short_id: true } } } }),
+        prisma.commentVote.findMany({ where: { user_id: user.id }, select: { value: true, created_at: true, comment: { select: { short_id: true } } } }),
+        prisma.savedPost.findMany({ where: { user_id: user.id }, select: { created_at: true, post: { select: { short_id: true } } } }),
+        prisma.savedComment.findMany({ where: { user_id: user.id }, select: { created_at: true, comment: { select: { short_id: true } } } }),
+        prisma.communityMember.findMany({ where: { user_id: user.id }, select: { role: true, joined_at: true, community: { select: { name: true } } } }),
+        prisma.session.findMany({ where: { user_id: user.id }, select: { created_at: true, last_used_at: true, browser: true, os: true, country: true } }),
+    ]);
+    response.setHeader('Content-Disposition', `attachment; filename="${user.username}-data.json"`);
+    response.json({
+        exported_at: new Date(),
+        account: toPrivateUser(user),
+        posts,
+        comments,
+        votes: { posts: postVotes, comments: commentVotes },
+        saved: { posts: savedPosts, comments: savedComments },
+        communities: memberships,
+        sessions,
     });
 });
 

@@ -90,7 +90,8 @@ Everything lives under `/v1`. Requests and responses are JSON. Auth is cookie-ba
 | GET | `/users/:username/posts`, `/users/:username/comments` | Never includes anonymous content or private communities |
 | PATCH | `/users/me` | `display_name, avatar_id` |
 | GET | `/users/me/communities` | Joined communities with your role |
-| GET | `/users/me/saved?type=posts\|comments` | |
+| GET | `/users/me/saved?type=posts\|comments` | Saved comments carry `post: { short_id, slug, title, community }` |
+| GET | `/users/me/export` | Everything the account wrote or chose, as a JSON download |
 | DELETE | `/users/me` | `{ password }`; detaches your name from past content |
 | GET | `/search?q=&type=posts\|communities&page=` | Postgres full-text search; supports `"phrases"` and `-exclusions` |
 | GET | `/search/autocomplete?q=` | Community and username prefixes |
