@@ -5,10 +5,15 @@ import { TokenPair } from '../../services/PasswordService';
 import { UAParser } from 'ua-parser-js';
 import { LoginSession, User } from '@prisma/client';
 import { ErrorResponse } from '../../models/interfaces/errorType';
-import { DeviceDetailsUtils } from '../../utils/DeviceDetailsUtils';
-import { authenticateToken, AuthRequest } from '../../middlewares/authMiddleware';
+import { AuthRequest } from '../../middlewares/authMiddleware';
+import { env } from '../../config/env';
+import { CookieOptions } from 'express';
+import ms from 'ms';
+import { sendServerError } from '../../utils/errorUtils';
 
 const router = Router();
+
+const INVALID_CREDENTIALS = 'Invalid email, username or password.';
 
 // Is user authenticated
 router.get('/is-authenticated', async (request: AuthRequest, response) => {
@@ -27,9 +32,7 @@ router.get('/is-authenticated', async (request: AuthRequest, response) => {
 
         return response.json({ message: 'User already logged in.' });
     } catch (error) {
-        return response
-            .status(500)
-            .json({ error: 'Failed to check if user is authenticated.', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to check if user is authenticated.', error);
     }
 });
 // Login a user
@@ -37,10 +40,22 @@ router.post('/login', async (request, response) => {
     await loginUser(request, response);
 });
 
+// Secure + SameSite=Lax works when the web app and API share a parent domain (e.g. *.oskeylabs.com)
+function cookieOptions(maxAge?: ms.StringValue): CookieOptions {
+    return {
+        httpOnly: true,
+        secure: env.IS_PRODUCTION,
+        sameSite: 'lax',
+        path: '/',
+        domain: env.COOKIE_DOMAIN,
+        ...(maxAge ? { maxAge: ms(maxAge) } : {}),
+    };
+}
+
 function clearCookies(response: Response) {
-    response.clearCookie(PasswordService.ACCESS_TOKEN_NAME);
-    response.clearCookie(PasswordService.REFRESH_TOKEN_NAME);
-    response.clearCookie(PasswordService.SESSION_COOKIE_NAME);
+    response.clearCookie(PasswordService.ACCESS_TOKEN_NAME, cookieOptions());
+    response.clearCookie(PasswordService.REFRESH_TOKEN_NAME, cookieOptions());
+    response.clearCookie(PasswordService.SESSION_COOKIE_NAME, cookieOptions());
 }
 
 // Logout a user
@@ -48,10 +63,11 @@ router.get('/logout', async (request: AuthRequest, response) => {
     const refreshToken = request.cookies.refresh_token;
 
     try {
+        // Already logged out: nothing to invalidate
         if (!refreshToken) {
-            throw new Error('Refresh token not provided.');
+            clearCookies(response);
+            return response.status(200).json({ success: true, message: 'Logged out successfully.' });
         }
-        console.log('HIT LOGOUT ROUTE?');
 
         const decoded: DecodedJWTToken | null = await PasswordService.verifyRefreshToken(refreshToken);
         if (!decoded) {
@@ -96,7 +112,7 @@ router.get('/logout', async (request: AuthRequest, response) => {
 
         response.status(200).json({ success: true, message: 'Logged out successfully.' });
     } catch (error) {
-        response.status(500).json({ error: 'Failed to logout.', details: error } as ErrorResponse);
+        sendServerError(response, 'Failed to logout.', error);
     }
 });
 
@@ -181,25 +197,19 @@ async function loginUser(request: Request, response: Response) {
             user = (await prisma.user.findUnique({
                 where: { username: username.toLowerCase() },
             })) as User | null;
-        } else {
-            return response.json({ error: 'Email or username is required.' });
         }
 
-        if (!user) {
-            return response.json({ error: 'User not found.' });
-        }
-
-        // Verify password
-        const isPasswordValid = await PasswordService.verifyPassword(password, user.password_hash);
-        if (!isPasswordValid) {
-            return response.json({ error: 'Invalid password.' });
+        // Same message and status whether the account exists or not, so logins can't probe for accounts
+        const isPasswordValid = user ? await PasswordService.verifyPassword(password, user.password_hash) : false;
+        if (!user || !isPasswordValid) {
+            return response.status(401).json({ error: INVALID_CREDENTIALS } as ErrorResponse);
         }
 
         // Check if user is already logged in via refresh token
         if (refreshToken && sessionId) {
             const decoded: DecodedJWTToken | null = await PasswordService.verifyRefreshToken(refreshToken);
             if (decoded) {
-                return response.json({ error: 'User already logged in.' });
+                return response.status(400).json({ error: 'User already logged in.' } as ErrorResponse);
             }
 
             const loginSession = await prisma.loginSession.findUnique({
@@ -214,15 +224,6 @@ async function loginUser(request: Request, response: Response) {
                 return response.status(400).json({ error: 'User is already logged in.' } as ErrorResponse);
             }
         }
-
-        // Get login session details
-        const loginSessionDetails = await getLoginSessionDetails(request);
-
-        // const loginSessions = await prisma.loginSession.findMany({
-        //     where: { user_id: user.id, is_active: true },
-        // });
-
-        const userIPInformation = await DeviceDetailsUtils.getUserIPInformation(request);
 
         // Generate tokens
         const tokens: TokenPair | ErrorResponse = await generateTokens(user);
@@ -255,54 +256,30 @@ async function loginUser(request: Request, response: Response) {
 
         // const isProduction = process.env.NODE_ENV === 'production';
 
-        const isCookiesSet = await setCookies(response, tokens, loginSession);
-
-        if (isCookiesSet) {
-            return response
-                .status(500)
-                .json({ error: isCookiesSet.error, details: isCookiesSet.details } as ErrorResponse);
-        }
+        setCookies(response, tokens, loginSession);
 
         response.json({ success: true, user: safeUser });
     } catch (error) {
-        response.status(500).json({ error: 'Failed to login.', details: error } as ErrorResponse);
+        sendServerError(response, 'Failed to login.', error);
     }
 }
 
-async function setCookies(
-    response: Response,
-    tokens: TokenPair,
-    loginSession: LoginSession
-): Promise<null | ErrorResponse> {
-    try {
-        response.cookie(PasswordService.ACCESS_TOKEN_NAME, tokens.access_token, {
-            httpOnly: true,
-            // secure: false,
-            // sameSite: 'lax',
-            // path: '/',
-            // maxAge: PasswordService.ACCESS_TOKEN_EXPIRATION,
-        });
-
-        response.cookie(PasswordService.REFRESH_TOKEN_NAME, tokens.refresh_token, {
-            httpOnly: true,
-            // secure: false,
-            // sameSite: 'lax',
-            // path: '/',
-            // maxAge: PasswordService.REFRESH_TOKEN_EXPIRATION,
-        });
-
-        response.cookie(PasswordService.SESSION_COOKIE_NAME, loginSession.id, {
-            httpOnly: true,
-            // secure: false,
-            // sameSite: 'lax',
-            // path: '/',
-            // maxAge: PasswordService.SESSION_COOKIE_EXPIRATION,
-        });
-
-        return null;
-    } catch (error) {
-        return { error: 'Failed to set cookies.', details: error } as ErrorResponse;
-    }
+function setCookies(response: Response, tokens: TokenPair, loginSession: LoginSession) {
+    response.cookie(
+        PasswordService.ACCESS_TOKEN_NAME,
+        tokens.access_token,
+        cookieOptions(PasswordService.ACCESS_TOKEN_EXPIRATION)
+    );
+    response.cookie(
+        PasswordService.REFRESH_TOKEN_NAME,
+        tokens.refresh_token,
+        cookieOptions(PasswordService.REFRESH_TOKEN_EXPIRATION)
+    );
+    response.cookie(
+        PasswordService.SESSION_COOKIE_NAME,
+        loginSession.id,
+        cookieOptions(PasswordService.REFRESH_TOKEN_EXPIRATION)
+    );
 }
 
 async function signupUser(request: Request, response: Response) {
@@ -358,7 +335,7 @@ async function signupUser(request: Request, response: Response) {
 
         await loginUser(request, response);
     } catch (error) {
-        response.status(500).json({ error: 'Failed to create user', details: error } as ErrorResponse);
+        sendServerError(response, 'Failed to create user', error);
     }
 }
 
@@ -382,43 +359,34 @@ async function refreshToken(request: Request, response: Response) {
             return response.status(500).json({ error: 'Could not generate new access token.' });
         }
 
-        response.cookie(PasswordService.ACCESS_TOKEN_NAME, newAccessToken, {
-            httpOnly: true,
-            // secure: false,
-            // sameSite: 'lax',
-            // path: '/',
-            // maxAge: PasswordService.ACCESS_TOKEN_EXPIRATION,
-        });
+        response.cookie(
+            PasswordService.ACCESS_TOKEN_NAME,
+            newAccessToken,
+            cookieOptions(PasswordService.ACCESS_TOKEN_EXPIRATION)
+        );
 
         response.json({ success: true, message: 'New access token refreshed successfully.' });
     } catch (error) {
-        response.status(500).json({ error: 'Failed to refresh token.', details: error } as ErrorResponse);
+        sendServerError(response, 'Failed to refresh token.', error);
     }
 }
 
-async function getLoginSessionDetails(request: any): Promise<LoginSessionDetails> {
-    try {
-        const parser = new UAParser();
-        const result = parser.getResult();
-        const userAgent = result.ua;
-        const browser = result.browser.name;
-        const os = result.os.name;
-        const device = result.device.type;
-        const ipAddress =
-            request.headers.get('x-forwarded-for') ||
-            request.headers.get('x-real-ip') ||
-            'unknown' ||
-            (request as any).ip;
+function getLoginSessionDetails(request: Request): LoginSessionDetails {
+    const result = new UAParser(request.headers['user-agent']).getResult();
 
-        return { userAgent, browser, os, device, ipAddress };
-    } catch (error) {
-        return { userAgent: null, browser: null, os: null, device: null, ipAddress: null, error: error as string };
-    }
+    return {
+        userAgent: result.ua || null,
+        browser: result.browser.name,
+        os: result.os.name,
+        device: result.device.type,
+        // request.ip honours X-Forwarded-For because 'trust proxy' is set in index.ts
+        ipAddress: request.ip,
+    };
 }
 
-async function createLoginSession(user: User, tokens: TokenPair, request: any) {
+async function createLoginSession(user: User, tokens: TokenPair, request: Request) {
     // Create login session
-    const { userAgent, browser, os, device, ipAddress } = await getLoginSessionDetails(request);
+    const { userAgent, browser, os, device, ipAddress } = getLoginSessionDetails(request);
     const longLivedExpiry = PasswordService.getTokenExpiry(tokens.refresh_token);
 
     if (!longLivedExpiry) {

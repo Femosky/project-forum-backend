@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { User } from '@prisma/client';
 import { DecodedTokenWithUser, PasswordService } from '../services/PasswordService';
 import prisma from '../prismaConnection';
+import { sendServerError } from '../utils/errorUtils';
 
 export type AuthRequest = Request & { user?: User };
 
@@ -13,7 +14,6 @@ export async function authenticateToken(request: AuthRequest, response: Response
     const refreshToken = request.cookies.refresh_token;
 
     if (!accessToken && !refreshToken) {
-        console.log('Unauthorized, no access token or refresh token provided MIDDLEWARE.');
         return response.status(401).json({ error: 'Unauthorized, no access token or refresh token provided.' });
     }
 
@@ -28,6 +28,6 @@ export async function authenticateToken(request: AuthRequest, response: Response
         request.user = decodedToken.user as User;
         next();
     } catch (error) {
-        return response.status(500).json({ error: { message: 'Failed to authenticate token.', stack: error } });
+        return sendServerError(response, 'Failed to authenticate token.', error);
     }
 }

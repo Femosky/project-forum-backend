@@ -8,6 +8,7 @@ import { CommentService } from '../../services/CommentService';
 import PaginationUtils from '../../utils/paginationUtils';
 import { toPublicComment } from '../../utils/ContentSerializer';
 import { ModeratorService } from '../../services/ModeratorService';
+import { sendServerError } from '../../utils/errorUtils';
 
 const router = Router();
 
@@ -70,6 +71,10 @@ router.post('/create', async (request: AuthRequest, response) => {
                 parent_comment_id,
                 is_anonymous: is_anonymous || false,
             },
+            include: {
+                author_ref: { select: { username: true, avatar_id: true } },
+                _count: { select: { child_comments: true, upvoters: true, downvoters: true } },
+            },
         });
 
         if (!comment) {
@@ -78,7 +83,7 @@ router.post('/create', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Comment created successfully', comment });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to create comment', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to create comment', error);
     }
 });
 
@@ -141,7 +146,7 @@ router.post('/upvote', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Comment upvoted successfully', comment });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to upvote comment', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to upvote comment', error);
     }
 });
 
@@ -187,9 +192,7 @@ router.post('/remove-upvote', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Upvote removed from comment successfully', comment });
     } catch (error) {
-        return response
-            .status(500)
-            .json({ error: 'Failed to remove upvote from comment', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to remove upvote from comment', error);
     }
 });
 
@@ -260,7 +263,7 @@ router.post('/downvote', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Comment downvoted successfully', comment });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to downvote comment', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to downvote comment', error);
     }
 });
 
@@ -306,9 +309,7 @@ router.post('/remove-downvote', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Downvote removed from comment successfully', comment });
     } catch (error) {
-        return response
-            .status(500)
-            .json({ error: 'Failed to remove downvote from comment', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to remove downvote from comment', error);
     }
 });
 
@@ -349,7 +350,7 @@ router.post('/edit-comment', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Comment edited successfully', comment });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to edit comment', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to edit comment', error);
     }
 });
 
@@ -390,7 +391,7 @@ router.post('/delete-comment', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Comment deleted successfully', comment });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to delete comment', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to delete comment', error);
     }
 });
 
@@ -439,7 +440,7 @@ router.post('/pin-comment', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Comment pinned successfully', post });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to pin comment', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to pin comment', error);
     }
 });
 
@@ -487,7 +488,7 @@ router.post('/unpin-comment', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Comment unpinned successfully', post });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to unpin comment', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to unpin comment', error);
     }
 });
 
@@ -537,7 +538,7 @@ router.post('/remove-comment', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Comment removed successfully', comment });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to remove comment', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to remove comment', error);
     }
 });
 
@@ -587,7 +588,7 @@ router.post('/hide-comment', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Comment hidden successfully', comment });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to hide comment', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to hide comment', error);
     }
 });
 
@@ -637,7 +638,7 @@ router.post('/unhide-comment', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Comment unhidden successfully', comment });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to unhide comment', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to unhide comment', error);
     }
 });
 
@@ -680,7 +681,7 @@ router.post('/report-comment', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Comment reported successfully', community });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to report comment', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to report comment', error);
     }
 });
 
@@ -735,7 +736,7 @@ router.post('/save-comment', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Comment saved successfully' });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to save comment', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to save comment', error);
     }
 });
 
@@ -790,7 +791,7 @@ router.post('/unsave-comment', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Comment unsaved successfully' });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to unsave comment', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to unsave comment', error);
     }
 });
 
@@ -881,9 +882,7 @@ router.get('/saved-comments', async (request: AuthRequest, response) => {
             pagination: PaginationUtils.preparePaginationResponse(pageNumber, totalPages, totalSavedComments),
         });
     } catch (error) {
-        return response
-            .status(500)
-            .json({ error: 'Failed to retrieve saved comments', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to retrieve saved comments', error);
     }
 });
 
@@ -928,7 +927,7 @@ router.get('/check-saved-status/:comment_id', async (request: AuthRequest, respo
             comment_id: comment_id,
         });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to check saved status', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to check saved status', error);
     }
 });
 

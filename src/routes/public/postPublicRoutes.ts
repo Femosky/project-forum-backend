@@ -7,6 +7,7 @@ import { PostService } from '../../services/PostService';
 import { CommentService } from '../../services/CommentService';
 import PaginationUtils from '../../utils/paginationUtils';
 import { toPublicComment, toPublicPost, VISIBLE_COMMENT_STATUSES, VISIBLE_POST_STATUSES } from '../../utils/ContentSerializer';
+import { sendServerError } from '../../utils/errorUtils';
 
 const router = Router();
 
@@ -82,7 +83,7 @@ router.get('/:community_name/replies/:post_short_id', async (request, response) 
             pagination: PaginationUtils.preparePaginationResponse(pageNumber, totalPages, totalComments),
         });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to get comments', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to get comments', error);
     }
 });
 

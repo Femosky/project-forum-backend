@@ -4,6 +4,7 @@ import { AuthRequest } from '../../middlewares/authMiddleware';
 import { ErrorResponse } from '../../models/interfaces/errorType';
 import { AVATAR_OPTIONS } from '../../models/interfaces/avatar';
 import { PasswordService } from '../../services/PasswordService';
+import { sendServerError } from '../../utils/errorUtils';
 
 const router = Router();
 
@@ -35,7 +36,7 @@ router.post('/change/avatar', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Avatar changed successfully' });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to change avatar', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to change avatar', error);
     }
 });
 
@@ -69,7 +70,7 @@ router.post('/change/password', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Password changed successfully' });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to change password', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to change password', error);
     }
 });
 
@@ -97,7 +98,7 @@ router.post('/change/display-name', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Display name changed successfully' });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to change display name', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to change display name', error);
     }
 });
 
@@ -170,7 +171,7 @@ router.post('/delete/account', async (request: AuthRequest, response) => {
 
         return response.status(200).json({ message: 'Account deleted successfully' });
     } catch (error) {
-        return response.status(500).json({ error: 'Failed to delete account', details: error } as ErrorResponse);
+        return sendServerError(response, 'Failed to delete account', error);
     }
 });
 

@@ -15,7 +15,6 @@ export class DeviceDetailsUtils {
         try {
             const ip = request.socket.remoteAddress;
             // const lookup = await maxmind.open('./dependencies/GeoLite2-ASN.mmdb');
-            console.log(ip);
             // const result = lookup.get(ip);
 
             // if (!result) {
