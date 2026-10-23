@@ -1,4 +1,3 @@
-import { Request } from 'express';
 import { z, ZodError } from 'zod';
 
 // Thrown from routes and services; the error handler turns it into a JSON response.
@@ -36,8 +35,6 @@ export function parse<T extends z.ZodType>(schema: T, input: unknown): z.infer<T
     if (!result.success) throw validationError(result.error);
     return result.data;
 }
-
-export const isV1 = (request: Request) => request.originalUrl.startsWith('/v1');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

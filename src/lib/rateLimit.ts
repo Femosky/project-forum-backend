@@ -77,12 +77,8 @@ export function limiter({ name, windowMs, limit, message, skipGet, store }: Limi
         keyGenerator: userOrIpKey,
         store: store ?? createStore(name, windowMs),
         skip: (request) => env.IS_TEST || (skipGet === true && request.method === 'GET'),
-        // Matches both error shapes: legacy clients read `error` as a string, v1 clients read error.code
         handler: (request, response) => {
-            const isV1 = request.originalUrl.startsWith('/v1');
-            response
-                .status(429)
-                .json({ error: isV1 ? { code: 'rate_limited', message } : message });
+            response.status(429).json({ error: { code: 'rate_limited', message } });
         },
     });
 }

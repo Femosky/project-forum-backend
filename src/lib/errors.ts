@@ -1,16 +1,13 @@
 import { NextFunction, Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { ZodError } from 'zod';
-import { HttpError, isV1, validationError } from './http';
+import { HttpError, validationError } from './http';
 
-// /v1 errors look like { error: { code, message, fields? } }. The legacy routes keep { error: message }.
+// Errors look like { error: { code, message, fields? } }
 function send(request: Request, response: Response, error: HttpError) {
-    if (isV1(request)) {
-        return response.status(error.status).json({
-            error: { code: error.code, message: error.message, ...(error.fields ? { fields: error.fields } : {}) },
-        });
-    }
-    return response.status(error.status).json({ error: error.message });
+    return response.status(error.status).json({
+        error: { code: error.code, message: error.message, ...(error.fields ? { fields: error.fields } : {}) },
+    });
 }
 
 export function notFoundHandler(request: Request, response: Response) {

@@ -18,7 +18,6 @@ import userRoutes from './modules/users/routes';
 import feedRoutes from './modules/feed/routes';
 import searchRoutes from './modules/search/routes';
 import moderationRoutes from './modules/moderation/routes';
-import legacyRoutes from './legacy/routes';
 
 const app = express();
 
@@ -92,10 +91,6 @@ v1.get('/health', (request, response) => {
     response.json({ status: 'ok' });
 });
 app.use('/v1', v1);
-
-// --- Deprecated pre-v1 routes the current web app still uses ---
-app.use('/auth/login', authLimiter);
-app.use(legacyRoutes);
 
 app.get('/', (request, response) => {
     response.send('Welcome to the "Project Forum" API. See /v1.');

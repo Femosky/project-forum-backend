@@ -106,14 +106,6 @@ describe('refresh token rotation', () => {
         expect((await agent.get('/v1/auth/me')).status).toBe(200);
     });
 
-    it('keeps the old GET /auth/refresh-token route working', async () => {
-        await signUp('alice');
-        const login = await api().post('/auth/login').send({ username: 'alice', password: PASSWORD });
-        const response = await api().get('/auth/refresh-token').set('Cookie', `refresh_token=${cookieValue(login, 'refresh_token')}`);
-        expect(response.status).toBe(200);
-        expect(cookieValue(response, 'access_token')).toBeDefined();
-    });
-
     it('stops accepting the access token after logout', async () => {
         const { agent } = await signUp('alice');
         expect((await agent.get('/v1/auth/me')).status).toBe(200);
@@ -191,21 +183,17 @@ describe('error responses (bug 11)', () => {
     it('returns JSON errors without internal details', async () => {
         const notFound = await api().get('/no-such-route');
         expect(notFound.status).toBe(404);
-        expect(notFound.body).toEqual({ error: 'Not found' });
+        expect(notFound.body).toEqual({ error: { code: 'not_found', message: 'Not found' } });
 
-        const badJson = await api().post('/auth/login').set('Content-Type', 'application/json').send('{bad');
+        const badJson = await api().post('/v1/auth/login').set('Content-Type', 'application/json').send('{bad');
         expect(badJson.status).toBe(400);
-        expect(badJson.body).toEqual({ error: 'Invalid JSON body' });
-
-        const badJsonV1 = await api().post('/v1/auth/login').set('Content-Type', 'application/json').send('{bad');
-        expect(badJsonV1.body).toEqual({ error: { code: 'invalid_json', message: 'Invalid JSON body' } });
+        expect(badJson.body).toEqual({ error: { code: 'invalid_json', message: 'Invalid JSON body' } });
 
         // A malformed id is a 404, not a database error
         expect((await api().get('/v1/posts/not-a-real-id')).status).toBe(404);
     });
 
     it('logs out cleanly without a session', async () => {
-        expect((await api().get('/auth/logout')).status).toBe(200);
         expect((await api().post('/v1/auth/logout')).status).toBe(200);
     });
 });
