@@ -6,6 +6,7 @@ import { isTurnstileEnabled, requireTurnstile } from '../../lib/turnstile';
 import { AuthRequest, optionalAuth, requireAuth, viewerOf } from '../../middlewares/auth';
 import { assertCanParticipate, findCommunity, viewerContext } from '../communities/access';
 import { assertCommentable, createComment, listPostComments } from '../comments/service';
+import { notifyForComment } from '../notifications/service';
 import { postViewerState, votePost } from '../votes/service';
 import { commentsQuery, createCommentSchema, createPostSchema, updatePostSchema, voteSchema } from './schema';
 import { createPost, findVisiblePost } from './service';
@@ -155,6 +156,7 @@ router.post('/:id/comments', requireAuth, async (request: AuthRequest, response)
         parentId: input.parent_id,
         isAnonymous: input.is_anonymous,
     });
+    await notifyForComment(comment);
     response.status(201).json({ comment: { ...toPublicComment(comment, post.community_id, context), replies: [], more_replies: 0 } });
 });
 

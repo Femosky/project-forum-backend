@@ -95,6 +95,16 @@ Everything lives under `/v1`. Requests and responses are JSON. Auth is cookie-ba
 | GET | `/search?q=&type=posts\|communities&page=` | Postgres full-text search; supports `"phrases"` and `-exclusions` |
 | GET | `/search/autocomplete?q=` | Community and username prefixes |
 
+## Notifications `/v1/notifications`
+
+Created when someone comments on your post (`post_reply`), replies to your comment (`comment_reply`) or mentions you as `@name` or `u/name` in a comment (`mention`, at most 5 per comment). Never for your own comments, from people you blocked, or twice for one comment. Anonymous commenters show as `actor: null`.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/?cursor=` | Newest first: `{ notifications: [{ id, type, created_at, read_at, actor, post: { short_id, slug, title, community }, comment: { short_id, excerpt } }], next_cursor, unread_count }`. Deleted or removed comments drop out |
+| GET | `/unread-count` | `{ count }`, for polling |
+| POST | `/read` | `{ ids? }`; no ids marks everything read. Returns the new `{ count }` |
+
 ## Operations
 
 - **Rate limits**: auth 20 per 15 minutes per IP, writes 60 per minute per account, reads 300 per minute per IP. Auth and write counters live in Postgres (`RATE_LIMIT_STORE=postgres`, the default), so they hold across instances without Redis.

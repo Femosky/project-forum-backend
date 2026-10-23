@@ -18,6 +18,7 @@ import userRoutes from './modules/users/routes';
 import feedRoutes from './modules/feed/routes';
 import searchRoutes from './modules/search/routes';
 import moderationRoutes from './modules/moderation/routes';
+import notificationRoutes from './modules/notifications/routes';
 
 const app = express();
 
@@ -86,6 +87,7 @@ v1.use('/posts', postRoutes);
 v1.use('/comments', commentRoutes);
 v1.use('/users', userRoutes);
 v1.use('/search', searchRoutes);
+v1.use('/notifications', notificationRoutes);
 v1.use(moderationRoutes);
 v1.get('/health', (request, response) => {
     response.json({ status: 'ok' });

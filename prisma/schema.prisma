@@ -16,9 +16,9 @@ datasource db {
   extensions = [pg_trgm]
 }
 
-/*
-  Enums
-*/
+/**
+ * Enums
+ */
 
 enum UserStatus {
   active
@@ -113,9 +113,9 @@ enum AdFormat {
   thread_comment
 }
 
-/*
-  Users and auth
-*/
+/**
+ * Users and auth
+ */
 
 model User {
   id         String   @id @default(uuid(7)) @db.Uuid
@@ -163,6 +163,9 @@ model User {
   reports_sent     Report[]    @relation("reporter")
   reports_resolved Report[]    @relation("resolver")
   mod_actions      ModAction[]
+
+  notifications      Notification[] @relation("notification_recipient")
+  notifications_sent Notification[] @relation("notification_actor")
 
   @@index([status])
   @@index([username(ops: raw("gin_trgm_ops"))], map: "User_username_trgm_idx", type: Gin)
@@ -226,9 +229,9 @@ model Block {
   @@index([blocked_id])
 }
 
-/*
-  Communities
-*/
+/**
+ * Communities
+ */
 
 model Community {
   id         String   @id @default(uuid(7)) @db.Uuid
@@ -245,8 +248,8 @@ model Community {
   visibility   CommunityVisibility @default(public)
   is_nsfw      Boolean             @default(false)
 
-  created_by    String @db.Uuid
-  created_by_ref User  @relation("created_communities", fields: [created_by], references: [id])
+  created_by     String @db.Uuid
+  created_by_ref User   @relation("created_communities", fields: [created_by], references: [id])
 
   member_count Int @default(0)
   post_count   Int @default(0)
@@ -320,9 +323,9 @@ model Flair {
   @@unique([community_id, name])
 }
 
-/*
-  Content
-*/
+/**
+ * Content
+ */
 
 model Post {
   id         String   @id @default(uuid(7)) @db.Uuid
@@ -365,9 +368,10 @@ model Post {
 
   search_vector Unsupported("tsvector")?
 
-  comments Comment[]
-  votes    PostVote[]
-  saves    SavedPost[]
+  comments      Comment[]
+  votes         PostVote[]
+  saves         SavedPost[]
+  notifications Notification[]
 
   // Feed indexes. Status is left out on purpose: almost every post is listed, so scanning in rank order and
   // filtering status (and community visibility) stops after one page, while a status column in the index
@@ -415,8 +419,9 @@ model Comment {
   // Wilson score lower bound, for "best" sort
   best_rank      Float @default(0)
 
-  votes CommentVote[]
-  saves SavedComment[]
+  votes         CommentVote[]
+  saves         SavedComment[]
+  notifications Notification[]
 
   @@index([post_id, depth, best_rank(sort: Desc), id(sort: Desc)])
   @@index([post_id, depth, created_at(sort: Desc), id(sort: Desc)])
@@ -474,9 +479,9 @@ model SavedComment {
   @@index([user_id, created_at(sort: Desc)])
 }
 
-/*
-  Moderation
-*/
+/**
+ * Moderation
+ */
 
 model Report {
   id         String   @id @default(uuid(7)) @db.Uuid
@@ -486,11 +491,11 @@ model Report {
   reporter_id String @db.Uuid
   reporter    User   @relation("reporter", fields: [reporter_id], references: [id], onDelete: Cascade)
 
-  target_type ReportTargetType
-  target_id   String           @db.Uuid
+  target_type  ReportTargetType
+  target_id    String           @db.Uuid
   // The community whose mod queue sees it; null for user/site-level reports
-  community_id String?    @db.Uuid
-  community    Community? @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  community_id String?          @db.Uuid
+  community    Community?       @relation(fields: [community_id], references: [id], onDelete: Cascade)
 
   reason_code ReportReason
   note        String?
@@ -526,9 +531,9 @@ model ModAction {
   @@index([target_type, target_id])
 }
 
-/*
-  Rate limiting (Postgres-backed, so limits hold across instances without Redis)
-*/
+/**
+ * Rate limiting (Postgres-backed, so limits hold across instances without Redis)
+ */
 
 model RateLimit {
   key      String   @id
@@ -538,9 +543,9 @@ model RateLimit {
   @@index([reset_at])
 }
 
-/*
-  Ads (schema only; the ad server arrives in Phase 6). Money is stored in minor units with an explicit currency.
-*/
+/**
+ * Ads (schema only; the ad server arrives in Phase 6). Money is stored in minor units with an explicit currency.
+ */
 
 model Advertiser {
   id            String   @id @default(uuid(7)) @db.Uuid
@@ -598,4 +603,38 @@ model AdDailyStat {
   clicks      Int        @default(0)
 
   @@id([creative_id, date])
+}
+
+/**
+ * Notifications
+ */
+
+enum NotificationType {
+  post_reply
+  comment_reply
+  mention
+}
+
+// In-app notifications. Each points at the comment that caused it; one per recipient per comment.
+model Notification {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  created_at DateTime @default(now())
+
+  user_id  String  @db.Uuid
+  user     User    @relation("notification_recipient", fields: [user_id], references: [id], onDelete: Cascade)
+  // Kept even for anonymous comments (so blocks still apply); hidden when serialised
+  actor_id String? @db.Uuid
+  actor    User?   @relation("notification_actor", fields: [actor_id], references: [id], onDelete: SetNull)
+
+  type       NotificationType
+  post_id    String           @db.Uuid
+  post       Post             @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  comment_id String           @db.Uuid
+  comment    Comment          @relation(fields: [comment_id], references: [id], onDelete: Cascade)
+
+  read_at DateTime?
+
+  @@unique([user_id, comment_id])
+  @@index([user_id, created_at(sort: Desc), id(sort: Desc)])
+  @@index([user_id, read_at])
 }
