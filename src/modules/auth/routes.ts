@@ -2,6 +2,7 @@ import { Request, Response, Router } from 'express';
 import prisma from '../../prismaConnection';
 import { HttpError, badRequest, conflict, notFound, parse, unauthorized, uuidParam } from '../../lib/http';
 import { createStore } from '../../lib/rateLimit';
+import { track } from '../../lib/analytics';
 import { isTurnstileEnabled, requireTurnstile } from '../../lib/turnstile';
 import { AuthRequest, requireAuth, viewerOf } from '../../middlewares/auth';
 import { verifyGoogleIdToken } from './google';
@@ -99,6 +100,7 @@ router.post('/signup', async (request, response) => {
         password_hash: await hashPassword(input.password),
     });
     await sendVerificationEmail(user);
+    track('signup', user.id, { method: 'email' });
 
     setAuthCookies(response, await createSession(user, request));
     response.status(201).json({ user: toPrivateUser(user) });
@@ -219,6 +221,7 @@ router.post('/google', async (request, response) => {
     }
 
     user = await assertCanSignIn(user);
+    if (created) track('signup', user.id, { method: 'google' });
     setAuthCookies(response, await createSession(user, request));
     response.status(created ? 201 : 200).json({ user: toPrivateUser(user), created });
 });

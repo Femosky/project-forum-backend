@@ -1,0 +1,48 @@
+name: Deploy
+
+# After CI passes on main: apply migrations to Neon, then ask Render to deploy. Each step is skipped until its
+# secret exists, so this stays green before hosting is set up (docs/DEPLOY.md).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      # Direct (non-pooled) Neon URL: Prisma's advisory lock must not go through the pooler
+      DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Apply migrations
+        if: env.DIRECT_DATABASE_URL != ''
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+          PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK: '1'
+
+      - name: Deploy to Render
+        if: env.RENDER_DEPLOY_HOOK_URL != ''
+        run: curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL" > /dev/null
+
+      - name: Not configured yet
+        if: env.DIRECT_DATABASE_URL == '' && env.RENDER_DEPLOY_HOOK_URL == ''
+        run: echo "No deploy secrets set; see docs/DEPLOY.md"

@@ -3,6 +3,7 @@ import app from './app';
 import logger from './lib/logger';
 import { startJobs, stopJobs } from './lib/jobs';
 import prisma from './prismaConnection';
+import { flushAnalytics } from './lib/analytics';
 
 const server = app.listen(env.PORT, () => {
     logger.info(`Server is running on port: ${env.PORT}`);
@@ -14,6 +15,7 @@ async function shutdown(signal: string) {
     logger.info({ signal }, 'Shutting down');
     server.close();
     await stopJobs().catch(() => undefined);
+    await flushAnalytics();
     await prisma.$disconnect();
     process.exit(0);
 }

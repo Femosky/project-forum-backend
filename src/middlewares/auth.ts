@@ -3,6 +3,7 @@ import { User } from '@prisma/client';
 import prisma from '../prismaConnection';
 import { unauthorized } from '../lib/http';
 import { ACCESS_COOKIE, verifyAccessToken } from '../modules/auth/tokens';
+import { trackActive } from '../lib/analytics';
 
 export type Viewer = { user: User; sessionId: string };
 export type AuthRequest = Request & { viewer?: Viewer; viewerResolved?: boolean };
@@ -14,6 +15,7 @@ async function resolveViewer(request: AuthRequest): Promise<Viewer | null> {
     if (request.viewerResolved) return request.viewer ?? null;
     request.viewerResolved = true;
     request.viewer = (await lookupViewer(request)) ?? undefined;
+    if (request.viewer) trackActive(request.viewer.user.id);
     return request.viewer ?? null;
 }
 

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { track } from '../../lib/analytics';
 import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { parse } from '../../lib/http';
@@ -33,6 +34,7 @@ router.get('/', optionalAuth, async (request: AuthRequest, response) => {
             LIMIT ${PAGE_SIZE + 1} OFFSET ${offset}`;
         const rows = await prisma.community.findMany({ where: { id: { in: ids.slice(0, PAGE_SIZE).map((row) => row.id) } } });
         const byId = new Map(rows.map((row) => [row.id, row]));
+        trackSearch(request, query, ids.length);
         return response.json({
             communities: ids.slice(0, PAGE_SIZE).flatMap((row) => (byId.has(row.id) ? [toPublicCommunity(byId.get(row.id)!)] : [])),
             next_page: ids.length > PAGE_SIZE && query.page < MAX_PAGE ? query.page + 1 : null,
@@ -49,11 +51,24 @@ router.get('/', optionalAuth, async (request: AuthRequest, response) => {
     const pageIds = ids.slice(0, PAGE_SIZE).map((row) => row.id);
     const rows = await prisma.post.findMany({ where: { id: { in: pageIds } }, include: postInclude });
     const ordered = pageIds.flatMap((id) => rows.filter((row) => row.id === id));
+    trackSearch(request, query, ids.length);
     response.json({
         posts: await serializePosts(ordered, await viewerContext(request.viewer)),
         next_page: ids.length > PAGE_SIZE && query.page < MAX_PAGE ? query.page + 1 : null,
     });
 });
+
+// First pages only, so paging through results isn't counted as more searches. The words are kept (lowercased,
+// capped) because searches that find nothing show which threads the site is missing.
+function trackSearch(request: AuthRequest, query: z.infer<typeof searchQuery>, found: number) {
+    if (query.page !== 1) return;
+    track('search', request.viewer?.user.id, {
+        type: query.type,
+        query: query.q.toLowerCase().slice(0, 100),
+        results: Math.min(found, PAGE_SIZE),
+        no_results: found === 0,
+    });
+}
 
 const autocompleteQuery = z.object({ q: z.string().trim().min(1).max(50) });
 
