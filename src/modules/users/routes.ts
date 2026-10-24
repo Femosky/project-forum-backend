@@ -176,6 +176,8 @@ router.get('/:username', async (request, response) => {
     const user = await findPublicUser(String(request.params.username));
     response.json({
         user: {
+            // For reporting a user
+            id: user.id,
             username: user.username,
             display_name: user.display_name,
             avatar_id: user.avatar_id,
