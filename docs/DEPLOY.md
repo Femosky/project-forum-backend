@@ -50,10 +50,11 @@ Optional; each feature turns itself off without its key, and the boot log warns 
 | Variable | What it does | Where to get it |
 |---|---|---|
 | `RESEND_API_KEY`, `EMAIL_FROM` | Verification and password-reset email. Without it, emails only go to the log. | resend.com → API Keys; verify `forum.oskeylabs.com` as a sending domain. `EMAIL_FROM` like `Forum <no-reply@forum.oskeylabs.com>` |
-| `TURNSTILE_SECRET_KEY` | Bot challenge on signup, risky logins and first-day posts. **Leave unset for now:** the web app has no Turnstile widget yet, so setting it would block every signup. | Cloudflare → Turnstile → add site |
+| `TURNSTILE_SECRET_KEY` | Bot check on signup, password reset, repeated failed logins and a new account's first-day posts. Set it together with the web app's `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (one without the other blocks signups or skips the check). | Cloudflare → Turnstile → Add widget → Secret key |
 | `GOOGLE_CLIENT_ID` | "Continue with Google". The web app has no Google button yet, so this can wait. | Google Cloud console → OAuth client (web), origin `https://forum.oskeylabs.com` |
 | `POSTHOG_API_KEY` | Product analytics (see below) | posthog.com, **EU** cloud → Project settings → Project API key |
 | `POSTHOG_HOST` | Defaults to `https://eu.i.posthog.com` | |
+| `SENTRY_DSN` | Error alerts: unexpected errors (500s, crashes) with the route and request id, never bodies or cookies. Repeats within a minute are sent once. | sentry.io → project (Node.js) → Settings → Client Keys (DSN) |
 | `INDEXNOW_KEY` | Pings Bing when a post is created. Leave unset while the site is private. | any 8-128 letters/digits, same value in the web app |
 | `JOBS_ENABLED` | `false` on the free tier: jobs run inline, so nothing keeps Neon awake | |
 | `ADSENSE_ENABLED` + `ADSENSE_*` ids | Only after AdSense approves the site | AdSense → Ads → By ad unit |
@@ -72,6 +73,22 @@ Events go from the API to PostHog's batch endpoint every 10 seconds (`src/lib/an
 | `search` | first page of a search | `type`, `query` (lowercased), `results`, `no_results` |
 
 Page views and shares come from the web app. Return visits (D1/D7/D30) are a PostHog Retention insight: first event `signup`, returning event `user_active`.
+
+## Backups
+
+`.github/workflows/backup.yml` runs every Sunday at 03:00 UTC (and on demand: Actions → Backup → Run workflow). It dumps the database over the direct connection, restores the dump into a scratch Postgres 17 and compares tables and row counts (`scripts/backup-check.sh`), then encrypts it with `BACKUP_PASSPHRASE` and keeps it as a workflow artifact for 35 days. The repo is public, so the dump is never stored unencrypted. A failed run emails you.
+
+Needs the repo secrets `DIRECT_DATABASE_URL` (already set for deploys) and `BACKUP_PASSPHRASE` (a long random string; keep a copy in your password manager, because without it the backups can't be opened).
+
+Neon's own restore history covers "undo the last few hours"; these weekly dumps cover losing the Neon project itself.
+
+To restore:
+
+1. Actions → Backup → pick a run → download the artifact and unzip it.
+2. `gpg --decrypt forum-db-YYYY-MM-DD.dump.gpg > backup.dump` (asks for the passphrase).
+3. In Neon, create an empty database or branch to restore into, and copy its direct URL.
+4. `pg_restore --no-owner --no-privileges --dbname="<direct URL>" backup.dump` (pg_restore 17 or newer).
+5. Point `DATABASE_URL` on Render (and the GitHub secret) at it once it looks right.
 
 ## Free-tier notes
 

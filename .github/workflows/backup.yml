@@ -1,0 +1,69 @@
+name: Backup
+
+# Weekly dump of the production database, restored into a throwaway Postgres to prove it works, then encrypted and
+# kept as a workflow artifact for 35 days. The repo is public, so the dump is only ever stored encrypted with
+# BACKUP_PASSPHRASE. A failed run (dump or restore check) emails the repo owner. Restore steps: docs/DEPLOY.md.
+on:
+  schedule:
+    - cron: '0 3 * * 0' # Sundays 03:00 UTC
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    environment: production
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: restore_check
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+      BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+      RESTORE_URL: postgresql://postgres:postgres@localhost:5432/restore_check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check secrets
+        run: |
+          if [ -z "$DIRECT_DATABASE_URL" ] || [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "Set DIRECT_DATABASE_URL and BACKUP_PASSPHRASE (docs/DEPLOY.md)"; exit 1
+          fi
+
+      # The dump client must be at least the server's version (Neon runs Postgres 17)
+      - name: Install Postgres 17 client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common > /dev/null
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y > /dev/null
+          sudo apt-get install -y -qq postgresql-client-17 > /dev/null
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+
+      - name: Dump
+        run: pg_dump --format=custom --no-owner --no-privileges --file=backup.dump "$DIRECT_DATABASE_URL"
+
+      - name: Restore into a scratch database and compare
+        run: scripts/backup-check.sh backup.dump "$DIRECT_DATABASE_URL" "$RESTORE_URL"
+
+      - name: Encrypt
+        run: |
+          name="forum-db-$(date -u +%Y-%m-%d).dump.gpg"
+          gpg --batch --yes --symmetric --cipher-algo AES256 --passphrase "$BACKUP_PASSPHRASE" --output "$name" backup.dump
+          rm backup.dump
+          echo "BACKUP_FILE=$name" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BACKUP_FILE }}
+          path: ${{ env.BACKUP_FILE }}
+          retention-days: 35
+          if-no-files-found: error
