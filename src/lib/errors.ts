@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { ZodError } from 'zod';
 import { HttpError, validationError } from './http';
+import { reportError } from './errorReport';
 
 // Errors look like { error: { code, message, fields? } }
 function send(request: Request, response: Response, error: HttpError) {
@@ -33,5 +34,7 @@ export function errorHandler(error: unknown, request: Request, response: Respons
     }
 
     request.log?.error({ err: error }, 'Unhandled error');
+    // The route pattern (/v1/posts/:id), not the URL, so ids and query strings stay out of the report
+    reportError(error, { method: request.method, path: request.baseUrl + (request.route?.path ?? ''), requestId: String(request.id ?? '') });
     return send(request, response, new HttpError(500, 'internal', 'Something went wrong'));
 }

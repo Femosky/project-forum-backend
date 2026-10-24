@@ -64,6 +64,9 @@ const envSchema = z.object({
     // Product analytics (PostHog). Events are sent from the API; without a key nothing is sent.
     POSTHOG_API_KEY: z.string().optional(),
     POSTHOG_HOST: z.string().url().default('https://eu.i.posthog.com'),
+
+    // Error alerts (Sentry project DSN). Without it errors are only logged.
+    SENTRY_DSN: z.string().url().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -85,6 +88,7 @@ if (parsed.data.NODE_ENV === 'production') {
         !parsed.data.COOKIE_DOMAIN && 'COOKIE_DOMAIN is not set, so the web app on another subdomain will not see sign-in cookies',
         !parsed.data.RESEND_API_KEY && 'RESEND_API_KEY is not set, so emails are logged instead of sent',
         !parsed.data.POSTHOG_API_KEY && 'POSTHOG_API_KEY is not set, so no analytics are recorded',
+        !parsed.data.SENTRY_DSN && 'SENTRY_DSN is not set, so errors are only logged',
     ].filter(Boolean);
     for (const warning of warnings) console.warn(`Config warning: ${warning}`);
 }
