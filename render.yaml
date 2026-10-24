@@ -1,0 +1,50 @@
+# Render Blueprint for the API (docs/DEPLOY.md). Free web service in Ohio, next to the Neon database (us-east-2).
+# Deploys are triggered by GitHub Actions after CI passes and migrations have run, so autoDeploy is off.
+services:
+  - type: web
+    name: forum-api
+    runtime: node
+    plan: free
+    region: ohio
+    branch: main
+    autoDeploy: false
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: LOG_LEVEL
+        value: info
+      # Pooled Neon URL (host contains "-pooler") for the app
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: WEB_ORIGIN
+        sync: false
+      - key: WEB_URL
+        sync: false
+      - key: COOKIE_DOMAIN
+        sync: false
+      # The free instance sleeps when idle; inline jobs keep Neon free to scale to zero as well
+      - key: JOBS_ENABLED
+        value: "false"
+      - key: RATE_LIMIT_STORE
+        value: postgres
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: TURNSTILE_SECRET_KEY
+        sync: false
+      - key: INDEXNOW_KEY
+        sync: false
+      - key: POSTHOG_API_KEY
+        sync: false
+      - key: ADSENSE_ENABLED
+        value: "false"

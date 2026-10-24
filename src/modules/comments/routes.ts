@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { track } from '../../lib/analytics';
 import { Prisma, User } from '@prisma/client';
 import prisma from '../../prismaConnection';
 import { badRequest, forbidden, notFound, parse } from '../../lib/http';
@@ -96,6 +97,7 @@ router.put('/:id/vote', requireAuth, async (request: AuthRequest, response) => {
         throw badRequest("You can't vote on this comment.", 'comment_unavailable');
     }
     await assertCanParticipate(comment.post.community, user);
+    track('vote', user.id, { target: 'comment', value });
     response.json(await voteComment(comment.id, user.id, value));
 });
 

@@ -60,6 +60,10 @@ const envSchema = z.object({
     ADSENSE_FEED_SLOT: z.string().regex(/^\d+$/).optional(),
     ADSENSE_FEED_LAYOUT_KEY: z.string().max(40).optional(),
     ADSENSE_THREAD_SLOT: z.string().regex(/^\d+$/).optional(),
+
+    // Product analytics (PostHog). Events are sent from the API; without a key nothing is sent.
+    POSTHOG_API_KEY: z.string().optional(),
+    POSTHOG_HOST: z.string().url().default('https://eu.i.posthog.com'),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -73,6 +77,18 @@ if (!parsed.success) {
 }
 
 const WEB_ORIGINS = parsed.data.WEB_ORIGIN.split(',').map((origin) => origin.trim());
+
+// A production server starts without these, but something visible is off; say so in the boot log (docs/DEPLOY.md)
+if (parsed.data.NODE_ENV === 'production') {
+    const warnings = [
+        WEB_ORIGINS.some((origin) => !origin.startsWith('https://')) && 'WEB_ORIGIN should only list https:// origins',
+        !parsed.data.COOKIE_DOMAIN && 'COOKIE_DOMAIN is not set, so the web app on another subdomain will not see sign-in cookies',
+        !parsed.data.RESEND_API_KEY && 'RESEND_API_KEY is not set, so emails are logged instead of sent',
+        !parsed.data.TURNSTILE_SECRET_KEY && 'TURNSTILE_SECRET_KEY is not set, so signup and posting challenges are skipped',
+        !parsed.data.POSTHOG_API_KEY && 'POSTHOG_API_KEY is not set, so no analytics are recorded',
+    ].filter(Boolean);
+    for (const warning of warnings) console.warn(`Config warning: ${warning}`);
+}
 
 export const env = {
     ...parsed.data,

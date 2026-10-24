@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { track } from '../../lib/analytics';
 import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { badRequest, forbidden, parse } from '../../lib/http';
@@ -57,6 +58,13 @@ router.post('/', requireAuth, async (request: AuthRequest, response) => {
     const context = await viewerContext(request.viewer);
     const created = toPublicPost(post, context);
     if (created.is_indexable) await indexNowJob.enqueue({ paths: [postPath(post)] });
+    // Anonymous posts are counted without their community, so the event can't be matched to the post
+    track('post_created', user.id, {
+        type: input.type,
+        anonymous: input.is_anonymous,
+        community: input.is_anonymous ? undefined : community.name,
+        held: post.status === 'pending',
+    });
     response.status(201).json({ post: created });
 });
 
@@ -167,6 +175,7 @@ router.put('/:id/vote', requireAuth, async (request: AuthRequest, response) => {
     if (post.status !== 'active' && post.status !== 'locked') throw badRequest("You can't vote on this post.", 'post_unavailable');
     await assertCanParticipate(post.community, user);
 
+    track('vote', user.id, { target: 'post', value });
     response.json(await votePost(post.id, user.id, value));
 });
 
@@ -227,6 +236,7 @@ router.post('/:id/comments', requireAuth, async (request: AuthRequest, response)
         heldReason: await screenContent({ user, kind: 'comment', body: input.body, postId: post.id }),
         shadowHidden: user.shadow_banned_at !== null,
     });
+    track('comment_created', user.id, { reply: Boolean(input.parent_id), anonymous: input.is_anonymous, held: comment.status === 'pending' });
     // Nobody hears about a comment that isn't visible yet
     if (comment.status === 'active' && !comment.shadow_hidden) await notifyForComment(comment);
     response.status(201).json({ comment: { ...toPublicComment(comment, post.community_id, context), replies: [], more_replies: 0 } });

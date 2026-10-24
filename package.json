@@ -2,6 +2,9 @@
     "name": "backend",
     "version": "1.0.0",
     "main": "build/index.js",
+    "engines": {
+        "node": ">=22"
+    },
     "scripts": {
         "dev": "nodemon src/index.ts",
         "build": "prisma generate && tsc -p .",
