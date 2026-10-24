@@ -59,6 +59,27 @@ export const pageQuery = z.object({
     limit: z.coerce.number().int().min(1).max(LIMITS.PAGE_SIZE_MAX).default(25),
 });
 
+// Directory categories. The key is stored on the community; the label is what people see.
+export const COMMUNITY_CATEGORIES = {
+    careers: 'Jobs & Careers',
+    tech: 'Tech & Startups',
+    relocation: 'Relocation & Visas',
+    education: 'Schools & Education',
+    housing: 'Rent & Housing',
+    money: 'Money & Banking',
+    business: 'Small Business',
+    cars: 'Cars',
+    health: 'Health',
+    relationships: 'Relationships',
+    sports: 'Sports',
+    food: 'Food',
+    entertainment: 'Entertainment',
+    other: 'Other',
+} as const;
+
+export type CommunityCategory = keyof typeof COMMUNITY_CATEGORIES;
+export const communityCategory = z.enum(Object.keys(COMMUNITY_CATEGORIES) as [CommunityCategory, ...CommunityCategory[]]);
+
 export const postSort = z.enum(['hot', 'new', 'top']).default('hot');
 export const topWindow = z.enum(['hour', 'day', 'week', 'month', 'year', 'all']).default('day');
 export const commentSort = z.enum(['best', 'top', 'new', 'old']).default('best');

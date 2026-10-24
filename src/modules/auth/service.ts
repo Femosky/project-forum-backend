@@ -8,6 +8,7 @@ import { HttpError, badRequest, conflict, unauthorized } from '../../lib/http';
 import { hashToken, randomToken, safeEqual } from '../../lib/tokens';
 import { linkEmail } from '../../lib/email';
 import { emailJob } from './jobs';
+import { trustFlags } from '../safety/policy';
 import {
     formatRefreshToken,
     newRefreshSecret,
@@ -45,6 +46,7 @@ export function toPrivateUser(user: User) {
         has_password: user.password_hash !== null,
         has_google: user.google_id !== null,
         created_at: user.created_at,
+        ...trustFlags(user),
     };
 }
 
@@ -264,9 +266,15 @@ export async function sendEmailChangeConfirmation(user: Pick<User, 'id' | 'email
     });
 }
 
-export function assertCanSignIn(user: User) {
+// Returns the user, with an expired suspension lifted
+export async function assertCanSignIn(user: User): Promise<User> {
+    if (user.status === 'suspended' && user.suspended_until && user.suspended_until <= new Date()) {
+        return prisma.user.update({ where: { id: user.id }, data: { status: 'active', suspended_until: null, suspension_reason: null } });
+    }
     if (user.status === 'suspended' || user.status === 'banned') {
-        throw new HttpError(403, 'account_suspended', 'This account is suspended.');
+        const until = user.status === 'suspended' && user.suspended_until ? ` until ${user.suspended_until.toUTCString()}` : '';
+        throw new HttpError(403, 'account_suspended', `This account is suspended${until}.`);
     }
     if (user.status === 'deleted') throw unauthorized('Invalid email, username or password.', 'invalid_credentials');
+    return user;
 }

@@ -4,7 +4,7 @@ import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
 import { idOrShortId, withShortIdRetry } from '../../lib/ids';
 import { notFound } from '../../lib/http';
 import { hotRank, TopWindow, topWindowStart } from '../../lib/ranking';
-import { LISTED_POST_STATUSES, postInclude, PostRow, toPublicPost } from '../../lib/serializers';
+import { isHiddenFrom, LISTED_POST_STATUSES, notShadowHidden, postInclude, PostRow, toPublicPost } from '../../lib/serializers';
 import { slugify } from '../../lib/slug';
 import { urlKey } from '../../lib/urls';
 import { assertCanView, canModerate, ViewerContext } from '../communities/access';
@@ -34,6 +34,7 @@ export async function listPosts({ where, sort, window = 'day', cursor, limit, co
             AND: [
                 where,
                 { status: { in: LISTED_POST_STATUSES } },
+                notShadowHidden(context),
                 since ? { created_at: { gte: since } } : {},
                 afterCursor(field, 'desc', decodeCursor(cursor)),
             ],
@@ -65,7 +66,7 @@ export async function findVisiblePost(idOrShort: string, viewerUser: User | unde
     const isAuthor = context?.userId === post.author_id;
     const visible =
         LISTED_POST_STATUSES.includes(post.status) || isMod || (post.status === 'pending' && isAuthor);
-    if (!visible || post.community.status === 'deleted') throw notFound('Post not found');
+    if (!visible || isHiddenFrom(post, context) || post.community.status === 'deleted') throw notFound('Post not found');
 
     await assertCanView(post.community, viewerUser);
     return post;
@@ -81,6 +82,9 @@ type CreatePostInput = {
     is_anonymous: boolean;
     is_nsfw: boolean;
     flair_id?: string;
+    // Held by the filters for review, or written by a shadow-banned account
+    held_reason: string | null;
+    shadow_hidden: boolean;
 };
 
 export async function createPost(input: CreatePostInput) {
@@ -101,12 +105,18 @@ export async function createPost(input: CreatePostInput) {
                     is_anonymous: input.is_anonymous,
                     is_nsfw: input.is_nsfw,
                     flair_id: input.flair_id ?? null,
+                    status: input.held_reason ? 'pending' : 'active',
+                    held_reason: input.held_reason,
+                    shadow_hidden: input.shadow_hidden,
                     created_at: now,
                     hot_rank: hotRank(0, now),
                 },
                 include: postInclude,
             });
-            await tx.community.update({ where: { id: input.communityId }, data: { post_count: { increment: 1 } } });
+            // Held and shadow-hidden posts aren't counted until (unless) they become visible
+            if (!input.held_reason && !input.shadow_hidden) {
+                await tx.community.update({ where: { id: input.communityId }, data: { post_count: { increment: 1 } } });
+            }
             return created;
         })
     );
@@ -130,7 +140,7 @@ export async function relatedPosts(post: { id: string; title: string; community_
         SELECT p."short_id", p."slug", p."title", c."name" AS community, p."score", p."comment_count"
         FROM q, "Post" p JOIN "Community" c ON c."id" = p."community_id"
         WHERE q.query IS NOT NULL AND p."id" <> ${post.id}::uuid
-          AND p."status" IN ('active', 'locked') AND c."status" = 'active' AND c."visibility" = 'public'
+          AND p."status" IN ('active', 'locked') AND NOT p."shadow_hidden" AND c."status" = 'active' AND c."visibility" = 'public'
           AND p."search_vector" @@ q.query
         ORDER BY ts_rank_cd(p."search_vector", q.query) DESC, p."hot_rank" DESC
         LIMIT ${RELATED_LIMIT}`;
@@ -142,6 +152,7 @@ export async function relatedPosts(post: { id: string; title: string; community_
             id: { not: post.id },
             short_id: { notIn: relatedIds },
             status: { in: LISTED_POST_STATUSES },
+            shadow_hidden: false,
             created_at: { gte: topWindowStart('month') },
         },
         orderBy: [{ score: 'desc' }, { id: 'desc' }],

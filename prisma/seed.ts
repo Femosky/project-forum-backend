@@ -26,6 +26,10 @@ async function devSeed() {
                     password_hash: passwordHash,
                     email_verified_at: new Date(),
                     adult_attested_at: new Date(),
+                    // A month old, so new-account limits don't get in the way of trying things out
+                    created_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+                    // femi can open /admin
+                    role: username === 'femi' ? 'admin' : 'user',
                 },
                 update: {},
             })
@@ -33,17 +37,17 @@ async function devSeed() {
     );
 
     const communities = [
-        { name: 'lagos_rent', description: 'Renting, agents, landlords and house hunting in Lagos.' },
-        { name: 'naija_tech', description: 'Jobs, tools and building tech in and from Nigeria.' },
-        { name: 'japa', description: 'Moving abroad: visas, schools, jobs and settling in.' },
-        { name: 'diaspora_home', description: 'Staying connected to home from London, Houston, Toronto and everywhere else.' },
+        { name: 'lagos_rent', category: 'housing', description: 'Renting, agents, landlords and house hunting in Lagos.' },
+        { name: 'naija_tech', category: 'tech', description: 'Jobs, tools and building tech in and from Nigeria.' },
+        { name: 'japa', category: 'relocation', description: 'Moving abroad: visas, schools, jobs and settling in.' },
+        { name: 'diaspora_home', category: 'other', description: 'Staying connected to home from London, Houston, Toronto and everywhere else.' },
     ];
     for (const [index, data] of communities.entries()) {
         const owner = users[index % users.length];
         const community = await prisma.community.upsert({
             where: { name: data.name },
             create: { ...data, created_by: owner.id, member_count: users.length },
-            update: {},
+            update: { category: data.category },
         });
         for (const user of users) {
             await prisma.communityMember.upsert({

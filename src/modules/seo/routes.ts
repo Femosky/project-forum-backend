@@ -98,9 +98,9 @@ async function pageState(type: 'post' | 'community' | 'user', id: string): Promi
         const where = idOrShortId(id) as Prisma.PostWhereUniqueInput;
         const post = await prisma.post.findUnique({
             where,
-            select: { short_id: true, slug: true, status: true, community: { select: { name: true, status: true, visibility: true } } },
+            select: { short_id: true, slug: true, status: true, shadow_hidden: true, community: { select: { name: true, status: true, visibility: true } } },
         });
-        if (!post || post.status === 'pending' || post.community.visibility !== 'public') return { state: 'missing' };
+        if (!post || post.status === 'pending' || post.shadow_hidden || post.community.visibility !== 'public') return { state: 'missing' };
         if (post.status === 'deleted' || post.status === 'removed' || post.community.status === 'deleted') return { state: 'gone' };
         return { state: 'live', path: postPath(post) };
     }

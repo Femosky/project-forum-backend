@@ -7,7 +7,9 @@ import { urlKey } from '../../lib/urls';
 import { fetchLinkPreview } from '../../lib/linkPreview';
 import { isTurnstileEnabled, requireTurnstile } from '../../lib/turnstile';
 import { AuthRequest, optionalAuth, requireAuth, viewerOf } from '../../middlewares/auth';
-import { assertCanParticipate, findCommunity, viewerContext } from '../communities/access';
+import { assertCanParticipate, assertCanPost, findCommunity, viewerContext } from '../communities/access';
+import { screenContent } from '../safety/filters';
+import { assertAnonymousAllowed, assertLinksAllowed, assertWithinYoungAccountLimits } from '../safety/policy';
 import { assertCommentable, createComment, listPostComments } from '../comments/service';
 import { notifyForComment } from '../notifications/service';
 import { postViewerState, votePost } from '../votes/service';
@@ -29,7 +31,11 @@ router.post('/', requireAuth, async (request: AuthRequest, response) => {
     }
 
     const community = await findCommunity(input.community);
-    await assertCanParticipate(community, user);
+    await assertCanPost(community, user);
+    const url = input.type === 'link' ? input.url : undefined;
+    assertAnonymousAllowed(user, input.is_anonymous);
+    assertLinksAllowed(user, [input.title, input.body], url);
+    await assertWithinYoungAccountLimits(user, 'post');
     if (input.flair_id && !(await prisma.flair.findFirst({ where: { id: input.flair_id, community_id: community.id } }))) {
         throw badRequest('That flair is not part of this community.', 'invalid_flair');
     }
@@ -40,10 +46,12 @@ router.post('/', requireAuth, async (request: AuthRequest, response) => {
         type: input.type,
         title: input.title,
         body: input.body,
-        url: input.type === 'link' ? input.url : undefined,
+        url,
         is_anonymous: input.is_anonymous,
         is_nsfw: input.is_nsfw || community.is_nsfw,
         flair_id: input.flair_id,
+        held_reason: await screenContent({ user, kind: 'post', title: input.title, body: input.body, url, communityId: community.id }),
+        shadow_hidden: user.shadow_banned_at !== null,
     });
 
     const context = await viewerContext(request.viewer);
@@ -60,7 +68,7 @@ router.get('/duplicates', optionalAuth, async (request: AuthRequest, response) =
     const key = urlKey(url);
     if (!key) return response.json({ posts: [] });
     const rows = await prisma.post.findMany({
-        where: { url_key: key, status: { in: LISTED_POST_STATUSES }, community: { visibility: 'public', status: 'active' } },
+        where: { url_key: key, status: { in: LISTED_POST_STATUSES }, shadow_hidden: false, community: { visibility: 'public', status: 'active' } },
         orderBy: { created_at: 'desc' },
         take: 5,
         include: postInclude,
@@ -104,15 +112,31 @@ router.patch('/:id', requireAuth, async (request: AuthRequest, response) => {
         throw badRequest('That flair is not part of this community.', 'invalid_flair');
     }
 
-    const updated = await prisma.post.update({
-        where: { id: post.id },
-        data: {
-            ...(input.body !== undefined && input.body !== post.body ? { body: input.body, edited_at: new Date() } : {}),
-            ...(input.is_nsfw !== undefined ? { is_nsfw: input.is_nsfw } : {}),
-            ...(input.flair_id !== undefined ? { flair_id: input.flair_id } : {}),
-        },
-        include: postInclude,
-    });
+    // An edit goes through the same checks as a new post, so a clean post can't be edited into a scam
+    const bodyChanged = input.body !== undefined && input.body !== post.body;
+    let heldReason: string | null = null;
+    if (bodyChanged) {
+        assertLinksAllowed(user, [input.body!]);
+        if (post.status === 'active') {
+            heldReason = await screenContent({ user, kind: 'post', body: input.body!, communityId: post.community_id });
+        }
+    }
+
+    const [updated] = await prisma.$transaction([
+        prisma.post.update({
+            where: { id: post.id },
+            data: {
+                ...(bodyChanged ? { body: input.body, edited_at: new Date() } : {}),
+                ...(input.is_nsfw !== undefined ? { is_nsfw: input.is_nsfw } : {}),
+                ...(input.flair_id !== undefined ? { flair_id: input.flair_id } : {}),
+                ...(heldReason ? { status: 'pending' as const, held_reason: heldReason, pinned_at: null } : {}),
+            },
+            include: postInclude,
+        }),
+        ...(heldReason && !post.shadow_hidden
+            ? [prisma.community.update({ where: { id: post.community_id }, data: { post_count: { decrement: 1 } } })]
+            : []),
+    ]);
     response.json({ post: toPublicPost(updated, context) });
 });
 
@@ -124,9 +148,12 @@ router.delete('/:id', requireAuth, async (request: AuthRequest, response) => {
     if (post.author_id !== user.id) throw forbidden('You can only delete your own posts.', 'not_author');
     if (post.status === 'deleted') return response.json({ success: true });
 
+    const wasCounted = (post.status === 'active' || post.status === 'locked') && !post.shadow_hidden;
     await prisma.$transaction([
         prisma.post.update({ where: { id: post.id }, data: { status: 'deleted', pinned_at: null } }),
-        prisma.community.update({ where: { id: post.community_id }, data: { post_count: { decrement: 1 } } }),
+        ...(wasCounted
+            ? [prisma.community.update({ where: { id: post.community_id }, data: { post_count: { decrement: 1 } } })]
+            : []),
     ]);
     response.json({ success: true });
 });
@@ -186,7 +213,10 @@ router.post('/:id/comments', requireAuth, async (request: AuthRequest, response)
     const context = await viewerContext(request.viewer);
     const post = await findVisiblePost(String(request.params.id), user, context);
     assertCommentable(post);
-    await assertCanParticipate(post.community, user);
+    await assertCanPost(post.community, user);
+    assertAnonymousAllowed(user, input.is_anonymous);
+    assertLinksAllowed(user, [input.body]);
+    await assertWithinYoungAccountLimits(user, 'comment');
 
     const comment = await createComment({
         postId: post.id,
@@ -194,8 +224,11 @@ router.post('/:id/comments', requireAuth, async (request: AuthRequest, response)
         body: input.body,
         parentId: input.parent_id,
         isAnonymous: input.is_anonymous,
+        heldReason: await screenContent({ user, kind: 'comment', body: input.body, postId: post.id }),
+        shadowHidden: user.shadow_banned_at !== null,
     });
-    await notifyForComment(comment);
+    // Nobody hears about a comment that isn't visible yet
+    if (comment.status === 'active' && !comment.shadow_hidden) await notifyForComment(comment);
     response.status(201).json({ comment: { ...toPublicComment(comment, post.community_id, context), replies: [], more_replies: 0 } });
 });
 

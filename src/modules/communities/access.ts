@@ -57,6 +57,20 @@ export async function assertCanParticipate(community: Community, user: User) {
     }
 }
 
+export async function activeMute(communityId: string, userId: string) {
+    const mute = await prisma.communityMute.findUnique({ where: { community_id_user_id: { community_id: communityId, user_id: userId } } });
+    return mute && mute.muted_until > new Date() ? mute : null;
+}
+
+// Posting and commenting: everything assertCanParticipate checks, plus community mutes
+export async function assertCanPost(community: Community, user: User) {
+    await assertCanParticipate(community, user);
+    const mute = await activeMute(community.id, user.id);
+    if (mute) {
+        throw forbidden(`You are muted in this community until ${mute.muted_until.toUTCString()}.`, 'muted');
+    }
+}
+
 export async function assertModerator(communityId: string, user: User) {
     if (user.role === 'admin') return null;
     const member = await findMembership(communityId, user.id);

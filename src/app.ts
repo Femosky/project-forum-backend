@@ -20,6 +20,7 @@ import searchRoutes from './modules/search/routes';
 import moderationRoutes from './modules/moderation/routes';
 import notificationRoutes from './modules/notifications/routes';
 import seoRoutes from './modules/seo/routes';
+import adminRoutes from './modules/admin/routes';
 
 const app = express();
 
@@ -58,6 +59,13 @@ const authLimiter = limiter({
     limit: 20,
     message: 'Too many attempts, please try again later.',
 });
+// New accounts per IP (Phase 5): a handful a day is plenty for a household or office; scripted signups stop here
+const signupLimiter = limiter({
+    name: 'signup',
+    windowMs: 24 * 60 * 60 * 1000,
+    limit: 5,
+    message: 'Too many new accounts from this network today. Please try again tomorrow.',
+});
 const writeLimiter = limiter({
     name: 'write',
     windowMs: 60 * 1000,
@@ -79,6 +87,7 @@ v1.use(readLimiter);
 for (const path of ['/auth/signup', '/auth/login', '/auth/forgot-password', '/auth/reset-password', '/auth/google', '/auth/verify-email']) {
     v1.use(path, authLimiter);
 }
+v1.post('/auth/signup', signupLimiter);
 // Identify the caller before the write limiter so limits are per account where possible
 v1.use(optionalAuth, writeLimiter);
 v1.use('/auth', authRoutes);
@@ -90,6 +99,7 @@ v1.use('/users', userRoutes);
 v1.use('/search', searchRoutes);
 v1.use('/notifications', notificationRoutes);
 v1.use('/seo', seoRoutes);
+v1.use('/admin', adminRoutes);
 v1.use(moderationRoutes);
 v1.get('/health', (request, response) => {
     response.json({ status: 'ok' });

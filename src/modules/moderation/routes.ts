@@ -6,25 +6,36 @@ import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
 import { badRequest, forbidden, notFound, parse, uuidParam } from '../../lib/http';
 import { postInclude, toPublicComment, toPublicPost } from '../../lib/serializers';
 import { AuthRequest, requireAuth, viewerOf } from '../../middlewares/auth';
-import { LIMITS, pageQuery } from '../../shared/validation';
+import { LIMITS, pageQuery, username } from '../../shared/validation';
 import { setCommentStatus } from '../comments/service';
 import { findVisibleComment } from '../comments/routes';
-import { assertModerator, findCommunity, viewerContext } from '../communities/access';
+import { assertModerator, findCommunity, findMembership, viewerContext } from '../communities/access';
 import { findVisiblePost } from '../posts/service';
+import { buildQueue, closeReports } from './queue';
 
-// Reports, the mod queue, moderator actions on posts and comments, and the mod log.
+// Reports, the mod queue, moderator actions on posts and comments, mutes, and the mod log.
 // Every action writes a ModAction row, which is the audit trail.
 
 const router = Router();
 
 const reason = z.string().trim().max(LIMITS.REASON_MAX).optional();
 
+// The roadmap's reasons first; the rest are kept for reports filed before Phase 5
+export const REPORT_REASONS = [
+    'spam', 'scam', 'harassment', 'hate', 'sexual', 'violence', 'misinformation', 'personal_info', 'other',
+    'self_harm', 'illegal', 'impersonation',
+] as const;
+
+const muteSchema = z.object({
+    username,
+    days: z.number().int().min(1).max(365),
+    reason,
+});
+
 const reportSchema = z.object({
     target_type: z.enum(['post', 'comment', 'user', 'community']),
     target_id: z.uuid(),
-    reason_code: z.enum([
-        'spam', 'harassment', 'hate', 'violence', 'sexual', 'self_harm', 'misinformation', 'illegal', 'impersonation', 'other',
-    ]),
+    reason_code: z.enum(REPORT_REASONS),
     note: z.string().trim().max(LIMITS.REPORT_NOTE_MAX).optional(),
 });
 
@@ -39,7 +50,7 @@ const commentActionSchema = z.object({ action: z.enum(['remove', 'approve', 'loc
 
 const reportsQuery = pageQuery.extend({ status: z.enum(['open', 'resolved', 'dismissed']).default('open') });
 
-const requireAdmin = (user: User) => {
+export const requireAdmin = (user: User) => {
     if (user.role !== 'admin') throw forbidden('Only site admins can do that.', 'not_admin');
 };
 
@@ -112,7 +123,7 @@ router.get('/communities/:name/reports', requireAuth, async (request: AuthReques
     response.json({ reports: items, next_cursor });
 });
 
-// Site-level reports (users and communities)
+// Site-level reports (users and communities); the admin queue in admin/routes.ts shows everything
 router.get('/admin/reports', requireAuth, async (request: AuthRequest, response) => {
     requireAdmin(viewerOf(request).user);
     const { items, next_cursor } = await listReports({ community_id: null }, parse(reportsQuery, request.query));
@@ -143,6 +154,92 @@ router.post('/reports/:id/resolve', requireAuth, async (request: AuthRequest, re
         },
     });
     response.json({ success: true, closed: result.count });
+});
+
+// Reports and held items waiting for this community's moderators
+router.get('/communities/:name/mod-queue', requireAuth, async (request: AuthRequest, response) => {
+    const { user } = viewerOf(request);
+    const community = await findCommunity(String(request.params.name));
+    await assertModerator(community.id, user);
+    const items = await buildQueue({ communityId: community.id }, await viewerContext(request.viewer));
+    response.json({ items });
+});
+
+// Who is banned or muted here
+router.get('/communities/:name/restrictions', requireAuth, async (request: AuthRequest, response) => {
+    const { user } = viewerOf(request);
+    const community = await findCommunity(String(request.params.name));
+    await assertModerator(community.id, user);
+    const now = new Date();
+    const [bans, mutes] = await Promise.all([
+        prisma.communityMember.findMany({
+            where: { community_id: community.id, is_banned: true, OR: [{ banned_until: null }, { banned_until: { gt: now } }] },
+            select: { banned_until: true, ban_reason: true, user: { select: { username: true } } },
+            take: 200,
+        }),
+        prisma.communityMute.findMany({
+            where: { community_id: community.id, muted_until: { gt: now } },
+            select: { muted_until: true, reason: true, user: { select: { username: true } } },
+            take: 200,
+        }),
+    ]);
+    response.json({
+        bans: bans.map((row) => ({ username: row.user.username, until: row.banned_until, reason: row.ban_reason })),
+        mutes: mutes.map((row) => ({ username: row.user.username, until: row.muted_until, reason: row.reason })),
+    });
+});
+
+// A mute stops someone posting and commenting here for a while; they can still read and stay a member
+router.post('/communities/:name/mutes', requireAuth, async (request: AuthRequest, response) => {
+    const { user } = viewerOf(request);
+    const community = await findCommunity(String(request.params.name));
+    const actor = await assertModerator(community.id, user);
+    const input = parse(muteSchema, request.body);
+
+    const target = await prisma.user.findUnique({ where: { username: input.username } });
+    if (!target) throw notFound('User not found');
+    if (target.id === user.id) throw badRequest("You can't mute yourself.", 'self_mute');
+    const member = await findMembership(community.id, target.id);
+    if (member?.role === 'owner') throw forbidden("The owner can't be muted.", 'cannot_mute_owner');
+    if (member?.role === 'moderator' && actor && actor.role !== 'owner') {
+        throw forbidden('Only the owner can mute a moderator.', 'cannot_mute_moderator');
+    }
+
+    const until = new Date(Date.now() + input.days * 24 * 60 * 60 * 1000);
+    await prisma.$transaction([
+        prisma.communityMute.upsert({
+            where: { community_id_user_id: { community_id: community.id, user_id: target.id } },
+            create: { community_id: community.id, user_id: target.id, muted_until: until, reason: input.reason ?? null, muted_by: user.id },
+            update: { muted_until: until, reason: input.reason ?? null, muted_by: user.id },
+        }),
+        prisma.modAction.create({
+            data: {
+                actor_id: user.id,
+                community_id: community.id,
+                action: 'mute_user',
+                target_type: 'user',
+                target_id: target.id,
+                reason: input.reason ?? null,
+                details: { until: until.toISOString() },
+            },
+        }),
+    ]);
+    response.json({ username: target.username, muted_until: until });
+});
+
+router.delete('/communities/:name/mutes/:username', requireAuth, async (request: AuthRequest, response) => {
+    const { user } = viewerOf(request);
+    const community = await findCommunity(String(request.params.name));
+    await assertModerator(community.id, user);
+    const target = await prisma.user.findUnique({ where: { username: String(request.params.username).toLowerCase() } });
+    const result = target
+        ? await prisma.communityMute.deleteMany({ where: { community_id: community.id, user_id: target.id } })
+        : { count: 0 };
+    if (!target || result.count === 0) throw notFound('That user is not muted here.', 'not_muted');
+    await prisma.modAction.create({
+        data: { actor_id: user.id, community_id: community.id, action: 'unmute_user', target_type: 'user', target_id: target.id },
+    });
+    response.json({ success: true });
 });
 
 router.get('/communities/:name/mod-log', requireAuth, async (request: AuthRequest, response) => {
@@ -205,7 +302,7 @@ router.post('/posts/:id/moderation', requireAuth, async (request: AuthRequest, r
     if (input.action === 'unlock' && post.status !== 'locked') throw badRequest('This post is not locked.', 'not_locked');
 
     const nextStatus = (data as { status?: string }).status ?? post.status;
-    const countChange = (counted(nextStatus) ? 1 : 0) - (counted(post.status) ? 1 : 0);
+    const countChange = post.shadow_hidden ? 0 : (counted(nextStatus) ? 1 : 0) - (counted(post.status) ? 1 : 0);
 
     const [updated] = await prisma.$transaction([
         prisma.post.update({ where: { id: post.id }, data, include: postInclude }),
@@ -220,9 +317,12 @@ router.post('/posts/:id/moderation', requireAuth, async (request: AuthRequest, r
                 target_type: 'post',
                 target_id: post.id,
                 reason: input.reason ?? null,
+                ...(post.held_reason && input.action === 'approve' ? { details: { held_reason: post.held_reason } } : {}),
             },
         }),
     ]);
+    if (input.action === 'remove') await closeReports('post', post.id, 'resolved', user.id);
+    if (input.action === 'approve') await closeReports('post', post.id, 'dismissed', user.id);
     response.json({ post: toPublicPost(updated as typeof updated & { community: typeof post.community }, context) });
 });
 
@@ -269,6 +369,8 @@ router.post('/comments/:id/moderation', requireAuth, async (request: AuthRequest
             reason: input.reason ?? null,
         },
     });
+    if (input.action === 'remove') await closeReports('comment', comment.id, 'resolved', user.id);
+    if (input.action === 'approve') await closeReports('comment', comment.id, 'dismissed', user.id);
     response.json({ comment: toPublicComment(updated, communityId, context) });
 });
 

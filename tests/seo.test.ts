@@ -4,16 +4,12 @@ import { api, createComment, createCommunity, createPost, signUp } from './helpe
 
 const LONG_BODY = 'Agents keep asking for two years upfront, is that normal everywhere?';
 
-// Test accounts are seconds old; age one so its posts aren't held back as "brand-new account" posts
-async function ageAccount(userId: string) {
-    await prisma.user.update({ where: { id: userId }, data: { created_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) } });
-}
 
 describe('indexing rule', () => {
     it('holds back posts by brand-new accounts until they get a reply or an upvote', async () => {
-        const alice = await signUp('alice');
+        const alice = await signUp('alice', { fresh: true });
         const bob = await signUp('bob');
-        await createCommunity(alice.agent, 'lounge');
+        await createCommunity(bob.agent, 'lounge');
         const post = await createPost(alice.agent, 'lounge', { title: 'Renting a flat in Yaba', body: LONG_BODY });
 
         expect((await api().get(`/v1/posts/${post.short_id}`)).body.post.is_indexable).toBe(false);
@@ -23,7 +19,6 @@ describe('indexing rule', () => {
 
     it('holds back very short posts with no replies, and removed posts', async () => {
         const alice = await signUp('alice');
-        await ageAccount(alice.user.id);
         await createCommunity(alice.agent, 'lounge');
         const short = await createPost(alice.agent, 'lounge', { title: 'Hello', body: 'hi' });
         const good = await createPost(alice.agent, 'lounge', { title: 'Renting a flat in Yaba', body: LONG_BODY });
@@ -41,13 +36,13 @@ describe('indexing rule', () => {
 describe('sitemap data', () => {
     it('lists indexable posts, public communities and users with indexable posts', async () => {
         const alice = await signUp('alice');
-        const newbie = await signUp('newbie');
-        await ageAccount(alice.user.id);
+        const newbie = await signUp('newbie', { fresh: true });
         await createCommunity(alice.agent, 'lounge');
         await createCommunity(alice.agent, 'secret', { visibility: 'private' });
 
         const listed = await createPost(alice.agent, 'lounge', { title: 'Renting a flat in Yaba', body: LONG_BODY });
-        await createPost(alice.agent, 'secret', { title: 'Private thoughts on rent', body: LONG_BODY });
+        // A different body: the same text in two communities would be held as a repeat
+        await createPost(alice.agent, 'secret', { title: 'Private thoughts on rent', body: `${LONG_BODY} Asking privately.` });
         await createPost(alice.agent, 'lounge', { title: 'Anon post about rent', body: LONG_BODY, is_anonymous: true });
         await createPost(newbie.agent, 'lounge', { title: 'New account post about rent', body: LONG_BODY });
 
