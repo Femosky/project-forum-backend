@@ -46,6 +46,20 @@ const envSchema = z.object({
         .string()
         .regex(/^[a-zA-Z0-9-]{8,128}$/, 'INDEXNOW_KEY must be 8-128 letters, digits or dashes')
         .optional(),
+
+    // Ads (Phase 6). ADS_ENABLED is the master switch for every ad slot. Direct and house campaigns come from the
+    // admin panel; AdSense fills slots nothing else does once ADSENSE_ENABLED is on and the ids below are set.
+    ADS_ENABLED: booleanFlag(true),
+    ADSENSE_ENABLED: booleanFlag(false),
+    // Publisher id, e.g. ca-pub-1234567890123456
+    ADSENSE_CLIENT_ID: z
+        .string()
+        .regex(/^ca-pub-\d{10,20}$/, 'ADSENSE_CLIENT_ID looks like ca-pub-1234567890123456')
+        .optional(),
+    // Ad unit ids from the AdSense dashboard: an in-feed unit (with its layout key) and an in-article unit
+    ADSENSE_FEED_SLOT: z.string().regex(/^\d+$/).optional(),
+    ADSENSE_FEED_LAYOUT_KEY: z.string().max(40).optional(),
+    ADSENSE_THREAD_SLOT: z.string().regex(/^\d+$/).optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

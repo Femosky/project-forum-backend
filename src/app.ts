@@ -21,6 +21,7 @@ import moderationRoutes from './modules/moderation/routes';
 import notificationRoutes from './modules/notifications/routes';
 import seoRoutes from './modules/seo/routes';
 import adminRoutes from './modules/admin/routes';
+import adsRoutes from './modules/ads/routes';
 
 const app = express();
 
@@ -100,6 +101,7 @@ v1.use('/search', searchRoutes);
 v1.use('/notifications', notificationRoutes);
 v1.use('/seo', seoRoutes);
 v1.use('/admin', adminRoutes);
+v1.use('/ads', adsRoutes);
 v1.use(moderationRoutes);
 v1.get('/health', (request, response) => {
     response.json({ status: 'ok' });
