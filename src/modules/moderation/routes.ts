@@ -33,7 +33,7 @@ const muteSchema = z.object({
 });
 
 const reportSchema = z.object({
-    target_type: z.enum(['post', 'comment', 'user', 'community']),
+    target_type: z.enum(['post', 'comment', 'user', 'community', 'ad']),
     target_id: z.uuid(),
     reason_code: z.enum(REPORT_REASONS),
     note: z.string().trim().max(LIMITS.REPORT_NOTE_MAX).optional(),
@@ -68,6 +68,10 @@ async function reportCommunity(targetType: string, targetId: string) {
     }
     if (targetType === 'user') {
         if (!(await prisma.user.findUnique({ where: { id: targetId }, select: { id: true } }))) throw notFound('User not found');
+        return null;
+    }
+    if (targetType === 'ad') {
+        if (!(await prisma.adCreative.findUnique({ where: { id: targetId }, select: { id: true } }))) throw notFound('Ad not found');
         return null;
     }
     if (!(await prisma.community.findUnique({ where: { id: targetId }, select: { id: true } }))) throw notFound('Community not found');

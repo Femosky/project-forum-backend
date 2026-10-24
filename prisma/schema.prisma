@@ -74,6 +74,7 @@ enum ReportTargetType {
   comment
   user
   community
+  ad
 }
 
 enum ReportReason {
@@ -113,6 +114,18 @@ enum CampaignStatus {
 enum AdFormat {
   feed_post
   thread_comment
+}
+
+// direct: a paying advertiser. house: the site's own promotions, shown when no direct campaign fills a slot.
+enum CampaignKind {
+  direct
+  house
+}
+
+// cpm: budget is spent per thousand viewable impressions. flat: a fixed fee for the campaign's dates.
+enum PricingModel {
+  cpm
+  flat
 }
 
 /**
@@ -261,6 +274,8 @@ model Community {
   status       CommunityStatus     @default(active)
   visibility   CommunityVisibility @default(public)
   is_nsfw      Boolean             @default(false)
+  // null follows the default (no ads in sensitive categories); true/false is an admin's override
+  ads_enabled  Boolean?
 
   created_by     String @db.Uuid
   created_by_ref User   @relation("created_communities", fields: [created_by], references: [id])
@@ -622,6 +637,9 @@ model Advertiser {
   created_at    DateTime @default(now())
   name          String
   contact_email String?
+  logo_url      String?
+  website       String?
+  notes         String?
 
   campaigns Campaign[]
 }
@@ -634,14 +652,29 @@ model Campaign {
   advertiser_id String     @db.Uuid
   advertiser    Advertiser @relation(fields: [advertiser_id], references: [id], onDelete: Cascade)
 
-  name         String
-  status       CampaignStatus @default(draft)
-  starts_at    DateTime?
-  ends_at      DateTime?
-  // Countries, communities, keywords: kept open so diaspora and local targeting both fit
-  targeting    Json?
-  budget_minor Int?
-  currency     String?
+  name          String
+  kind          CampaignKind   @default(direct)
+  status        CampaignStatus @default(draft)
+  starts_at     DateTime?
+  ends_at       DateTime?
+  // { communities?: string[], categories?: string[] } today; kept open so country targeting fits later.
+  // Empty means every page that carries ads.
+  targeting     Json?
+  pricing_model PricingModel   @default(flat)
+  // Money in minor units (kobo for NGN) with an explicit currency
+  budget_minor  Int?
+  // CPM rate, or the flat fee
+  price_minor   Int?
+  currency      String         @default("NGN")
+  // Most times one viewer sees this campaign per day; null is no cap
+  frequency_cap Int?
+  // Higher wins among campaigns that target the same pages
+  priority      Int            @default(0)
+  // Invoice tracking for direct deals (Paystack payment link)
+  payment_url   String?
+  paid_at       DateTime?
+  // Secret for the advertiser's read-only stats page
+  stats_token   String?        @unique
 
   creatives AdCreative[]
 
@@ -655,11 +688,14 @@ model AdCreative {
   campaign_id String   @db.Uuid
   campaign    Campaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
 
+  updated_at DateTime @updatedAt
+
   format    AdFormat
   headline  String
   body      String?
   image_url String?
   click_url String
+  cta_label String   @default("Learn more")
   is_active Boolean  @default(true)
 
   daily_stats AdDailyStat[]

@@ -116,6 +116,24 @@ Rules live in `src/modules/safety/policy.ts` (numbers) and `filters.ts` (pattern
 | GET/POST | `/blocklist` | POST `{ kind: domain\|keyword, value, note? }`. Domains also match subdomains |
 | DELETE | `/blocklist/:id` | |
 | GET | `/mod-log` | Every moderator and admin action |
+| PATCH | `/communities/:name/ads` | `{ ads_enabled: boolean \| null }`. null follows the default (off in sensitive categories) |
+| GET | `/ads` | Advertisers with their campaigns (totals, spend for CPM) and whether AdSense is on and configured |
+| POST/PATCH | `/ads/advertisers`, `/ads/advertisers/:id` | `{ name, contact_email?, logo_url?, website?, notes? }` |
+| POST | `/ads/campaigns` | `{ advertiser_id, name, kind: direct\|house, status, starts_at?, ends_at?, targeting: { communities[], categories[] }, pricing_model: cpm\|flat, budget_minor?, price_minor?, currency, frequency_cap?, priority, payment_url?, paid }`. Money is in minor units (kobo). Empty targeting runs everywhere |
+| GET/PATCH | `/ads/campaigns/:id` | GET adds creatives with totals and the last 30 days |
+| POST | `/ads/campaigns/:id/creatives` | `{ format: feed_post\|thread_comment, headline, body?, image_url? (https), click_url, cta_label? }` |
+| PATCH | `/ads/creatives/:id` | Same fields plus `is_active`. Pausing resolves open reports on the ad |
+
+## Ads `/v1/ads` (Phase 6)
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/?placement=feed\|thread&community=&post=&count=&seen=` | `{ ads: AdUnit[] }` in priority order: direct campaigns targeting this community or its category, direct run-of-site, house ads, then AdSense. Empty on NSFW, private, sensitive or ad-free communities and on threads that aren't active. `seen=campaignId:n,...` is the viewer's count today, for frequency caps. `Cache-Control: private, no-store` |
+| POST | `/events` | `{ impressions: creativeId[] }` (max 50), JSON or plain text. Added to today's `AdDailyStat` row (Lagos time) |
+| GET | `/click/:creativeId` | Counts a click and 302s to the advertiser |
+| GET | `/stats/:token` | The advertiser's read-only stats: totals, per day, per creative |
+
+`AdUnit` is `{ kind: 'direct' \| 'house', id, campaign_id, frequency_cap, creative: { advertiser_name, advertiser_logo, title, body, image_url, cta_label, display_url } }` or `{ kind: 'adsense', id, client, slot_id, format: 'in-feed' \| 'in-article', layout_key }`. Settings: `ADS_ENABLED` (default on) is the master switch; `ADSENSE_ENABLED` plus `ADSENSE_CLIENT_ID`, `ADSENSE_FEED_SLOT`, `ADSENSE_FEED_LAYOUT_KEY` and `ADSENSE_THREAD_SLOT` turn AdSense on. Reports take `target_type: 'ad'` with the creative id; they go to the site queue.
 
 ## Users and search
 

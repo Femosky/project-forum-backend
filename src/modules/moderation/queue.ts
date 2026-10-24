@@ -3,7 +3,7 @@ import prisma from '../../prismaConnection';
 import { commentInclude, postInclude, toPublicComment, toPublicPost } from '../../lib/serializers';
 import { ViewerContext } from '../communities/access';
 
-// The mod queue: everything waiting for a moderator in one list. An item is a post, comment, user or community
+// The mod queue: everything waiting for a moderator in one list. An item is a post, comment, user, community or ad
 // with open reports and/or held by the automatic filters. Reports on the same target are grouped.
 
 const QUEUE_LIMIT = 100;
@@ -24,6 +24,7 @@ export type QueueItem = {
     comment?: ReturnType<typeof toPublicComment> & { post: { short_id: string; slug: string; title: string; community: string } };
     user?: { username: string; status: string; karma: number; created_at: Date };
     community?: { name: string; display_name: string | null; status: string };
+    ad?: { headline: string; advertiser: string; campaign_id: string; campaign: string; is_active: boolean };
 };
 
 // Community queues see reports filed against that community's content; the site queue (admins) sees every
@@ -91,7 +92,7 @@ export async function buildQueue(scope: Scope, context: ViewerContext): Promise<
     const ordered = [...items.values()].sort((a, b) => b.updated_at.getTime() - a.updated_at.getTime()).slice(0, QUEUE_LIMIT);
     const idsOf = (type: ReportTargetType) => ordered.filter((item) => item.target_type === type).map((item) => item.target_id);
 
-    const [posts, comments, users, communities] = await Promise.all([
+    const [posts, comments, users, communities, ads] = await Promise.all([
         prisma.post.findMany({ where: { id: { in: idsOf('post') } }, include: postInclude }),
         prisma.comment.findMany({
             where: { id: { in: idsOf('comment') } },
@@ -102,11 +103,16 @@ export async function buildQueue(scope: Scope, context: ViewerContext): Promise<
             select: { id: true, username: true, status: true, karma: true, created_at: true },
         }),
         prisma.community.findMany({ where: { id: { in: idsOf('community') } }, select: { id: true, name: true, display_name: true, status: true } }),
+        prisma.adCreative.findMany({
+            where: { id: { in: idsOf('ad') } },
+            select: { id: true, headline: true, is_active: true, campaign: { select: { id: true, name: true, advertiser: { select: { name: true } } } } },
+        }),
     ]);
     const postsById = new Map(posts.map((row) => [row.id, row]));
     const commentsById = new Map(comments.map((row) => [row.id, row]));
     const usersById = new Map(users.map((row) => [row.id, row]));
     const communitiesById = new Map(communities.map((row) => [row.id, row]));
+    const adsById = new Map(ads.map((row) => [row.id, row]));
 
     // Content that has since gone (deleted by its author, cascade-deleted) drops out
     return ordered.flatMap((item): QueueItem[] => {
@@ -131,6 +137,16 @@ export async function buildQueue(scope: Scope, context: ViewerContext): Promise<
         if (item.target_type === 'user') {
             const user = usersById.get(item.target_id);
             return user ? [{ ...item, user: { username: user.username, status: user.status, karma: user.karma, created_at: user.created_at } }] : [];
+        }
+        if (item.target_type === 'ad') {
+            const ad = adsById.get(item.target_id);
+            if (!ad) return [];
+            return [
+                {
+                    ...item,
+                    ad: { headline: ad.headline, advertiser: ad.campaign.advertiser.name, campaign_id: ad.campaign.id, campaign: ad.campaign.name, is_active: ad.is_active },
+                },
+            ];
         }
         const community = communitiesById.get(item.target_id);
         return community ? [{ ...item, community: { name: community.name, display_name: community.display_name, status: community.status } }] : [];

@@ -11,9 +11,11 @@ import { viewerContext } from '../communities/access';
 import { buildQueue, queueCount } from '../moderation/queue';
 import { requireAdmin } from '../moderation/routes';
 import { clearBlocklistCache } from '../safety/filters';
+import adsAdmin from '../ads/admin';
+import { clearAdCache } from '../ads/decision';
 
-// Site-admin panel (role=admin): the site-wide queue, user suspension and shadow-bans, community takedowns and
-// the blocklist. Every action is written to ModAction like moderator actions are.
+// Site-admin panel (role=admin): the site-wide queue, user suspension and shadow-bans, community takedowns,
+// the blocklist and ad campaigns (ads/admin.ts). Every action is written to ModAction like moderator actions are.
 
 const router = Router();
 
@@ -181,7 +183,19 @@ router.get('/communities', async (request, response) => {
         where: q ? { name: { startsWith: q.toLowerCase() } } : {},
         orderBy: { created_at: 'desc' },
         take: 50,
-        select: { id: true, name: true, display_name: true, status: true, visibility: true, member_count: true, post_count: true, created_at: true },
+        select: {
+            id: true,
+            name: true,
+            display_name: true,
+            status: true,
+            visibility: true,
+            category: true,
+            is_nsfw: true,
+            ads_enabled: true,
+            member_count: true,
+            post_count: true,
+            created_at: true,
+        },
     });
     response.json({ communities });
 });
@@ -207,6 +221,22 @@ router.post('/communities/:name/restore', async (request: AuthRequest, response)
     await log(actor.id, 'restore_community', { type: 'community', id: community.id }, { communityId: community.id });
     response.json({ success: true });
 });
+
+// Ads on or off for one community; null goes back to the default (off in sensitive categories)
+router.patch('/communities/:name/ads', async (request: AuthRequest, response) => {
+    const { user: actor } = viewerOf(request);
+    const { ads_enabled } = parse(z.object({ ads_enabled: z.boolean().nullable() }), request.body);
+    const community = await prisma.community.findUnique({ where: { name: String(request.params.name).toLowerCase() } });
+    if (!community) throw notFound('Community not found');
+    await prisma.community.update({ where: { id: community.id }, data: { ads_enabled } });
+    clearAdCache();
+    await log(actor.id, 'set_community_ads', { type: 'community', id: community.id }, { communityId: community.id, details: { ads_enabled } });
+    response.json({ success: true, ads_enabled });
+});
+
+// --- Ads ---
+
+router.use('/ads', adsAdmin);
 
 // --- Blocklist ---
 
