@@ -78,6 +78,8 @@ enum ReportTargetType {
 
 enum ReportReason {
   spam
+  scam
+  personal_info
   harassment
   hate
   violence
@@ -138,8 +140,14 @@ model User {
   // Users confirm they are 18+ at signup; we keep the time of the attestation, not a birth date
   adult_attested_at DateTime?
 
-  karma                    Int       @default(0)
-  last_login_at            DateTime?
+  karma         Int       @default(0)
+  last_login_at DateTime?
+
+  // Site-admin actions. A suspension with no end date is permanent; an expired one is lifted at the next sign-in.
+  suspended_until          DateTime?
+  suspension_reason        String?
+  // Shadow-banned accounts see their own posts and comments; nobody else does (see shadow_hidden on content)
+  shadow_banned_at         DateTime?
   notification_preferences Json?
 
   sessions            Session[]
@@ -166,6 +174,10 @@ model User {
 
   notifications      Notification[] @relation("notification_recipient")
   notifications_sent Notification[] @relation("notification_actor")
+
+  mutes         CommunityMute[] @relation("muted_user")
+  mutes_given   CommunityMute[] @relation("muted_by")
+  blocked_terms BlockedTerm[]
 
   @@index([status])
   @@index([username(ops: raw("gin_trgm_ops"))], map: "User_username_trgm_idx", type: Gin)
@@ -244,6 +256,8 @@ model Community {
   description  String?
   image_url    String?
   rules        Json?
+  // One of COMMUNITY_CATEGORIES (src/shared/validation.ts), for the directory
+  category     String?
   status       CommunityStatus     @default(active)
   visibility   CommunityVisibility @default(public)
   is_nsfw      Boolean             @default(false)
@@ -259,12 +273,14 @@ model Community {
 
   members       CommunityMember[]
   join_requests CommunityJoinRequest[]
+  mutes         CommunityMute[]
   posts         Post[]
   flairs        Flair[]
   mod_actions   ModAction[]
   reports       Report[]
 
   @@index([status, member_count(sort: Desc)])
+  @@index([category, member_count(sort: Desc)])
   @@index([search_vector], type: Gin)
   @@index([name(ops: raw("gin_trgm_ops"))], map: "Community_name_trgm_idx", type: Gin)
 }
@@ -287,6 +303,25 @@ model CommunityMember {
   @@id([community_id, user_id])
   @@index([user_id])
   @@index([community_id, role])
+}
+
+// A muted user can still read (and stay a member) but can't post or comment in the community until the mute ends.
+// Separate from CommunityMember because people who never joined can still post in public communities.
+model CommunityMute {
+  created_at DateTime @default(now())
+
+  community_id String    @db.Uuid
+  community    Community @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  user_id      String    @db.Uuid
+  user         User      @relation("muted_user", fields: [user_id], references: [id], onDelete: Cascade)
+
+  muted_until DateTime
+  reason      String?
+  muted_by    String   @db.Uuid
+  muter       User     @relation("muted_by", fields: [muted_by], references: [id])
+
+  @@id([community_id, user_id])
+  @@index([user_id])
 }
 
 model CommunityJoinRequest {
@@ -358,9 +393,13 @@ model Post {
   flair_id String? @db.Uuid
   flair    Flair?  @relation(fields: [flair_id], references: [id], onDelete: SetNull)
 
-  status    ContentStatus @default(active)
-  edited_at DateTime?
-  pinned_at DateTime?
+  status        ContentStatus @default(active)
+  edited_at     DateTime?
+  pinned_at     DateTime?
+  // Why the automatic filters held this post for review (status pending); shown to moderators only
+  held_reason   String?
+  // Written by a shadow-banned account: only the author sees it
+  shadow_hidden Boolean       @default(false)
 
   upvote_count   Int   @default(0)
   downvote_count Int   @default(0)
@@ -386,6 +425,8 @@ model Post {
   @@index([created_at(sort: Desc), id(sort: Desc)])
   @@index([author_id, created_at(sort: Desc)])
   @@index([search_vector], type: Gin)
+  // The mod queue's held posts
+  @@index([community_id, status])
 }
 
 model Comment {
@@ -408,12 +449,14 @@ model Comment {
   depth     Int       @default(0)
   path      String
 
-  body         String
-  is_anonymous Boolean       @default(false)
-  is_sponsored Boolean       @default(false)
-  status       ContentStatus @default(active)
-  edited_at    DateTime?
-  pinned_at    DateTime?
+  body          String
+  is_anonymous  Boolean       @default(false)
+  is_sponsored  Boolean       @default(false)
+  status        ContentStatus @default(active)
+  edited_at     DateTime?
+  pinned_at     DateTime?
+  held_reason   String?
+  shadow_hidden Boolean       @default(false)
 
   upvote_count   Int   @default(0)
   downvote_count Int   @default(0)
@@ -431,6 +474,8 @@ model Comment {
   @@index([parent_id, best_rank(sort: Desc), id(sort: Desc)])
   @@index([root_id, path])
   @@index([author_id, created_at(sort: Desc)])
+  // The mod queue's held comments
+  @@index([status, post_id])
 }
 
 // One row per user per item; changing a vote is an upsert
@@ -532,6 +577,28 @@ model ModAction {
 
   @@index([community_id, created_at(sort: Desc)])
   @@index([target_type, target_id])
+  @@index([created_at(sort: Desc)])
+}
+
+enum BlockedTermKind {
+  domain
+  keyword
+}
+
+// Site-wide blocklist managed by admins. Posts and comments that match are held for review, not deleted.
+model BlockedTerm {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  created_at DateTime @default(now())
+
+  kind  BlockedTermKind
+  // Lowercase; a domain also matches its subdomains, a keyword matches as a whole word or phrase
+  value String
+  note  String?
+
+  created_by String @db.Uuid
+  creator    User   @relation(fields: [created_by], references: [id])
+
+  @@unique([kind, value])
 }
 
 /**

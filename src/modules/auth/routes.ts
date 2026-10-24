@@ -63,11 +63,11 @@ export async function login(request: Request, response: Response) {
         await failedLogins.increment(key);
         throw unauthorized(INVALID_CREDENTIALS, 'invalid_credentials');
     }
-    assertCanSignIn(user);
+    const allowed = await assertCanSignIn(user);
     await failedLogins.resetKey(key);
 
-    setAuthCookies(response, await createSession(user, request));
-    response.json({ success: true, user: toPrivateUser(user) });
+    setAuthCookies(response, await createSession(allowed, request));
+    response.json({ success: true, user: toPrivateUser(allowed) });
 }
 
 export async function logout(request: Request, response: Response) {
@@ -218,7 +218,7 @@ router.post('/google', async (request, response) => {
         created = true;
     }
 
-    assertCanSignIn(user);
+    user = await assertCanSignIn(user);
     setAuthCookies(response, await createSession(user, request));
     response.status(created ? 201 : 200).json({ user: toPrivateUser(user), created });
 });

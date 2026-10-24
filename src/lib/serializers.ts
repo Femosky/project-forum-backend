@@ -23,6 +23,14 @@ export const LISTED_POST_STATUSES: ContentStatus[] = ['active', 'locked'];
 // Comments stay in the tree as placeholders when deleted or removed, so replies keep their parent
 export const THREAD_COMMENT_STATUSES: ContentStatus[] = ['active', 'locked', 'removed', 'deleted'];
 
+// Content from shadow-banned accounts (shadow_hidden) is shown to its author only
+export const notShadowHidden = (context: ViewerContext) =>
+    context ? { OR: [{ shadow_hidden: false }, { author_id: context.userId }] } : { shadow_hidden: false };
+
+// Site admins can still open a shadow-hidden item directly (from the admin panel)
+export const isHiddenFrom = (item: { shadow_hidden: boolean; author_id: string }, context: ViewerContext) =>
+    item.shadow_hidden && context?.userId !== item.author_id && !context?.isAdmin;
+
 function publicAuthor(author: AuthorRow) {
     if (!author || author.status === 'deleted') return null;
     return { username: author.username, display_name: author.display_name, avatar_id: author.avatar_id };
@@ -49,6 +57,8 @@ export function toPublicPost(post: PostRow, context: ViewerContext, votes?: Vote
         is_nsfw: post.is_nsfw,
         is_sponsored: post.is_sponsored,
         status: post.status,
+        // Why the filters held it; moderators only
+        held_reason: canModerate(context, post.community_id) ? post.held_reason : null,
         flair: post.flair,
         created_at: post.created_at,
         edited_at: post.edited_at,
@@ -82,6 +92,8 @@ export type CommentRow = {
     is_anonymous: boolean;
     is_sponsored: boolean;
     status: ContentStatus;
+    held_reason?: string | null;
+    shadow_hidden: boolean;
     created_at: Date;
     edited_at: Date | null;
     pinned_at: Date | null;
@@ -113,6 +125,7 @@ export function toPublicComment(comment: CommentRow, communityId: string, contex
         is_anonymous: comment.is_anonymous,
         is_sponsored: comment.is_sponsored,
         status: comment.status,
+        held_reason: isMod ? (comment.held_reason ?? null) : null,
         created_at: comment.created_at,
         edited_at: comment.edited_at,
         pinned_at: comment.pinned_at,

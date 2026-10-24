@@ -3,12 +3,14 @@ import { Prisma, User } from '@prisma/client';
 import prisma from '../../prismaConnection';
 import { badRequest, forbidden, notFound, parse } from '../../lib/http';
 import { idOrShortId } from '../../lib/ids';
-import { commentInclude, LISTED_POST_STATUSES, THREAD_COMMENT_STATUSES, toPublicComment } from '../../lib/serializers';
+import { commentInclude, isHiddenFrom, LISTED_POST_STATUSES, THREAD_COMMENT_STATUSES, toPublicComment } from '../../lib/serializers';
 import { AuthRequest, optionalAuth, requireAuth, viewerOf } from '../../middlewares/auth';
 import { assertCanParticipate, assertCanView, canModerate, viewerContext, ViewerContext } from '../communities/access';
 import { commentViewerState, voteComment } from '../votes/service';
 import { repliesQuery, updateCommentSchema, voteSchema } from './schema';
 import { listReplies, setCommentStatus } from './service';
+import { screenContent } from '../safety/filters';
+import { assertLinksAllowed } from '../safety/policy';
 
 const router = Router();
 
@@ -25,7 +27,9 @@ export async function findVisibleComment(idOrShort: string, user: User | undefin
     const postVisible = LISTED_POST_STATUSES.includes(post.status) || isMod;
     const commentVisible =
         THREAD_COMMENT_STATUSES.includes(comment.status) || isMod || context?.userId === comment.author_id;
-    if (!postVisible || !commentVisible || post.community.status === 'deleted') throw notFound('Comment not found');
+    if (!postVisible || !commentVisible || isHiddenFrom(comment, context) || isHiddenFrom(post, context) || post.community.status === 'deleted') {
+        throw notFound('Comment not found');
+    }
 
     await assertCanView(post.community, user);
     return comment;
@@ -60,11 +64,14 @@ router.patch('/:id', requireAuth, async (request: AuthRequest, response) => {
         throw badRequest("This comment can't be edited.", 'comment_unavailable');
     }
 
-    const updated = await prisma.comment.update({
-        where: { id: comment.id },
-        data: { body, edited_at: new Date() },
-        include: commentInclude,
-    });
+    // Edits go through the same checks as new comments
+    assertLinksAllowed(user, [body]);
+    const heldReason =
+        comment.status === 'active' ? await screenContent({ user, kind: 'comment', body, postId: comment.post_id }) : null;
+
+    const updated = heldReason
+        ? await setCommentStatus(comment, 'pending', { body, edited_at: new Date(), held_reason: heldReason, pinned_at: null })
+        : await prisma.comment.update({ where: { id: comment.id }, data: { body, edited_at: new Date() }, include: commentInclude });
     response.json({ comment: toPublicComment(updated, comment.post.community_id, context) });
 });
 

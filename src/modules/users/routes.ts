@@ -3,7 +3,7 @@ import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
 import { badRequest, notFound, parse } from '../../lib/http';
-import { commentInclude, LISTED_POST_STATUSES, postInclude, toPublicComment } from '../../lib/serializers';
+import { commentInclude, LISTED_POST_STATUSES, notShadowHidden, postInclude, toPublicComment } from '../../lib/serializers';
 import { AuthRequest, optionalAuth, requireAuth, viewerOf } from '../../middlewares/auth';
 import { LIMITS, pageQuery } from '../../shared/validation';
 import { revokeAllSessions, toPrivateUser, verifyPassword } from '../auth/service';
@@ -176,6 +176,8 @@ router.get('/:username', async (request, response) => {
     const user = await findPublicUser(String(request.params.username));
     response.json({
         user: {
+            // For reporting a user
+            id: user.id,
             username: user.username,
             display_name: user.display_name,
             avatar_id: user.avatar_id,
@@ -214,6 +216,7 @@ router.get('/:username/comments', optionalAuth, async (request: AuthRequest, res
                     author_id: user.id,
                     is_anonymous: false,
                     status: { in: ['active', 'locked'] },
+                    ...notShadowHidden(context),
                     post: { status: { in: LISTED_POST_STATUSES }, community: { visibility: 'public' } },
                 },
                 afterCursor('created_at', 'desc', decodeCursor(query.cursor)),

@@ -58,9 +58,10 @@ Everything lives under `/v1`. Requests and responses are JSON. Auth is cookie-ba
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/?sort=popular\|new` | |
-| POST | `/` | `name (3-21, letters/digits/_), display_name?, description?, visibility: public\|private, is_nsfw?, rules?` |
-| GET | `/:name` | Community, moderators, and `viewer: { is_member, role, is_banned, has_pending_request }` |
+| GET | `/?sort=popular\|new&category=&q=` | `q` matches name, display name or description |
+| GET | `/categories` | `{ categories: [{ id, label, count }] }` for the directory |
+| POST | `/` | `name (3-21, letters/digits/_), display_name?, description?, visibility: public\|private, is_nsfw?, rules?, category?` |
+| GET | `/:name` | Community, moderators, and `viewer: { is_member, role, is_banned, has_pending_request, muted_until, queue_count }` (`queue_count` for moderators only) |
 | PATCH | `/:name` | Moderators |
 | GET | `/:name/posts?sort&t` | Pinned posts lead the first "hot" page |
 | PUT | `/:name/membership` | Join. Private communities answer 202 and create a join request |
@@ -72,18 +73,49 @@ Everything lives under `/v1`. Requests and responses are JSON. Auth is cookie-ba
 | DELETE | `/:name/bans/:username` | |
 | GET/POST | `/:name/flairs` | POST for moderators: `{ name, color? }` |
 | DELETE | `/:name/flairs/:id` | |
-| GET | `/:name/reports?status=open` | Mod queue |
+| GET | `/:name/reports?status=open` | Raw report list |
+| GET | `/:name/mod-queue` | Open reports grouped by target plus items held by the filters: `{ items: [{ target_type, target_id, updated_at, held_reason, reports: { total, reasons, notes }, report_ids, post? \| comment? \| user? }] }` |
+| GET | `/:name/restrictions` | Moderators: current `{ bans, mutes }` |
+| POST | `/:name/mutes` | Moderators: `{ username, days (1-365), reason? }`. Muted users can read but not post or comment here |
+| DELETE | `/:name/mutes/:username` | |
 | GET | `/:name/mod-log` | Every moderator action |
 
 ## Moderation and reports
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/reports` | `target_type: post\|comment\|user\|community, target_id, reason_code, note?` |
+| POST | `/reports` | `target_type: post\|comment\|user\|community, target_id, reason_code: spam\|scam\|harassment\|hate\|sexual\|violence\|misinformation\|personal_info\|other, note?` |
 | POST | `/reports/:id/resolve` | `{ status: resolved \| dismissed }`; closes every open report on that target |
 | GET | `/admin/reports` | Site admins: reports about users and communities |
-| POST | `/posts/:id/moderation` | `{ action: remove\|approve\|lock\|unlock\|pin\|unpin, reason? }`; `sponsor`/`unsponsor` for site admins |
+| POST | `/posts/:id/moderation` | `{ action: remove\|approve\|lock\|unlock\|pin\|unpin, reason? }`; `sponsor`/`unsponsor` for site admins. Remove closes the target's open reports as resolved, approve as dismissed |
 | POST | `/comments/:id/moderation` | `{ action: remove\|approve\|lock\|unlock\|pin\|unpin, reason? }` |
+
+## Safety (Phase 5)
+
+Rules live in `src/modules/safety/policy.ts` (numbers) and `filters.ts` (patterns).
+
+- **Held content.** New posts and comments (and edits) are screened. A match is saved with `status: 'pending'` and lands in the mod queue; the author can still open it, nobody else can, and it isn't counted until approved. Moderators see `held_reason` on posts and comments; everyone else gets `null`. Filters: blocklisted domains and phrases, link shorteners, the same post in another community or the same comment under three posts within a day, and, for accounts under a day old with under 10 karma, phone numbers and "DM me / WhatsApp me" style asks.
+- **New accounts** (under a day old and under 10 karma) can't post links (`403 new_account_links`). Accounts under a week old with under 10 karma get 3 posts and 10 comments an hour (`429 new_account_limit`). Signups are limited to 5 per IP per day.
+- **Anonymous** posts and comments need an account at least a day old, a verified email, karma of 0 or more and no shadow-ban (`403 anonymous_not_allowed`). Moderators of the community still see the author.
+- **Mutes** answer `403 muted`; bans `403 banned`.
+- The signed-in user (`/auth/me`, login, signup) carries `can_post_links` and `can_post_anonymously` so the composer can explain limits up front.
+
+## Admin `/v1/admin` (site admins only)
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/overview` | Queue size and 24-hour counts |
+| GET | `/queue` | Every open report and held item on the site, in the mod-queue shape |
+| GET | `/users?q=&filter=all\|suspended\|shadow_banned\|new` | Username or email prefix |
+| POST | `/users/:username/suspend` | `{ days?, reason? }` (no days = until lifted). Signs the account out everywhere; an expired suspension is lifted at the next sign-in |
+| POST | `/users/:username/unsuspend` | |
+| POST | `/users/:username/shadow-ban` | `{ shadow_banned: boolean, reason? }`. Their posts and comments, past and future, are visible only to them; counters are recomputed |
+| GET | `/communities?q=` | |
+| POST | `/communities/:name/takedown` | `{ reason? }`. The community and its posts disappear (crawlers get 410) |
+| POST | `/communities/:name/restore` | |
+| GET/POST | `/blocklist` | POST `{ kind: domain\|keyword, value, note? }`. Domains also match subdomains |
+| DELETE | `/blocklist/:id` | |
+| GET | `/mod-log` | Every moderator and admin action |
 
 ## Users and search
 
@@ -123,7 +155,7 @@ A post is indexable when it is active or locked in a public community, isn't a v
 
 ## Operations
 
-- **Rate limits**: auth 20 per 15 minutes per IP, writes 60 per minute per account, reads 300 per minute per IP. Auth and write counters live in Postgres (`RATE_LIMIT_STORE=postgres`, the default), so they hold across instances without Redis.
+- **Rate limits**: signups 5 per day per IP, auth 20 per 15 minutes per IP, writes 60 per minute per account, reads 300 per minute per IP. Auth and write counters live in Postgres (`RATE_LIMIT_STORE=postgres`, the default), so they hold across instances without Redis.
 - **Jobs**: pg-boss on the same Postgres runs email sending and link previews. `JOBS_ENABLED=false` runs them inline instead.
 - **Logs**: JSON lines via pino, one per request with a request id. Send `X-Request-Id` to set it; it comes back on every response.
 - **Seeds**: `npm run seed` (small dev data), `npm run seed:bench` then `npm run bench` (100k posts / 1M comments and timings).

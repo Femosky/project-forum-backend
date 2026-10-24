@@ -8,8 +8,10 @@ export type Agent = ReturnType<typeof request.agent>;
 
 export const PASSWORD = 'Passw0rd!Passw0rd';
 
-// Signs up a user and returns an agent that carries their auth cookies
-export async function signUp(username: string, options: { admin?: boolean } = {}) {
+// Signs up a user and returns an agent that carries their auth cookies. Accounts are made a month old with a
+// verified email so new-account friction (src/modules/safety/policy.ts) stays out of the way; pass fresh: true
+// for a brand-new account.
+export async function signUp(username: string, options: { admin?: boolean; fresh?: boolean } = {}) {
     const agent = request.agent(app);
     const response = await agent
         .post('/v1/auth/signup')
@@ -18,6 +20,12 @@ export async function signUp(username: string, options: { admin?: boolean } = {}
         throw new Error(`Signup failed for ${username}: ${JSON.stringify(response.body)}`);
     }
     if (options.admin) await prisma.user.update({ where: { username }, data: { role: 'admin' } });
+    if (!options.fresh) {
+        await prisma.user.update({
+            where: { username },
+            data: { created_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), email_verified_at: new Date() },
+        });
+    }
     const user = await prisma.user.findUniqueOrThrow({ where: { username } });
     return { agent, user, password: PASSWORD };
 }

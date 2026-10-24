@@ -3,10 +3,13 @@ import { Community, CommunityMember, Prisma } from '@prisma/client';
 import prisma from '../../prismaConnection';
 import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
 import { badRequest, conflict, forbidden, HttpError, notFound, parse, uuidParam } from '../../lib/http';
-import { LISTED_POST_STATUSES, postInclude } from '../../lib/serializers';
+import { LISTED_POST_STATUSES, notShadowHidden, postInclude } from '../../lib/serializers';
 import { AuthRequest, optionalAuth, requireAuth, viewerOf } from '../../middlewares/auth';
+import { COMMUNITY_CATEGORIES } from '../../shared/validation';
 import { listPosts, serializePosts } from '../posts/service';
+import { queueCount } from '../moderation/queue';
 import {
+    activeMute,
     assertCanView,
     assertModerator,
     assertOwner,
@@ -39,6 +42,7 @@ export function toPublicCommunity(community: Community) {
         description: community.description,
         image_url: community.image_url,
         rules: community.rules,
+        category: community.category,
         visibility: community.visibility,
         status: community.status,
         is_nsfw: community.is_nsfw,
@@ -48,25 +52,51 @@ export function toPublicCommunity(community: Community) {
     };
 }
 
-function viewerMembership(member: CommunityMember | null, hasPendingRequest: boolean) {
+function viewerMembership(member: CommunityMember | null, hasPendingRequest: boolean, mutedUntil: Date | null, queue: number | null) {
     return {
         is_member: isActiveMember(member),
         role: isActiveMember(member) ? member.role : null,
         is_banned: isBanned(member),
         has_pending_request: hasPendingRequest,
+        muted_until: mutedUntil,
+        // Moderators only: items waiting in the mod queue
+        queue_count: queue,
     };
 }
 
 router.get('/', async (request, response) => {
     const query = parse(listCommunitiesQuery, request.query);
     const field = query.sort === 'popular' ? 'member_count' : 'created_at';
+    const search = query.q
+        ? {
+              OR: [
+                  { name: { contains: query.q, mode: 'insensitive' as const } },
+                  { display_name: { contains: query.q, mode: 'insensitive' as const } },
+                  { description: { contains: query.q, mode: 'insensitive' as const } },
+              ],
+          }
+        : {};
     const rows = await prisma.community.findMany({
-        where: { AND: [{ status: 'active' }, afterCursor(field, 'desc', decodeCursor(query.cursor))] },
+        where: {
+            AND: [
+                { status: 'active', ...(query.category ? { category: query.category } : {}), ...search },
+                afterCursor(field, 'desc', decodeCursor(query.cursor)),
+            ],
+        },
         orderBy: [{ [field]: 'desc' }, { id: 'desc' }],
         take: query.limit + 1,
     });
     const { items, next_cursor } = paginate(rows, query.limit, field);
     response.json({ communities: items.map(toPublicCommunity), next_cursor });
+});
+
+// Directory categories with how many communities each has
+router.get('/categories', async (request, response) => {
+    const counts = await prisma.community.groupBy({ by: ['category'], where: { status: 'active' }, _count: { _all: true } });
+    const countOf = new Map(counts.map((row) => [row.category, row._count._all]));
+    response.json({
+        categories: Object.entries(COMMUNITY_CATEGORIES).map(([id, label]) => ({ id, label, count: countOf.get(id) ?? 0 })),
+    });
 });
 
 router.post('/', requireAuth, async (request: AuthRequest, response) => {
@@ -84,6 +114,7 @@ router.post('/', requireAuth, async (request: AuthRequest, response) => {
                     visibility: input.visibility,
                     is_nsfw: input.is_nsfw,
                     rules: input.rules ?? Prisma.JsonNull,
+                    category: input.category ?? null,
                     created_by: user.id,
                     member_count: 1,
                 },
@@ -103,7 +134,7 @@ router.post('/', requireAuth, async (request: AuthRequest, response) => {
 router.get('/:name', optionalAuth, async (request: AuthRequest, response) => {
     const community = await findCommunity(String(request.params.name));
     const userId = request.viewer?.user.id;
-    const [member, pending, moderators] = await Promise.all([
+    const [member, pending, moderators, mute] = await Promise.all([
         findMembership(community.id, userId),
         userId
             ? prisma.communityJoinRequest.findFirst({ where: { community_id: community.id, user_id: userId, status: 'pending' } })
@@ -113,11 +144,14 @@ router.get('/:name', optionalAuth, async (request: AuthRequest, response) => {
             orderBy: { joined_at: 'asc' },
             select: { role: true, user: { select: { username: true, display_name: true, avatar_id: true } } },
         }),
+        userId ? activeMute(community.id, userId) : null,
     ]);
+    const moderates = request.viewer?.user.role === 'admin' || (isActiveMember(member) && member.role !== 'member');
+    const queue = moderates ? await queueCount({ communityId: community.id }) : null;
     response.json({
         community: toPublicCommunity(community),
         moderators: moderators.map((row) => ({ ...row.user, role: row.role })),
-        viewer: request.viewer ? viewerMembership(member, Boolean(pending)) : null,
+        viewer: request.viewer ? viewerMembership(member, Boolean(pending), mute?.muted_until ?? null, queue) : null,
     });
 });
 
@@ -154,7 +188,7 @@ router.get('/:name/posts', optionalAuth, async (request: AuthRequest, response) 
     const showPinned = query.sort === 'hot' && !query.cursor;
     const pinnedRows = showPinned
         ? await prisma.post.findMany({
-              where: { community_id: community.id, status: { in: LISTED_POST_STATUSES }, pinned_at: { not: null } },
+              where: { community_id: community.id, status: { in: LISTED_POST_STATUSES }, pinned_at: { not: null }, ...notShadowHidden(context) },
               orderBy: { pinned_at: 'desc' },
               take: 2,
               include: postInclude,

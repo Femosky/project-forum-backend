@@ -6,6 +6,7 @@ import { withShortIdRetry } from '../../lib/ids';
 import {
     commentInclude,
     CommentRow,
+    notShadowHidden,
     PublicComment,
     THREAD_COMMENT_STATUSES,
     toPublicComment,
@@ -42,7 +43,7 @@ type RawComment = Omit<CommentRow, 'author'> & {
 
 // Descendants of the given comments, up to `levels` deep and `perParent` replies under each comment, in one query.
 // Uses root_id + the materialised path to stay inside the right subtrees and a window function to cap fan-out.
-async function loadDescendants(parents: ParentRef[], levels: number, perParent: number, sort: CommentSort) {
+async function loadDescendants(parents: ParentRef[], levels: number, perParent: number, sort: CommentSort, viewerId: string | null) {
     if (parents.length === 0 || levels <= 0 || perParent <= 0) return [];
 
     const rootIds = [...new Set(parents.map((parent) => parent.root_id ?? parent.id))];
@@ -52,7 +53,8 @@ async function loadDescendants(parents: ParentRef[], levels: number, perParent: 
     const rows = await prisma.$queryRaw<RawComment[]>`
         SELECT * FROM (
             SELECT c."id", c."short_id", c."post_id", c."author_id", c."parent_id", c."root_id", c."depth", c."path",
-                   c."body", c."is_anonymous", c."is_sponsored", c."status", c."created_at", c."edited_at", c."pinned_at",
+                   c."body", c."is_anonymous", c."is_sponsored", c."status", c."held_reason", c."shadow_hidden",
+                   c."created_at", c."edited_at", c."pinned_at",
                    c."upvote_count", c."downvote_count", c."score", c."reply_count", c."best_rank",
                    u."username" AS "author_username", u."display_name" AS "author_display_name",
                    u."avatar_id" AS "author_avatar_id", u."status"::text AS "author_status",
@@ -63,6 +65,7 @@ async function loadDescendants(parents: ParentRef[], levels: number, perParent: 
               AND c."path" LIKE ANY(${patterns}::text[])
               AND c."depth" <= ${maxDepth}
               AND c."status"::text = ANY(${THREAD_COMMENT_STATUSES}::text[])
+              AND (NOT c."shadow_hidden" OR c."author_id" = ${viewerId}::uuid)
         ) t
         WHERE t."rank" <= ${perParent}
         ORDER BY t."depth", ${orderSql(sort, 't')}`;
@@ -88,7 +91,7 @@ async function buildTree(
     communityId: string,
     context: ViewerContext
 ): Promise<PublicComment[]> {
-    const descendants = await loadDescendants(top, levels, perParent, sort);
+    const descendants = await loadDescendants(top, levels, perParent, sort, context?.userId ?? null);
     const all = [...top, ...descendants];
     const { votes, saved } = await commentViewerState(context?.userId, all.map((comment) => comment.id));
 
@@ -130,7 +133,7 @@ type ThreadOptions = {
 export async function listPostComments({ postId, communityId, sort, cursor, limit, depth, replies, context }: ThreadOptions) {
     const { field, direction } = SORTS[sort];
     const decoded = decodeCursor(cursor);
-    const base = { post_id: postId, depth: 0, status: { in: THREAD_COMMENT_STATUSES } };
+    const base = { post_id: postId, depth: 0, status: { in: THREAD_COMMENT_STATUSES }, ...notShadowHidden(context) };
 
     const pinned = decoded
         ? []
@@ -165,6 +168,7 @@ export async function listReplies(
         where: {
             AND: [
                 { parent_id: parentId, status: { in: THREAD_COMMENT_STATUSES } },
+                notShadowHidden(options.context),
                 afterCursor(field, direction, decodeCursor(options.cursor)),
             ],
         },
@@ -179,7 +183,16 @@ export async function listReplies(
     };
 }
 
-type CreateCommentInput = { postId: string; authorId: string; body: string; parentId?: string; isAnonymous: boolean };
+type CreateCommentInput = {
+    postId: string;
+    authorId: string;
+    body: string;
+    parentId?: string;
+    isAnonymous: boolean;
+    // Held by the filters for review, or written by a shadow-banned account
+    heldReason: string | null;
+    shadowHidden: boolean;
+};
 
 // Creates a comment or reply and bumps the post's comment count and the parent's reply count together
 export async function createComment(input: CreateCommentInput) {
@@ -210,30 +223,42 @@ export async function createComment(input: CreateCommentInput) {
                     path: parent ? `${parent.path}/${shortId}` : shortId,
                     body: input.body,
                     is_anonymous: input.isAnonymous,
+                    status: input.heldReason ? 'pending' : 'active',
+                    held_reason: input.heldReason,
+                    shadow_hidden: input.shadowHidden,
                 },
                 include: commentInclude,
             });
-            await tx.post.update({ where: { id: input.postId }, data: { comment_count: { increment: 1 } } });
-            if (parent) {
-                await tx.comment.update({ where: { id: parent.id }, data: { reply_count: { increment: 1 } } });
+            // Held and shadow-hidden comments aren't counted until (unless) they become visible
+            if (!input.heldReason && !input.shadowHidden) {
+                await tx.post.update({ where: { id: input.postId }, data: { comment_count: { increment: 1 } } });
+                if (parent) {
+                    await tx.comment.update({ where: { id: parent.id }, data: { reply_count: { increment: 1 } } });
+                }
             }
             return comment;
         })
     );
 }
 
-// Moves a comment out of the visible count when it is deleted or removed, and back when approved
+// Moves a comment out of the visible count when it is deleted or removed, and back when approved. Held (pending)
+// comments are out of the tree, so they also leave and rejoin the parent's reply count; removed and deleted
+// ones stay in the tree as placeholders.
 export async function setCommentStatus(
-    comment: { id: string; post_id: string; status: string },
-    status: 'active' | 'removed' | 'deleted' | 'locked',
+    comment: { id: string; post_id: string; parent_id: string | null; status: string; shadow_hidden: boolean },
+    status: 'active' | 'removed' | 'deleted' | 'locked' | 'pending',
     extra: Prisma.CommentUpdateInput = {}
 ) {
     const counted = (value: string) => value === 'active' || value === 'locked';
-    const change = (counted(status) ? 1 : 0) - (counted(comment.status) ? 1 : 0);
+    const change = comment.shadow_hidden ? 0 : (counted(status) ? 1 : 0) - (counted(comment.status) ? 1 : 0);
+    const treeChange = comment.shadow_hidden ? 0 : (status !== 'pending' ? 1 : 0) - (comment.status !== 'pending' ? 1 : 0);
     return prisma.$transaction(async (tx) => {
         const updated = await tx.comment.update({ where: { id: comment.id }, data: { status, ...extra }, include: commentInclude });
         if (change !== 0) {
             await tx.post.update({ where: { id: comment.post_id }, data: { comment_count: { increment: change } } });
+        }
+        if (treeChange !== 0 && comment.parent_id) {
+            await tx.comment.update({ where: { id: comment.parent_id }, data: { reply_count: { increment: treeChange } } });
         }
         return updated;
     });

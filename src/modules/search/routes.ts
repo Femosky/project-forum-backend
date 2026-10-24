@@ -42,7 +42,7 @@ router.get('/', optionalAuth, async (request: AuthRequest, response) => {
     const ids = await prisma.$queryRaw<{ id: string }[]>`
         SELECT p."id" FROM "Post" p
         JOIN "Community" c ON c."id" = p."community_id"
-        WHERE p."status" IN ('active', 'locked') AND c."status" = 'active' AND c."visibility" = 'public'
+        WHERE p."status" IN ('active', 'locked') AND NOT p."shadow_hidden" AND c."status" = 'active' AND c."visibility" = 'public'
           AND p."search_vector" @@ websearch_to_tsquery('english', ${query.q})
         ORDER BY ts_rank_cd(p."search_vector", websearch_to_tsquery('english', ${query.q})) DESC, p."hot_rank" DESC
         LIMIT ${PAGE_SIZE + 1} OFFSET ${offset}`;
