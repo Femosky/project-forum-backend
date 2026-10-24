@@ -50,8 +50,8 @@ Optional; each feature turns itself off without its key, and the boot log warns 
 | Variable | What it does | Where to get it |
 |---|---|---|
 | `RESEND_API_KEY`, `EMAIL_FROM` | Verification and password-reset email. Without it, emails only go to the log. | resend.com → API Keys; verify `forum.oskeylabs.com` as a sending domain. `EMAIL_FROM` like `Forum <no-reply@forum.oskeylabs.com>` |
-| `TURNSTILE_SECRET_KEY` | Bot challenge on signup, risky logins and first-day posts | Cloudflare → Turnstile → add site; the site key goes in the web app |
-| `GOOGLE_CLIENT_ID` | "Continue with Google" | Google Cloud console → OAuth client (web), origin `https://forum.oskeylabs.com` |
+| `TURNSTILE_SECRET_KEY` | Bot challenge on signup, risky logins and first-day posts. **Leave unset for now:** the web app has no Turnstile widget yet, so setting it would block every signup. | Cloudflare → Turnstile → add site |
+| `GOOGLE_CLIENT_ID` | "Continue with Google". The web app has no Google button yet, so this can wait. | Google Cloud console → OAuth client (web), origin `https://forum.oskeylabs.com` |
 | `POSTHOG_API_KEY` | Product analytics (see below) | posthog.com, **EU** cloud → Project settings → Project API key |
 | `POSTHOG_HOST` | Defaults to `https://eu.i.posthog.com` | |
 | `INDEXNOW_KEY` | Pings Bing when a post is created. Leave unset while the site is private. | any 8-128 letters/digits, same value in the web app |

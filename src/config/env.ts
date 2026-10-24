@@ -84,7 +84,6 @@ if (parsed.data.NODE_ENV === 'production') {
         WEB_ORIGINS.some((origin) => !origin.startsWith('https://')) && 'WEB_ORIGIN should only list https:// origins',
         !parsed.data.COOKIE_DOMAIN && 'COOKIE_DOMAIN is not set, so the web app on another subdomain will not see sign-in cookies',
         !parsed.data.RESEND_API_KEY && 'RESEND_API_KEY is not set, so emails are logged instead of sent',
-        !parsed.data.TURNSTILE_SECRET_KEY && 'TURNSTILE_SECRET_KEY is not set, so signup and posting challenges are skipped',
         !parsed.data.POSTHOG_API_KEY && 'POSTHOG_API_KEY is not set, so no analytics are recorded',
     ].filter(Boolean);
     for (const warning of warnings) console.warn(`Config warning: ${warning}`);
