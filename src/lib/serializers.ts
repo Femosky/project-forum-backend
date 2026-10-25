@@ -72,7 +72,13 @@ export function toPublicPost(post: PostRow, context: ViewerContext, votes?: Vote
         community: { id: post.community.id, name: post.community.name, display_name: post.community.display_name, image_url: post.community.image_url },
         author: revealAuthor ? publicAuthor(post.author) : null,
         viewer: context
-            ? { vote: votes?.get(post.id) ?? 0, saved: saved?.has(post.id) ?? false, is_author: isAuthor }
+            ? {
+                  vote: votes?.get(post.id) ?? 0,
+                  saved: saved?.has(post.id) ?? false,
+                  is_author: isAuthor,
+                  // Only the author sees how many people opened their post
+                  ...(isAuthor ? { views: post.view_count } : {}),
+              }
             : null,
     };
 }
@@ -99,6 +105,7 @@ export type CommentRow = {
     pinned_at: Date | null;
     upvote_count: number;
     downvote_count: number;
+    view_count: number;
     score: number;
     reply_count: number;
     best_rank: number;
@@ -135,7 +142,12 @@ export function toPublicComment(comment: CommentRow, communityId: string, contex
         reply_count: comment.reply_count,
         author: revealAuthor ? publicAuthor(comment.author) : null,
         viewer: context
-            ? { vote: votes?.get(comment.id) ?? 0, saved: saved?.has(comment.id) ?? false, is_author: isAuthor }
+            ? {
+                  vote: votes?.get(comment.id) ?? 0,
+                  saved: saved?.has(comment.id) ?? false,
+                  is_author: isAuthor,
+                  ...(isAuthor ? { views: comment.view_count } : {}),
+              }
             : null,
     };
 }

@@ -34,7 +34,7 @@ describe('voting', () => {
         await alice.agent.put(`/v1/posts/${post.id}/vote`).send({ value: -1 });
 
         const feed = await alice.agent.get('/v1/feed?scope=all');
-        expect(feed.body.posts[0].viewer).toEqual({ vote: -1, saved: false, is_author: true });
+        expect(feed.body.posts[0].viewer).toEqual({ vote: -1, saved: false, is_author: true, views: 0 });
         // Self-votes don't earn karma
         expect((await prisma.user.findUniqueOrThrow({ where: { id: alice.user.id } })).karma).toBe(0);
     });

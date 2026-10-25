@@ -55,7 +55,7 @@ async function loadDescendants(parents: ParentRef[], levels: number, perParent: 
             SELECT c."id", c."short_id", c."post_id", c."author_id", c."parent_id", c."root_id", c."depth", c."path",
                    c."body", c."is_anonymous", c."is_sponsored", c."status", c."held_reason", c."shadow_hidden",
                    c."created_at", c."edited_at", c."pinned_at",
-                   c."upvote_count", c."downvote_count", c."score", c."reply_count", c."best_rank",
+                   c."upvote_count", c."downvote_count", c."score", c."reply_count", c."best_rank", c."view_count",
                    u."username" AS "author_username", u."display_name" AS "author_display_name",
                    u."avatar_id" AS "author_avatar_id", u."status"::text AS "author_status",
                    row_number() OVER (PARTITION BY c."parent_id" ORDER BY ${orderSql(sort, 'c')}) AS "rank"
