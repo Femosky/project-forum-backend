@@ -38,6 +38,25 @@ router.patch('/me', requireAuth, async (request: AuthRequest, response) => {
     response.json({ user: toPrivateUser(updated) });
 });
 
+// Numbers for the signed-in user's own profile: what they've written and how it was received
+router.get('/me/stats', requireAuth, async (request: AuthRequest, response) => {
+    const { user } = viewerOf(request);
+    const live = { author_id: user.id, status: { notIn: ['deleted' as const, 'removed' as const] } };
+    const [posts, comments] = await Promise.all([
+        prisma.post.aggregate({ where: live, _count: true, _sum: { upvote_count: true, downvote_count: true, view_count: true } }),
+        prisma.comment.aggregate({ where: live, _count: true, _sum: { upvote_count: true, downvote_count: true, view_count: true } }),
+    ]);
+    response.json({
+        stats: {
+            posts: posts._count,
+            comments: comments._count,
+            upvotes_received: (posts._sum.upvote_count ?? 0) + (comments._sum.upvote_count ?? 0),
+            downvotes_received: (posts._sum.downvote_count ?? 0) + (comments._sum.downvote_count ?? 0),
+            views: (posts._sum.view_count ?? 0) + (comments._sum.view_count ?? 0),
+        },
+    });
+});
+
 router.get('/me/communities', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const rows = await prisma.communityMember.findMany({

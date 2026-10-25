@@ -417,6 +417,8 @@ model Post {
   shadow_hidden Boolean       @default(false)
 
   upvote_count   Int   @default(0)
+  // Times a person (not a bot, not the author) opened it; shown to the author only
+  view_count     Int   @default(0)
   downvote_count Int   @default(0)
   score          Int   @default(0)
   comment_count  Int   @default(0)
@@ -474,6 +476,8 @@ model Comment {
   shadow_hidden Boolean       @default(false)
 
   upvote_count   Int   @default(0)
+  // Times its thread was opened with this comment on screen (not by a bot or the author); author only
+  view_count     Int   @default(0)
   downvote_count Int   @default(0)
   score          Int   @default(0)
   reply_count    Int   @default(0)
