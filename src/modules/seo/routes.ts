@@ -21,7 +21,7 @@ type Chunk = { page: number; lastmod: Date | null };
 const LISTED_USER_SQL = Prisma.sql`
     u."status" = 'active' AND EXISTS (
         SELECT 1 FROM "Post" p JOIN "Community" c ON c."id" = p."community_id"
-        WHERE p."author_id" = u."id" AND NOT p."is_anonymous" AND ${INDEXABLE_POST_SQL}
+        WHERE p."author_id" = u."id" AND NOT p."is_anonymous" AND p."status" <> 'deleted' AND ${INDEXABLE_POST_SQL}
     )`;
 
 function toChunks(rows: { chunk: bigint | number; lastmod: Date | null }[]): Chunk[] {
@@ -98,10 +98,12 @@ async function pageState(type: 'post' | 'community' | 'user', id: string): Promi
         const where = idOrShortId(id) as Prisma.PostWhereUniqueInput;
         const post = await prisma.post.findUnique({
             where,
-            select: { short_id: true, slug: true, status: true, shadow_hidden: true, community: { select: { name: true, status: true, visibility: true } } },
+            select: { short_id: true, slug: true, status: true, comment_count: true, shadow_hidden: true, community: { select: { name: true, status: true, visibility: true } } },
         });
         if (!post || post.status === 'pending' || post.shadow_hidden || post.community.visibility !== 'public') return { state: 'missing' };
-        if (post.status === 'deleted' || post.status === 'removed' || post.community.status === 'deleted') return { state: 'gone' };
+        // A deleted post stays live as a tombstone while comments remain under it
+        const deletedForGood = post.status === 'deleted' && post.comment_count === 0;
+        if (deletedForGood || post.status === 'removed' || post.community.status === 'deleted') return { state: 'gone' };
         return { state: 'live', path: postPath(post) };
     }
     if (type === 'community') {

@@ -2,7 +2,8 @@ import { Prisma } from '@prisma/client';
 
 // Which posts search engines should index. Thin pages hurt the whole site's ranking, so a post is held back
 // (noindex, left out of the sitemap) while it is:
-//   - removed, deleted, pending or shadow-hidden, or in a private or closed community;
+//   - removed, pending or shadow-hidden, or in a private or closed community;
+//   - deleted by its author with no comments left (a deleted post with comments is still worth indexing);
 //   - written by an account that was under a day old when it posted, until it gets a reply or an upvote;
 //   - very short (a text post under THIN_TEXT_CHARS of title plus body) with no replies yet.
 // The same rule is written twice, once for a loaded post and once as SQL for the sitemap; keep them in step.
@@ -24,7 +25,8 @@ type IndexablePost = {
 };
 
 export function isIndexable(post: IndexablePost): boolean {
-    if (post.status !== 'active' && post.status !== 'locked') return false;
+    const isTombstone = post.status === 'deleted' && post.comment_count > 0;
+    if (post.status !== 'active' && post.status !== 'locked' && !isTombstone) return false;
     if (post.shadow_hidden) return false;
     if (post.community.visibility !== 'public' || (post.community.status ?? 'active') !== 'active') return false;
 
@@ -38,6 +40,6 @@ export function isIndexable(post: IndexablePost): boolean {
 
 // The same rule for raw SQL, over "Post" p JOIN "Community" c JOIN "User" u
 export const INDEXABLE_POST_SQL = Prisma.sql`
-    p."status" IN ('active', 'locked') AND NOT p."shadow_hidden" AND c."status" = 'active' AND c."visibility" = 'public'
+    (p."status" IN ('active', 'locked') OR (p."status" = 'deleted' AND p."comment_count" > 0)) AND NOT p."shadow_hidden" AND c."status" = 'active' AND c."visibility" = 'public'
     AND (p."comment_count" > 0 OR p."upvote_count" > 0 OR p."created_at" - u."created_at" >= interval '24 hours')
     AND NOT (p."type" = 'text' AND char_length(p."title") + char_length(p."body") < ${THIN_TEXT_CHARS} AND p."comment_count" = 0)`;

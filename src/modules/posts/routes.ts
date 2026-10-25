@@ -3,7 +3,7 @@ import { track } from '../../lib/analytics';
 import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { badRequest, forbidden, parse } from '../../lib/http';
-import { LISTED_POST_STATUSES, postInclude, toPublicComment, toPublicPost } from '../../lib/serializers';
+import { DELETED_POST_DATA, LISTED_POST_STATUSES, postInclude, toPublicComment, toPublicPost } from '../../lib/serializers';
 import { urlKey } from '../../lib/urls';
 import { fetchLinkPreview } from '../../lib/linkPreview';
 import { isTurnstileEnabled, requireTurnstile } from '../../lib/turnstile';
@@ -172,7 +172,8 @@ router.patch('/:id', requireAuth, async (request: AuthRequest, response) => {
     response.json({ post: toPublicPost(updated, context) });
 });
 
-// The author deletes their post: it leaves every list, but its comments stay readable to moderators
+// The author deletes their post: it leaves every list and its text, link and author are wiped, but the page stays
+// up as a "[deleted]" tombstone while comments remain under it, so other people's replies aren't lost
 router.delete('/:id', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const context = await viewerContext(request.viewer);
@@ -182,7 +183,7 @@ router.delete('/:id', requireAuth, async (request: AuthRequest, response) => {
 
     const wasCounted = (post.status === 'active' || post.status === 'locked') && !post.shadow_hidden;
     await prisma.$transaction([
-        prisma.post.update({ where: { id: post.id }, data: { status: 'deleted', pinned_at: null } }),
+        prisma.post.update({ where: { id: post.id }, data: DELETED_POST_DATA }),
         ...(wasCounted
             ? [prisma.community.update({ where: { id: post.community_id }, data: { post_count: { decrement: 1 } } })]
             : []),
