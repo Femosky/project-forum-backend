@@ -81,6 +81,24 @@ async function loadDescendants(parents: ParentRef[], levels: number, perParent: 
     });
 }
 
+// Which of these author-deleted comments still have something visible beneath them. A deleted comment with
+// nothing left under it is dropped from the thread instead of showing an empty "[deleted]" row; one with replies
+// stays as a tombstone so the replies keep their place. Removed comments count as visible (they show "[removed]").
+async function deletedWithReplies(deleted: CommentRow[], viewerId: string | null) {
+    if (deleted.length === 0) return new Set<string>();
+    const rows = await prisma.$queryRaw<{ id: string }[]>`
+        SELECT d."id" FROM "Comment" d
+        WHERE d."id" = ANY(${deleted.map((comment) => comment.id)}::uuid[])
+          AND EXISTS (
+              SELECT 1 FROM "Comment" x
+              WHERE x."root_id" = coalesce(d."root_id", d."id")
+                AND x."path" LIKE d."path" || '/%'
+                AND x."status" IN ('active', 'locked', 'removed')
+                AND (NOT x."shadow_hidden" OR x."author_id" = ${viewerId}::uuid)
+          )`;
+    return new Set(rows.map((row) => row.id));
+}
+
 // Serialises a page of comments with their reply trees. Each node gets `replies` and `more_replies`
 // (replies that exist but were not loaded: fetch them from /v1/comments/:id/replies).
 async function buildTree(
@@ -114,7 +132,11 @@ async function buildTree(
     for (const node of nodes.values()) {
         node.more_replies = Math.max(node.reply_count - (node.replies?.length ?? 0), 0);
     }
-    return top.map((comment) => nodes.get(comment.id)!);
+
+    const kept = await deletedWithReplies(all.filter((comment) => comment.status === 'deleted'), context?.userId ?? null);
+    const shown = (node: PublicComment) => node.status !== 'deleted' || kept.has(node.id);
+    for (const node of nodes.values()) node.replies = node.replies!.filter(shown);
+    return top.map((comment) => nodes.get(comment.id)!).filter(shown);
 }
 
 type ThreadOptions = {

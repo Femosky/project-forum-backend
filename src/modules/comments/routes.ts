@@ -4,7 +4,7 @@ import { Prisma, User } from '@prisma/client';
 import prisma from '../../prismaConnection';
 import { badRequest, forbidden, notFound, parse } from '../../lib/http';
 import { idOrShortId } from '../../lib/ids';
-import { commentInclude, isHiddenFrom, LISTED_POST_STATUSES, THREAD_COMMENT_STATUSES, toPublicComment } from '../../lib/serializers';
+import { commentInclude, isHiddenFrom, isReadablePost, THREAD_COMMENT_STATUSES, toPublicComment } from '../../lib/serializers';
 import { AuthRequest, optionalAuth, requireAuth, viewerOf } from '../../middlewares/auth';
 import { assertCanParticipate, assertCanView, canModerate, viewerContext, ViewerContext } from '../communities/access';
 import { commentViewerState, voteComment } from '../votes/service';
@@ -25,7 +25,7 @@ export async function findVisibleComment(idOrShort: string, user: User | undefin
 
     const { post } = comment;
     const isMod = canModerate(context, post.community_id);
-    const postVisible = LISTED_POST_STATUSES.includes(post.status) || isMod;
+    const postVisible = isReadablePost(post) || isMod;
     const commentVisible =
         THREAD_COMMENT_STATUSES.includes(comment.status) || isMod || context?.userId === comment.author_id;
     if (!postVisible || !commentVisible || isHiddenFrom(comment, context) || isHiddenFrom(post, context) || post.community.status === 'deleted') {

@@ -134,3 +134,103 @@ describe('status filters (bug 9)', () => {
         expect((await api().get(`/v1/posts/${post.id}/comments`)).body.comments).toEqual([]);
     });
 });
+
+describe('author deletes keep the discussion (tombstones)', () => {
+    it('keeps a deleted post with comments open as a "[deleted]" tombstone and wipes its text', async () => {
+        const alice = await signUp('alice');
+        const bob = await signUp('bob');
+        await createCommunity(alice.agent, 'lounge');
+        const post = await createPost(alice.agent, 'lounge', { title: 'Renting a flat in Yaba', body: 'my private story' });
+        await bob.agent.put(`/v1/posts/${post.id}/vote`).send({ value: 1 });
+        await createComment(bob.agent, post.id, { body: 'useful answer' });
+        await alice.agent.delete(`/v1/posts/${post.id}`);
+
+        const stored = await prisma.post.findUniqueOrThrow({ where: { id: post.id } });
+        expect(stored).toMatchObject({ status: 'deleted', body: '', url: null, link_preview: null });
+
+        for (const agent of [api(), alice.agent, bob.agent]) {
+            const page = await agent.get(`/v1/posts/${post.short_id}`);
+            expect(page.status).toBe(200);
+            expect(page.body.post).toMatchObject({ status: 'deleted', title: 'Renting a flat in Yaba', body: '', author: null, score: 0, upvote_count: 0 });
+            expect(page.body.post.viewer?.views).toBeUndefined();
+        }
+        const thread = await api().get(`/v1/posts/${post.short_id}/comments`);
+        expect(thread.body.comments.map((c: { body: string }) => c.body)).toEqual(['useful answer']);
+
+        // Read-only, out of lists, still on the commenter's profile and live for crawlers
+        expect((await bob.agent.post(`/v1/posts/${post.id}/comments`).send({ body: 'late comment' })).status).toBe(400);
+        expect((await bob.agent.put(`/v1/posts/${post.id}/vote`).send({ value: -1 })).status).toBe(400);
+        expect((await api().get('/v1/communities/lounge/posts')).body.posts).toEqual([]);
+        expect((await api().get('/v1/users/bob/comments')).body.comments.map((c: { body: string }) => c.body)).toEqual(['useful answer']);
+        expect((await api().get(`/v1/seo/status?type=post&id=${post.short_id}`)).body.state).toBe('live');
+    });
+
+    it('treats a deleted post as gone once no visible comments remain', async () => {
+        const alice = await signUp('alice');
+        await createCommunity(alice.agent, 'lounge');
+        const post = await createPost(alice.agent, 'lounge');
+        const comment = await createComment(alice.agent, post.id);
+        await alice.agent.delete(`/v1/posts/${post.id}`);
+        expect((await api().get(`/v1/posts/${post.short_id}`)).status).toBe(200);
+
+        await alice.agent.delete(`/v1/comments/${comment.id}`);
+        expect((await api().get(`/v1/posts/${post.short_id}`)).status).toBe(404);
+        expect((await api().get(`/v1/seo/status?type=post&id=${post.short_id}`)).body.state).toBe('gone');
+    });
+
+    it('hides deleted comments with nothing under them but keeps ones whose replies survive', async () => {
+        const alice = await signUp('alice');
+        const bob = await signUp('bob');
+        await createCommunity(alice.agent, 'lounge');
+        const post = await createPost(alice.agent, 'lounge');
+        const lonely = await createComment(alice.agent, post.id, { body: 'lonely' });
+        const top = await createComment(alice.agent, post.id, { body: 'top' });
+        const middle = await createComment(alice.agent, post.id, { body: 'middle', parent_id: top.id });
+        await createComment(bob.agent, post.id, { body: 'deep reply', parent_id: middle.id });
+        await bob.agent.put(`/v1/comments/${top.id}/vote`).send({ value: 1 });
+        for (const comment of [lonely, top, middle]) await alice.agent.delete(`/v1/comments/${comment.id}`);
+
+        const thread = await api().get(`/v1/posts/${post.short_id}/comments?sort=old`);
+        expect(thread.body.comments).toHaveLength(1);
+        const [kept] = thread.body.comments;
+        expect(kept).toMatchObject({ body: '[deleted]', author: null, score: 0, upvote_count: 0 });
+        expect(kept.replies[0]).toMatchObject({ body: '[deleted]', author: null });
+        expect(kept.replies[0].replies[0].body).toBe('deep reply');
+
+        // Once the last live reply goes, the whole chain disappears
+        const deep = kept.replies[0].replies[0];
+        await bob.agent.delete(`/v1/comments/${deep.id}`);
+        expect((await api().get(`/v1/posts/${post.short_id}/comments`)).body.comments).toEqual([]);
+    });
+
+    it('still shows a "[removed]" reply under a deleted comment', async () => {
+        const alice = await signUp('alice');
+        const bob = await signUp('bob');
+        await createCommunity(alice.agent, 'lounge');
+        const post = await createPost(alice.agent, 'lounge');
+        const parent = await createComment(bob.agent, post.id, { body: 'parent' });
+        const reply = await createComment(bob.agent, post.id, { body: 'rude', parent_id: parent.id });
+        await alice.agent.post(`/v1/comments/${reply.id}/moderation`).send({ action: 'remove' });
+        await bob.agent.delete(`/v1/comments/${parent.id}`);
+
+        const [kept] = (await api().get(`/v1/posts/${post.short_id}/comments`)).body.comments;
+        expect(kept.body).toBe('[deleted]');
+        expect(kept.replies[0].body).toBe('[removed]');
+    });
+});
+
+
+describe('posts deleted before tombstones', () => {
+    it('never serves the text of a deleted post, even if it is still stored', async () => {
+        const alice = await signUp('alice');
+        const bob = await signUp('bob');
+        await createCommunity(alice.agent, 'lounge');
+        const post = await createPost(alice.agent, 'lounge', { body: 'old private text' });
+        await createComment(bob.agent, post.id, { body: 'reply' });
+        await prisma.post.update({ where: { id: post.id }, data: { status: 'deleted' } });
+
+        const page = await api().get(`/v1/posts/${post.short_id}`);
+        expect(page.body.post).toMatchObject({ body: '', author: null });
+        expect(JSON.stringify(page.body)).not.toContain('old private text');
+    });
+});

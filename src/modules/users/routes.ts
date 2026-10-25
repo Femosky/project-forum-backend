@@ -3,7 +3,7 @@ import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
 import { badRequest, notFound, parse } from '../../lib/http';
-import { commentInclude, LISTED_POST_STATUSES, notShadowHidden, postInclude, toPublicComment } from '../../lib/serializers';
+import { commentInclude, notShadowHidden, postInclude, READABLE_POST_WHERE, toPublicComment } from '../../lib/serializers';
 import { AuthRequest, optionalAuth, requireAuth, viewerOf } from '../../middlewares/auth';
 import { LIMITS, pageQuery } from '../../shared/validation';
 import { revokeAllSessions, toPrivateUser, verifyPassword } from '../auth/service';
@@ -78,7 +78,7 @@ router.get('/me/saved', requireAuth, async (request: AuthRequest, response) => {
         const rows = await prisma.savedPost.findMany({
             where: {
                 user_id: user.id,
-                post: { status: { in: LISTED_POST_STATUSES } },
+                post: READABLE_POST_WHERE,
                 ...(cursor ? { OR: [{ created_at: { lt: cursor.value as Date } }, { created_at: cursor.value as Date, post_id: { lt: cursor.id } }] } : {}),
             },
             orderBy: [{ created_at: 'desc' }, { post_id: 'desc' }],
@@ -236,7 +236,7 @@ router.get('/:username/comments', optionalAuth, async (request: AuthRequest, res
                     is_anonymous: false,
                     status: { in: ['active', 'locked'] },
                     ...notShadowHidden(context),
-                    post: { status: { in: LISTED_POST_STATUSES }, community: { visibility: 'public' } },
+                    post: { ...READABLE_POST_WHERE, community: { visibility: 'public' } },
                 },
                 afterCursor('created_at', 'desc', decodeCursor(query.cursor)),
             ],

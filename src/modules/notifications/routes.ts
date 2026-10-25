@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 import prisma from '../../prismaConnection';
 import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
 import { parse } from '../../lib/http';
-import { LISTED_POST_STATUSES } from '../../lib/serializers';
+import { READABLE_POST_WHERE } from '../../lib/serializers';
 import { AuthRequest, requireAuth, viewerOf } from '../../middlewares/auth';
 import { pageQuery } from '../../shared/validation';
 
@@ -17,7 +17,7 @@ const EXCERPT_LENGTH = 200;
 // Only notifications whose comment and post are still there to read
 const visible = {
     comment: { status: { in: ['active', 'locked'] } },
-    post: { status: { in: LISTED_POST_STATUSES } },
+    post: READABLE_POST_WHERE,
 } satisfies Prisma.NotificationWhereInput;
 
 const include = {

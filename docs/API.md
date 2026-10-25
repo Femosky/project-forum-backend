@@ -8,7 +8,7 @@ Everything lives under `/v1`. Requests and responses are JSON. Auth is cookie-ba
 
 **Ids**: any `:id` for posts and comments accepts the UUID or the 8-character short id.
 
-**Viewer fields**: when signed in, posts and comments carry `viewer: { vote, saved, is_author }`. Anonymous content has `author: null` unless you wrote it or moderate that community. Deleted comments read `[deleted]` and removed ones `[removed]`, with `author: null`; they stay in the tree so replies keep their place.
+**Viewer fields**: when signed in, posts and comments carry `viewer: { vote, saved, is_author }`. Anonymous content has `author: null` unless you wrote it or moderate that community. Deleted comments read `[deleted]` and removed ones `[removed]`, with `author: null`; they stay in the tree so replies keep their place. A deleted comment with nothing visible beneath it is left out, and deleted ones carry zero counts. A post its author deleted keeps its page while it has comments: `status: 'deleted'`, title kept, empty body, no link, `author: null`, zero counts, read-only. With no comments left it is a 404.
 
 ## Auth `/v1/auth`
 
@@ -166,7 +166,7 @@ Data for the web app's sitemaps; the web app caches it.
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/sitemap` | `{ posts, communities, users }`, each a list of `{ page, lastmod }` chunks of up to 50,000 URLs |
-| GET | `/status?type=post\|community\|user&id=` | `{ state: 'live', path }`, `{ state: 'gone' }` (deleted or removed) or `{ state: 'missing' }`, so the web app can answer crawlers with 301/404/410 |
+| GET | `/status?type=post\|community\|user&id=` | `{ state: 'live', path }`, `{ state: 'gone' }` (removed, or deleted with no comments left) or `{ state: 'missing' }`, so the web app can answer crawlers with 301/404/410 |
 | GET | `/sitemap/:kind/:page` | `kind` is `posts` (`community, short_id, slug, lastmod`), `communities` (`name, lastmod`) or `users` (`username, lastmod`) |
 
 A post is indexable when it is active or locked in a public community, isn't a very short text post (under 40 characters of title and body) without replies, and, if its author's account was under a day old when posting, has a reply or an upvote. Users are listed when they have at least one indexable, non-anonymous post. With `INDEXNOW_KEY` set, new indexable posts are pinged to IndexNow (Bing, Yandex); the web app must serve the same key at `/indexnow-key.txt`.

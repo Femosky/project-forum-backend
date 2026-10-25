@@ -4,7 +4,7 @@ import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
 import { idOrShortId, withShortIdRetry } from '../../lib/ids';
 import { notFound } from '../../lib/http';
 import { hotRank, TopWindow, topWindowStart } from '../../lib/ranking';
-import { isHiddenFrom, LISTED_POST_STATUSES, notShadowHidden, postInclude, PostRow, toPublicPost } from '../../lib/serializers';
+import { isHiddenFrom, isReadablePost, LISTED_POST_STATUSES, notShadowHidden, postInclude, PostRow, toPublicPost } from '../../lib/serializers';
 import { slugify } from '../../lib/slug';
 import { urlKey } from '../../lib/urls';
 import { assertCanView, canModerate, ViewerContext } from '../communities/access';
@@ -53,8 +53,8 @@ export async function serializePosts(rows: PostRow[], context: ViewerContext) {
     return rows.map((row) => toPublicPost(row, context, votes, saved));
 }
 
-// Finds a post by id or short id that this viewer is allowed to see. Removed, deleted and pending posts are
-// visible only to moderators (and pending ones to their author).
+// Finds a post by id or short id that this viewer is allowed to see. Removed and pending posts are visible only
+// to moderators (and pending ones to their author); deleted ones to everyone while comments remain under them.
 export async function findVisiblePost(idOrShort: string, viewerUser: User | undefined, context: ViewerContext) {
     const post = await prisma.post.findUnique({
         where: idOrShortId(idOrShort) as Prisma.PostWhereUniqueInput,
@@ -65,7 +65,7 @@ export async function findVisiblePost(idOrShort: string, viewerUser: User | unde
     const isMod = canModerate(context, post.community_id);
     const isAuthor = context?.userId === post.author_id;
     const visible =
-        LISTED_POST_STATUSES.includes(post.status) || isMod || (post.status === 'pending' && isAuthor);
+        isReadablePost(post) || isMod || (post.status === 'pending' && isAuthor);
     if (!visible || isHiddenFrom(post, context) || post.community.status === 'deleted') throw notFound('Post not found');
 
     await assertCanView(post.community, viewerUser);
