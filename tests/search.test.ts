@@ -28,6 +28,13 @@ describe('search', () => {
         expect(complete.body.communities.map((c: { name: string }) => c.name).sort()).toEqual(['lagos_rent', 'london_naija']);
         expect((await api().get('/v1/search/autocomplete?q=lo')).body.communities.map((c: { name: string }) => c.name)).toEqual(['london_naija']);
         expect((await api().get('/v1/search/autocomplete?q=ali')).body.users.map((u: { username: string }) => u.username)).toEqual(['alice']);
+        // Spaces stand for underscores, and any word in the name can start the match
+        const names = async (q: string) =>
+            (await api().get(`/v1/search/autocomplete?q=${encodeURIComponent(q)}`)).body.communities.map((c: { name: string }) => c.name);
+        expect(await names('lagos r')).toEqual(['lagos_rent']);
+        expect(await names('rent')).toEqual(['lagos_rent']);
+        expect(await names('naija')).toEqual(['london_naija']);
+        expect(await names('ent')).toEqual([]);
         // LIKE wildcards in the query are treated literally
         expect((await api().get('/v1/search/autocomplete?q=%25')).body.communities).toEqual([]);
     });

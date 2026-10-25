@@ -72,16 +72,21 @@ function trackSearch(request: AuthRequest, query: z.infer<typeof searchQuery>, f
 
 const autocompleteQuery = z.object({ q: z.string().trim().min(1).max(50) });
 
-// Prefix match on community names and usernames, served by trigram GIN indexes
+// Prefix match on community names and usernames, served by trigram GIN indexes. Community names also match from the
+// start of any word, typed with spaces ("tech car" and "careers" both find tech_careers); whole-name prefixes rank first.
 router.get('/autocomplete', async (request, response) => {
     const { q } = parse(autocompleteQuery, request.query);
-    const pattern = `${q.toLowerCase().replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+    const escape = (text: string) => text.replace(/[\\%_]/g, (char) => `\\${char}`);
+    const pattern = `${escape(q.toLowerCase())}%`;
+    const handle = escape(q.toLowerCase().replace(/[\s-]+/g, '_'));
+    // Mid-name matches need three characters for the trigram index to help; shorter ones only match the start
+    const wordStart = q.length >= 3 ? `%\\_${handle}%` : `${handle}%`;
 
     const [communities, users] = await Promise.all([
         prisma.$queryRaw<{ name: string; display_name: string | null; image_url: string | null; member_count: number }[]>`
             SELECT "name", "display_name", "image_url", "member_count" FROM "Community"
-            WHERE "status" = 'active' AND "name" LIKE ${pattern}
-            ORDER BY "member_count" DESC LIMIT 8`,
+            WHERE "status" = 'active' AND ("name" LIKE ${`${handle}%`} OR "name" LIKE ${wordStart})
+            ORDER BY ("name" LIKE ${`${handle}%`}) DESC, "member_count" DESC LIMIT 8`,
         prisma.$queryRaw<{ username: string; display_name: string | null; avatar_id: string }[]>`
             SELECT "username", "display_name", "avatar_id" FROM "User"
             WHERE "status" = 'active' AND "username" LIKE ${pattern}
