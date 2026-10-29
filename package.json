@@ -14,6 +14,7 @@
         "test": "vitest run",
         "seed": "ts-node prisma/seed.ts",
         "seed:bench": "ts-node prisma/seed.ts --bench",
+        "seed:launch": "ts-node prisma/launch-seed.ts",
         "bench": "ts-node scripts/bench.ts",
         "admin:create-owner": "ts-node scripts/create-owner.ts"
     },
