@@ -79,7 +79,9 @@ describe('staff sign-in', () => {
         expect((await agent.post('/v1/posts').send({ community: 'x', title: 'hello there' })).status).toBe(401);
 
         for (let attempt = 0; attempt < 5; attempt++) await api().post('/v1/admin/auth/login').send({ email: 'root@staff.test', password: 'nope' });
-        expect((await api().post('/v1/admin/auth/login').send({ email: 'root@staff.test', password: PASSWORD })).status).toBe(429);
+        const blocked = await api().post('/v1/admin/auth/login').send({ email: 'root@staff.test', password: PASSWORD });
+        expect(blocked.status).toBe(429);
+        expect(blocked.body.error.message).toMatch(/Try again in \d+ minutes?/);
 
         await agent.post('/v1/admin/auth/logout').expect(200);
         expect((await agent.get('/v1/admin/overview')).status).toBe(401);
@@ -129,5 +131,55 @@ describe('managing staff', () => {
         expect(log.body.actions[0]).toMatchObject({ action: 'remove_post', actor: null, staff: { name: 'root' } });
         // The community's own mod log shows it too
         expect((await alice.agent.get('/v1/communities/lounge/mod-log')).body.actions[0].action).toBe('remove_post');
+    });
+});
+
+describe('sign-in limits and sessions side by side (regression: the admin page logged Femi out)', () => {
+    it("doesn't count page loads, session checks or successful sign-ins, only failures", async () => {
+        const { agent, secret } = await signInStaff('root', 'owner');
+        // Every admin page render checks the session; that used to burn the shared sign-in limit
+        for (let index = 0; index < 50; index++) expect((await agent.get('/v1/admin/auth/me')).status).toBe(200);
+        for (let index = 0; index < 6; index++) {
+            const again = request.agent(app);
+            expect((await again.post('/v1/admin/auth/login').send({ email: 'root@staff.test', password: PASSWORD })).status).toBe(200);
+            expect((await again.post('/v1/admin/auth/2fa/verify').send({ code: totpCode(secret) })).status).toBe(200);
+        }
+        expect((await agent.get('/v1/admin/overview')).status).toBe(200);
+    });
+
+    it('limits wrong codes too, per account and network, and a success clears the count', async () => {
+        const { secret } = await signInStaff('root', 'owner');
+        await signInStaff('other', 'admin');
+        const agent = request.agent(app);
+        await agent.post('/v1/admin/auth/login').send({ email: 'root@staff.test', password: PASSWORD }).expect(200);
+        for (let attempt = 0; attempt < 4; attempt++) expect((await agent.post('/v1/admin/auth/2fa/verify').send({ code: '000000' })).status).toBe(400);
+        // A success clears it...
+        await agent.post('/v1/admin/auth/2fa/verify').send({ code: totpCode(secret) }).expect(200);
+        const next = request.agent(app);
+        await next.post('/v1/admin/auth/login').send({ email: 'root@staff.test', password: PASSWORD }).expect(200);
+        for (let attempt = 0; attempt < 5; attempt++) await next.post('/v1/admin/auth/2fa/verify').send({ code: '000000' });
+        // ...five failures in a row block this account from this network...
+        expect((await next.post('/v1/admin/auth/2fa/verify').send({ code: totpCode(secret) })).body.error.code).toBe('too_many_attempts');
+        // ...but not someone else
+        expect((await api().post('/v1/admin/auth/login').send({ email: 'other@staff.test', password: PASSWORD })).status).toBe(200);
+    });
+
+    it('keeps a forum session and an admin session side by side in one browser', async () => {
+        const forum = await signUp('alice');
+        const staff = await prisma.staffAccount.create({
+            data: { email: 'alice@staff.test', name: 'Alice', role: 'owner', password_hash: await hashPassword(PASSWORD), password_temporary: true },
+        });
+        const agent = forum.agent;
+        await agent.post('/v1/admin/auth/login').send({ email: staff.email, password: PASSWORD }).expect(200);
+        const setup = await agent.get('/v1/admin/auth/2fa/setup');
+        await agent.post('/v1/admin/auth/2fa/setup').send({ code: totpCode(setup.body.secret) }).expect(200);
+        await agent.post('/v1/admin/auth/password').send({ current_password: PASSWORD, new_password: STRONG }).expect(200);
+
+        expect((await agent.get('/v1/auth/me')).body.user.username).toBe('alice');
+        expect((await agent.get('/v1/admin/auth/me')).body.staff.email).toBe('alice@staff.test');
+        // Signing out of the panel leaves the forum session, and the other way round
+        await agent.post('/v1/admin/auth/logout').expect(200);
+        expect((await agent.get('/v1/auth/me')).status).toBe(200);
+        expect((await agent.get('/v1/admin/overview')).status).toBe(401);
     });
 });

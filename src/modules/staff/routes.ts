@@ -1,4 +1,6 @@
-import { Router } from 'express';
+import { Request, Router } from 'express';
+import { ipKeyGenerator } from 'express-rate-limit';
+import { createStore } from '../../lib/rateLimit';
 import { z } from 'zod';
 import QRCode from 'qrcode';
 import prisma from '../../prismaConnection';
@@ -34,9 +36,34 @@ export const staffAuthRoutes = Router();
 export const staffRoutes = Router();
 
 const ISSUER = 'Project Forum admin';
-// Wrong passwords before the account waits a while (Turnstile and the auth rate limit come first)
-const MAX_FAILED_LOGINS = 5;
-const LOCK_MS = 15 * 60 * 1000;
+
+// Only failed attempts count towards the sign-in limit: a wrong password or a wrong code. Page loads, session checks
+// and successful steps never do. 5 failures per account from one network in 15 minutes, and 20 from one network
+// across accounts; a success clears the account's count. Counting per account and network (not per account alone)
+// means nobody can lock the owner out by guessing from elsewhere.
+const FAILURE_WINDOW_MS = 15 * 60 * 1000;
+const MAX_FAILURES_PER_ACCOUNT = 5;
+const MAX_FAILURES_PER_NETWORK = 20;
+const failures = createStore('staff-auth-fail', FAILURE_WINDOW_MS);
+
+function failureKeys(request: Request, who: string) {
+    const network = ipKeyGenerator(request.ip ?? '');
+    return { account: { key: `${who.toLowerCase()}|${network}`, max: MAX_FAILURES_PER_ACCOUNT }, network: { key: network, max: MAX_FAILURES_PER_NETWORK } };
+}
+
+async function assertAttemptsLeft(keys: ReturnType<typeof failureKeys>) {
+    for (const { key, max } of [keys.account, keys.network]) {
+        const count = await failures.get(key);
+        if (count && count.totalHits >= max) {
+            const minutes = Math.max(1, Math.ceil(((count.resetTime?.getTime() ?? Date.now()) - Date.now()) / 60_000));
+            throw new HttpError(429, 'too_many_attempts', `Too many wrong attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`);
+        }
+    }
+}
+
+async function recordFailure(keys: ReturnType<typeof failureKeys>) {
+    await Promise.all([failures.increment(keys.account.key), failures.increment(keys.network.key)]);
+}
 const INVITE_MS = 7 * 24 * 60 * 60 * 1000;
 
 const loginSchema = z.object({ email, password: z.string().min(1).max(200), turnstile_token: z.string().max(4096).optional() });
@@ -46,27 +73,25 @@ staffAuthRoutes.post('/login', async (request, response) => {
     const input = parse(loginSchema, request.body);
     await requireTurnstile(input.turnstile_token, request.ip);
 
+    const keys = failureKeys(request, input.email);
+    await assertAttemptsLeft(keys);
+
     const account = await prisma.staffAccount.findUnique({ where: { email: input.email } });
-    const wrong = () => unauthorized('Wrong email or password.', 'invalid_credentials');
+    const wrong = async () => {
+        await recordFailure(keys);
+        return unauthorized('Wrong email or password.', 'invalid_credentials');
+    };
     if (!account || account.disabled_at || !account.password_hash) {
         // Same work and answer whether or not the account exists
         await verifyPassword(input.password, null);
-        throw wrong();
-    }
-    if (account.locked_until && account.locked_until > new Date()) {
-        throw new HttpError(429, 'staff_locked', 'Too many wrong passwords. Try again in 15 minutes.');
+        throw await wrong();
     }
     if (!(await verifyPassword(input.password, account.password_hash))) {
-        const failed = account.failed_logins + 1;
-        await prisma.staffAccount.update({
-            where: { id: account.id },
-            data: failed >= MAX_FAILED_LOGINS ? { failed_logins: 0, locked_until: new Date(Date.now() + LOCK_MS) } : { failed_logins: failed },
-        });
         await prisma.staffAudit.create({ data: { staff_id: account.id, action: 'login_failed', ip_address: request.ip ?? null } });
-        throw wrong();
+        throw await wrong();
     }
 
-    await prisma.staffAccount.update({ where: { id: account.id }, data: { failed_logins: 0, locked_until: null } });
+    await failures.resetKey(keys.account.key);
     await startSession(response, request, account);
     response.json({ step: account.totp_enabled_at ? 'verify_2fa' : 'setup_2fa' });
 });
@@ -86,7 +111,13 @@ staffAuthRoutes.post('/2fa/setup', requirePendingSession, async (request: StaffR
     const { account, session } = request.staff!;
     const { code } = parse(codeSchema, request.body);
     if (account.totp_enabled_at || !account.totp_secret) throw badRequest('Start the setup again.', 'totp_setup_missing');
-    if (!code || !verifyTotp(decryptSecret(account.totp_secret), code)) throw badRequest("That code didn't match. Check the time on your phone and try the newest code.", 'invalid_code');
+    const keys = failureKeys(request, account.email);
+    await assertAttemptsLeft(keys);
+    if (!code || !verifyTotp(decryptSecret(account.totp_secret), code)) {
+        await recordFailure(keys);
+        throw badRequest("That code didn't match. Check the time on your phone and try the newest code.", 'invalid_code');
+    }
+    await failures.resetKey(keys.account.key);
 
     const recovery = newRecoveryCodes();
     const updated = await prisma.staffAccount.update({
@@ -105,6 +136,8 @@ staffAuthRoutes.post('/2fa/verify', requirePendingSession, async (request: Staff
     const { account, session } = request.staff!;
     const input = parse(codeSchema, request.body);
     if (!account.totp_enabled_at || !account.totp_secret) throw badRequest('Set up two-factor sign-in first.', 'totp_missing');
+    const keys = failureKeys(request, account.email);
+    await assertAttemptsLeft(keys);
 
     let ok = Boolean(input.code && verifyTotp(decryptSecret(account.totp_secret), input.code));
     let codes = (account.recovery_codes as string[] | null) ?? [];
@@ -115,9 +148,11 @@ staffAuthRoutes.post('/2fa/verify', requirePendingSession, async (request: Staff
         if (ok) codes = codes.filter((code) => code !== hash);
     }
     if (!ok) {
+        await recordFailure(keys);
         await prisma.staffAudit.create({ data: { staff_id: account.id, action: 'login_2fa_failed', ip_address: request.ip ?? null } });
         throw badRequest("That code didn't match.", 'invalid_code');
     }
+    await failures.resetKey(keys.account.key);
     const updated = await prisma.staffAccount.update({ where: { id: account.id }, data: { recovery_codes: codes, last_login_at: new Date() } });
     await completeSession(session);
     request.staff!.account = updated;

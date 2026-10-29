@@ -971,8 +971,6 @@ model StaffAccount {
   recovery_codes     Json?
   disabled_at        DateTime?
   last_login_at      DateTime?
-  failed_logins      Int       @default(0)
-  locked_until       DateTime?
 
   created_by String?        @db.Uuid
   creator    StaffAccount?  @relation("staff_created", fields: [created_by], references: [id], onDelete: SetNull)

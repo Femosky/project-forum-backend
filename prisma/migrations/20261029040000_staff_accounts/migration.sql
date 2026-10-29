@@ -17,8 +17,6 @@ CREATE TABLE "StaffAccount" (
     "recovery_codes" JSONB,
     "disabled_at" TIMESTAMP(3),
     "last_login_at" TIMESTAMP(3),
-    "failed_logins" INTEGER NOT NULL DEFAULT 0,
-    "locked_until" TIMESTAMP(3),
     "created_by" UUID,
     CONSTRAINT "StaffAccount_pkey" PRIMARY KEY ("id")
 );
