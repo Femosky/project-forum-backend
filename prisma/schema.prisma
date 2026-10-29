@@ -144,8 +144,10 @@ model User {
   google_id         String?   @unique
   email_verified_at DateTime?
 
-  display_name String?
-  avatar_id    String  @default("default_1")
+  display_name  String?
+  avatar_id     String  @default("default_1")
+  // Drawn avatar parts (lib/avatars.ts); null = derived from the account id
+  avatar_config Json?
 
   role   UserRole   @default(user)
   status UserStatus @default(active)
@@ -275,6 +277,8 @@ model Community {
   display_name String?
   description  String?
   image_url    String?
+  // 4:1 header picture
+  banner_url   String?
   rules        Json?
   // One of COMMUNITY_CATEGORIES (src/shared/validation.ts), for the directory
   category     String?

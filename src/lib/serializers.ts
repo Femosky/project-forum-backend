@@ -1,11 +1,12 @@
 import { ContentStatus, Prisma } from '@prisma/client';
 import { canModerate, ViewerContext } from '../modules/communities/access';
 import { isIndexable } from './indexing';
+import { avatarCode } from './avatars';
 
 // The only way posts and comments leave the API. Anonymous authors are hidden from everyone except the author
 // and moderators of that community; deleted and removed comments become placeholders.
 
-export const authorSelect = { username: true, display_name: true, avatar_id: true, status: true } as const;
+export const authorSelect = { username: true, display_name: true, avatar_id: true, avatar_config: true, status: true } as const;
 
 export const postInclude = {
     // created_at feeds the indexing rule (posts by brand-new accounts wait for engagement); it is not sent out
@@ -16,7 +17,7 @@ export const postInclude = {
 
 export type PostRow = Prisma.PostGetPayload<{ include: typeof postInclude }>;
 
-type AuthorRow = { username: string; display_name: string | null; avatar_id: string; status: string } | null;
+type AuthorRow = { username: string; display_name: string | null; avatar_id: string; avatar_config?: Prisma.JsonValue; status: string } | null;
 
 // Statuses public lists may show. Pending content waits for a moderator; removed and deleted posts drop out.
 export const LISTED_POST_STATUSES: ContentStatus[] = ['active', 'locked'];
@@ -53,7 +54,7 @@ export const isHiddenFrom = (item: { shadow_hidden: boolean; author_id: string }
 
 function publicAuthor(author: AuthorRow) {
     if (!author || author.status === 'deleted') return null;
-    return { username: author.username, display_name: author.display_name, avatar_id: author.avatar_id };
+    return { username: author.username, display_name: author.display_name, avatar_id: author.avatar_id, avatar: avatarCode(author.avatar_config) };
 }
 
 export type VoteMap = Map<string, number>;

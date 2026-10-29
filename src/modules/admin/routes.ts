@@ -13,6 +13,8 @@ import { requireAdmin } from '../moderation/routes';
 import { clearBlocklistCache } from '../safety/filters';
 import adsAdmin from '../ads/admin';
 import statsAdmin from '../metrics/admin';
+import { bodyBuffer, imageBody } from '../images/routes';
+import { processUpload } from '../images/service';
 import { clearAdCache } from '../ads/decision';
 
 // Site-admin panel (role=admin): the site-wide queue, user suspension and shadow-bans, community takedowns,
@@ -242,6 +244,13 @@ router.patch('/communities/:name/ads', async (request: AuthRequest, response) =>
 
 router.use('/ads', adsAdmin);
 router.use('/stats', statsAdmin);
+
+// Ad pictures (logos and feed images); see modules/images
+const adImageQuery = z.object({ purpose: z.enum(['ad_logo', 'ad_image']) });
+router.post('/images', imageBody, async (request: AuthRequest, response) => {
+    const { purpose } = parse(adImageQuery, request.query);
+    response.status(201).json({ image: await processUpload(bodyBuffer(request.body), purpose, viewerOf(request).user.id) });
+});
 
 // --- Blocklist ---
 

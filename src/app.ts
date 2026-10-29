@@ -24,6 +24,8 @@ import adminRoutes from './modules/admin/routes';
 import adsRoutes from './modules/ads/routes';
 import metricsRoutes from './modules/metrics/routes';
 import trendingRoutes from './modules/trending/routes';
+import imageRoutes from './modules/images/routes';
+import { LOCAL_MEDIA_DIR, storageDriver } from './lib/storage';
 
 const app = express();
 
@@ -103,6 +105,7 @@ v1.use('/comments', commentRoutes);
 v1.use('/users', userRoutes);
 v1.use('/search', searchRoutes);
 v1.use('/trending', trendingRoutes);
+v1.use('/images', imageRoutes);
 v1.use('/notifications', notificationRoutes);
 v1.use('/seo', seoRoutes);
 v1.use('/admin', adminRoutes);
@@ -112,6 +115,19 @@ v1.get('/health', (request, response) => {
     response.json({ status: 'ok' });
 });
 app.use('/v1', v1);
+
+// Uploaded images on local disk (development; production serves them from R2). File names are never reused.
+if (storageDriver() === 'local') {
+    app.use(
+        '/media',
+        express.static(LOCAL_MEDIA_DIR, {
+            immutable: true,
+            maxAge: '365d',
+            fallthrough: false,
+            setHeaders: (response) => response.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'),
+        })
+    );
+}
 
 app.get('/', (request, response) => {
     response.send('Welcome to the "Project Forum" API. See /v1.');

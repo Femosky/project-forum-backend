@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { track } from '../../lib/analytics';
+import { avatarCode } from '../../lib/avatars';
 import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { parse } from '../../lib/http';
@@ -238,12 +239,12 @@ router.get('/autocomplete', async (request, response) => {
             SELECT "name", coalesce("name_styled", "name"::text) AS name_styled, "display_name", "image_url", "member_count" FROM "Community"
             WHERE "status" = 'active' AND ("name"::text LIKE ${`${handle}%`} ${midName})
             ORDER BY ("name"::text LIKE ${`${handle}%`}) DESC, "member_count" DESC LIMIT 8`,
-        prisma.$queryRaw<{ username: string; display_name: string | null; avatar_id: string }[]>`
-            SELECT "username", "display_name", "avatar_id" FROM "User"
+        prisma.$queryRaw<{ username: string; display_name: string | null; avatar_id: string; avatar_config: Prisma.JsonValue }[]>`
+            SELECT "username", "display_name", "avatar_id", "avatar_config" FROM "User"
             WHERE "status" = 'active' AND "username" LIKE ${pattern}
             ORDER BY "karma" DESC LIMIT 5`,
     ]);
-    response.json({ communities, users });
+    response.json({ communities, users: users.map(({ avatar_config, ...user }) => ({ ...user, avatar: avatarCode(avatar_config) })) });
 });
 
 export default router;

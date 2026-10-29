@@ -68,6 +68,18 @@ const envSchema = z.object({
     // Error alerts (Sentry project DSN). Without it errors are only logged.
     SENTRY_DSN: z.string().url().optional(),
 
+    // Image uploads (modules/images): Cloudflare R2. Without all five, images are stored on local disk (MEDIA_DIR,
+    // default ./uploads) and served by the API at /media, which is only meant for development.
+    R2_ACCOUNT_ID: z.string().optional(),
+    R2_ACCESS_KEY_ID: z.string().optional(),
+    R2_SECRET_ACCESS_KEY: z.string().optional(),
+    R2_BUCKET: z.string().optional(),
+    // Public base URL of the bucket, e.g. https://media.forum.oskeylabs.com or https://pub-xxxx.r2.dev
+    R2_PUBLIC_URL: z.string().url().optional(),
+    MEDIA_DIR: z.string().optional(),
+    // This API's own public address, for local /media URLs; defaults to http://localhost:PORT
+    API_URL: z.string().url().optional(),
+
     // Site metrics (modules/metrics). Optional path to a GeoLite2-Country .mmdb for visitor countries; by default
     // src/dependencies/GeoLite2-Country.mmdb is used when it's there.
     GEOIP_COUNTRY_DB: z.string().optional(),
@@ -95,6 +107,7 @@ if (parsed.data.NODE_ENV === 'production') {
         !parsed.data.RESEND_API_KEY && 'RESEND_API_KEY is not set, so emails are logged instead of sent',
         !parsed.data.POSTHOG_API_KEY && 'POSTHOG_API_KEY is not set, so no analytics are recorded',
         !parsed.data.SENTRY_DSN && 'SENTRY_DSN is not set, so errors are only logged',
+        !parsed.data.R2_BUCKET && 'R2_* is not set, so uploaded images go to the local disk, which is wiped on every deploy',
     ].filter(Boolean);
     for (const warning of warnings) console.warn(`Config warning: ${warning}`);
 }
@@ -103,6 +116,7 @@ export const env = {
     ...parsed.data,
     WEB_ORIGINS,
     WEB_URL: (parsed.data.WEB_URL ?? WEB_ORIGINS[0]).replace(/\/$/, ''),
+    API_URL: (parsed.data.API_URL ?? `http://localhost:${parsed.data.PORT}`).replace(/\/$/, ''),
     IS_PRODUCTION: parsed.data.NODE_ENV === 'production',
     IS_TEST: parsed.data.NODE_ENV === 'test',
 };

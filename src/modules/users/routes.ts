@@ -1,3 +1,5 @@
+import { Prisma } from '@prisma/client';
+import { avatarCode, avatarConfigSchema } from '../../lib/avatars';
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../../prismaConnection';
@@ -21,6 +23,8 @@ const updateMeSchema = z
     .object({
         display_name: z.string().trim().max(LIMITS.DISPLAY_NAME_MAX).nullable().optional(),
         avatar_id: z.enum(AVATAR_IDS).optional(),
+        // The drawn avatar's parts (lib/avatars.ts); null goes back to the one derived from the username
+        avatar_config: avatarConfigSchema.nullable().optional(),
     })
     .refine((value) => Object.keys(value).length > 0, { message: 'Nothing to update' });
 
@@ -33,7 +37,11 @@ router.patch('/me', requireAuth, async (request: AuthRequest, response) => {
     const input = parse(updateMeSchema, request.body);
     const updated = await prisma.user.update({
         where: { id: user.id },
-        data: { ...input, display_name: input.display_name === '' ? null : input.display_name },
+        data: {
+            ...input,
+            display_name: input.display_name === '' ? null : input.display_name,
+            avatar_config: input.avatar_config === null ? Prisma.DbNull : input.avatar_config,
+        },
     });
     response.json({ user: toPrivateUser(updated) });
 });
@@ -200,6 +208,7 @@ router.get('/:username', async (request, response) => {
             username: user.username,
             display_name: user.display_name,
             avatar_id: user.avatar_id,
+            avatar: avatarCode(user.avatar_config),
             karma: user.karma,
             is_suspended: user.status !== 'active',
             created_at: user.created_at,

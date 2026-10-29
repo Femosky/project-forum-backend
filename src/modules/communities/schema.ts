@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isStoredMedia } from '../../lib/storage';
 import { communityCategory, communityName, LIMITS, pageQuery, postSort, topWindow, username } from '../../shared/validation';
 
 const rules = z
@@ -21,7 +22,9 @@ export const updateCommunitySchema = z
         // The handle's capitals ("PremierLeague"); must be the community's name with only the case changed
         name_styled: z.string().trim().max(LIMITS.COMMUNITY_NAME_MAX).nullable().optional(),
         description: z.string().trim().max(LIMITS.COMMUNITY_DESCRIPTION_MAX).nullable().optional(),
-        image_url: z.string().trim().max(LIMITS.URL_MAX).pipe(z.url({ protocol: /^https$/ })).nullable().optional(),
+        // Icon and banner: uploaded through POST /v1/images, so they're our own stored files
+        image_url: z.string().trim().max(LIMITS.URL_MAX).refine(isStoredMedia, 'Upload the picture first').nullable().optional(),
+        banner_url: z.string().trim().max(LIMITS.URL_MAX).refine(isStoredMedia, 'Upload the picture first').nullable().optional(),
         visibility: z.enum(['public', 'private']).optional(),
         is_nsfw: z.boolean().optional(),
         rules: rules.optional(),

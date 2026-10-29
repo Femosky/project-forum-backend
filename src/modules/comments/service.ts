@@ -38,6 +38,7 @@ type RawComment = Omit<CommentRow, 'author'> & {
     author_username: string | null;
     author_display_name: string | null;
     author_avatar_id: string | null;
+    author_avatar_config: Prisma.JsonValue;
     author_status: string | null;
 };
 
@@ -57,7 +58,7 @@ async function loadDescendants(parents: ParentRef[], levels: number, perParent: 
                    c."created_at", c."edited_at", c."pinned_at",
                    c."upvote_count", c."downvote_count", c."score", c."reply_count", c."best_rank", c."view_count",
                    u."username" AS "author_username", u."display_name" AS "author_display_name",
-                   u."avatar_id" AS "author_avatar_id", u."status"::text AS "author_status",
+                   u."avatar_id" AS "author_avatar_id", u."avatar_config" AS "author_avatar_config", u."status"::text AS "author_status",
                    row_number() OVER (PARTITION BY c."parent_id" ORDER BY ${orderSql(sort, 'c')}) AS "rank"
             FROM "Comment" c
             LEFT JOIN "User" u ON u."id" = c."author_id"
@@ -70,12 +71,18 @@ async function loadDescendants(parents: ParentRef[], levels: number, perParent: 
         WHERE t."rank" <= ${perParent}
         ORDER BY t."depth", ${orderSql(sort, 't')}`;
 
-    return rows.map(({ author_username, author_display_name, author_avatar_id, author_status, ...row }) => {
+    return rows.map(({ author_username, author_display_name, author_avatar_id, author_avatar_config, author_status, ...row }) => {
         delete (row as { rank?: unknown }).rank;
         return {
             ...row,
             author: author_username
-                ? { username: author_username, display_name: author_display_name, avatar_id: author_avatar_id!, status: author_status! }
+                ? {
+                      username: author_username,
+                      display_name: author_display_name,
+                      avatar_id: author_avatar_id!,
+                      avatar_config: author_avatar_config,
+                      status: author_status!,
+                  }
                 : null,
         } as CommentRow;
     });

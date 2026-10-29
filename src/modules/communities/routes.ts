@@ -43,6 +43,7 @@ export function toPublicCommunity(community: Community) {
         display_name: community.display_name,
         description: community.description,
         image_url: community.image_url,
+        banner_url: community.banner_url,
         rules: community.rules,
         category: community.category,
         visibility: community.visibility,

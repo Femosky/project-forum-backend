@@ -10,6 +10,7 @@ import { COMMUNITY_CATEGORIES, LIMITS } from '../../shared/validation';
 import { closeReports } from '../moderation/queue';
 import { findCommunity } from '../communities/access';
 import { linkProblem } from './urls';
+import { isStoredMedia } from '../../lib/storage';
 import { campaignSpend, clearAdCache, readTargeting, targetingSchema } from './decision';
 
 // Ad campaign management for site admins, mounted at /v1/admin/ads (the admin router has already checked the
@@ -36,7 +37,12 @@ const destinationUrl = z
         const problem = linkProblem(value, { allowSitePath: true });
         if (problem) context.addIssue({ code: 'custom', message: problem });
     });
-const imageUrl = webUrl.refine((value) => value.startsWith('https://'), 'Images must use https');
+// Pictures: uploaded through POST /v1/admin/images (our own storage), or an https link
+const imageUrl = z
+    .string()
+    .trim()
+    .max(LIMITS.URL_MAX)
+    .refine((value) => isStoredMedia(value) || value.startsWith('https://'), 'Upload a picture, or use an https link');
 const optional = <T extends z.ZodType>(schema: T) => schema.nullable().optional();
 
 const advertiserSchema = z.object({

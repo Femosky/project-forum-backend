@@ -4,7 +4,7 @@ import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
 import { badRequest, forbidden, notFound, parse, uuidParam } from '../../lib/http';
-import { postInclude, toPublicComment, toPublicPost } from '../../lib/serializers';
+import { authorSelect, postInclude, toPublicComment, toPublicPost } from '../../lib/serializers';
 import { AuthRequest, requireAuth, viewerOf } from '../../middlewares/auth';
 import { LIMITS, pageQuery, username } from '../../shared/validation';
 import { setCommentStatus } from '../comments/service';
@@ -359,7 +359,7 @@ router.post('/comments/:id/moderation', requireAuth, async (request: AuthRequest
             updated = await prisma.comment.update({
                 where: { id: comment.id },
                 data: { pinned_at: input.action === 'pin' ? new Date() : null },
-                include: { author: { select: { username: true, display_name: true, avatar_id: true, status: true } } },
+                include: { author: { select: authorSelect } },
             });
             break;
     }
