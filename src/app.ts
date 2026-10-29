@@ -10,6 +10,7 @@ import { MemoryStore } from 'express-rate-limit';
 import { limiter } from './lib/rateLimit';
 import { errorHandler, notFoundHandler } from './lib/errors';
 import { optionalAuth } from './middlewares/auth';
+import { noteActivity } from './lib/jobs';
 import authRoutes from './modules/auth/routes';
 import communityRoutes from './modules/communities/routes';
 import postRoutes from './modules/posts/routes';
@@ -51,6 +52,13 @@ app.use(
         },
     })
 );
+
+// Anything but a health check counts as the site being used: an idle job queue starts again (lib/jobs.ts). Uptime
+// monitors ping /v1/health, which touches neither the database nor this.
+app.use((request, response, next) => {
+    if (request.path !== '/v1/health') noteActivity();
+    next();
+});
 
 app.use(helmet());
 app.use(cors({ origin: env.WEB_ORIGINS, credentials: true, exposedHeaders: ['X-Request-Id'] }));

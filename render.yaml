@@ -31,10 +31,12 @@ services:
         sync: false
       - key: COOKIE_DOMAIN
         sync: false
-      # Inline jobs keep Neon free to scale to zero. Trending and daily stats still refresh: their readers recompute
-      # stale snapshots (docs/DEPLOY.md, "Jobs"). Set to true to run them on a schedule instead.
+      # The job queue runs while the site is in use and stops after 5 minutes without requests (health checks don't
+      # count), so Neon can suspend and stay inside the free plan's 100 compute hours (docs/DEPLOY.md, "Jobs")
       - key: JOBS_ENABLED
-        value: "false"
+        value: "true"
+      - key: JOBS_IDLE_SUSPEND_MINUTES
+        value: "5"
       - key: RATE_LIMIT_STORE
         value: postgres
       - key: RESEND_API_KEY

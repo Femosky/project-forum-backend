@@ -14,6 +14,8 @@ const envSchema = z.object({
     DATABASE_URL: z.string().min(1),
     // Optional direct (non-pooled) connection for the job queue; falls back to DATABASE_URL
     DIRECT_DATABASE_URL: z.string().optional(),
+    // Connections the app keeps open (read in prismaConnection.ts); the job queue adds up to 3
+    DATABASE_POOL_SIZE: z.coerce.number().int().min(1).max(50).default(5),
     JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
     // Comma-separated list of allowed web origins, e.g. https://forum.oskeylabs.com
     WEB_ORIGIN: z.string().default('http://localhost:3000'),
@@ -28,6 +30,9 @@ const envSchema = z.object({
 
     // Background jobs run on Postgres (pg-boss). When disabled, jobs run inline in the request.
     JOBS_ENABLED: booleanFlag(true),
+    // Minutes without requests (health checks don't count) before the job queue stops, so a serverless database can
+    // suspend; the next request starts it again. 0 keeps it running all the time (lib/jobs.ts).
+    JOBS_IDLE_SUSPEND_MINUTES: z.coerce.number().min(0).max(1440).default(5),
     LINK_PREVIEWS_ENABLED: booleanFlag(true),
 
     // Email (Resend). Without a key, emails are logged instead of sent.

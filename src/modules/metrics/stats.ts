@@ -1,6 +1,6 @@
 import prisma from '../../prismaConnection';
 import { addDays, lagosDay, lagosDayBounds } from '../../lib/days';
-import { defineScheduledJob } from '../../lib/jobs';
+import { defineScheduledJob, onJobsWake } from '../../lib/jobs';
 import logger from '../../lib/logger';
 import { flushMetrics } from './buffer';
 
@@ -149,3 +149,6 @@ export const dailyStatsJob = defineScheduledJob('stats.daily', '20 0 * * *', asy
     await prisma.$executeRaw`DELETE FROM "DailySalt" WHERE "date" < ${yesterday}::date`;
     logger.info({ day: yesterday }, 'Daily stats written');
 });
+
+// After an idle spell (or a restart) the nightly run may have been missed: write any missing days of the last week
+onJobsWake('daily-stats', () => ensureDailyStats(addDays(lagosDay(), -7), addDays(lagosDay(), -1)));

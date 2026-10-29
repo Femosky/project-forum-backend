@@ -56,7 +56,9 @@ Optional; each feature turns itself off without its key, and the boot log warns 
 | `POSTHOG_HOST` | Defaults to `https://eu.i.posthog.com` | |
 | `SENTRY_DSN` | Error alerts: unexpected errors (500s, crashes) with the route and request id, never bodies or cookies. Repeats within a minute are sent once. | sentry.io → project (Node.js) → Settings → Client Keys (DSN) |
 | `INDEXNOW_KEY` | Pings Bing when a post is created. Leave unset while the site is private. | any 8-128 letters/digits, same value in the web app |
-| `JOBS_ENABLED` | `false` keeps Neon free to scale to zero: emails and link previews run inline, and trending and daily stats are recomputed by whoever reads them stale (see Jobs below). `true` runs pg-boss with its schedules | |
+| `JOBS_ENABLED` | `true` (render.yaml) runs pg-boss with its schedules while the site is in use. `false` runs emails and link previews inline, with trending and daily stats recomputed by whoever reads them stale (see Jobs below) | |
+| `JOBS_IDLE_SUSPEND_MINUTES` | Default 5: with no requests for this long (health checks don't count) the job queue stops, so the API sends Neon nothing and it can suspend; the next request starts it again and catches up. 0 = always on, once traffic is steady | |
+| `DATABASE_POOL_SIZE` | Default 5 connections for the app (the job queue adds up to 3) | |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL` | Cloudflare R2 for uploaded images (ad logos and pictures, community icons and banners). Without all five, uploads go to the server's disk, which Render wipes on each deploy | Steps in the project-root `docs/LAUNCH.md`, Part 13 |
 | `METRICS_FLUSH_SECONDS` | How often buffered view counts, visits and last-active times are written. Default 45 | |
 | `GEOIP_COUNTRY_DB` | Optional path to a GeoLite2-Country `.mmdb` for visitor countries. Without it, `src/dependencies/GeoLite2-Country.mmdb` is used if present; otherwise countries are only known from a CDN header | free MaxMind account → Download databases → GeoLite2 Country (mmdb) |
@@ -95,6 +97,8 @@ pg-boss (on the same Postgres) runs emails, link previews and two schedules, on 
 |---|---|---|
 | `trending.compute` | every 10 minutes | Trending posts, rising communities and topics (`src/modules/trending`), plus the "Did you mean" word list hourly |
 | `stats.daily` | 00:20 | Yesterday's `DailyStat` and `CommunityDailyStat` rows, and old visitor salts deleted |
+
+**Idle suspend (Neon's free plan has 100 compute hours a month).** Neon suspends the database after 5 minutes without queries and bills nothing while suspended. The API sends none while idle: `/v1/health` (what uptime monitors ping) doesn't touch the database, the view/visit buffers write only when something was counted, idle pool connections are closed after 10 seconds without keep-alives, and the job queue (which polls every 10 seconds and does housekeeping every 10 minutes while running) stops after `JOBS_IDLE_SUSPEND_MINUTES` without requests. The next request starts it again, refreshes a stale trending snapshot and writes any missed daily stats; a job queued while it's stopped starts it first, so nothing is lost. Measured locally: no database transactions at all from about 6 minutes after the last request, with a health ping every minute.
 
 With `JOBS_ENABLED=false` nothing is scheduled. `GET /v1/trending` then recomputes a snapshot older than 10 minutes (the first read waits; later ones get the current snapshot while it refreshes) and Admin → Stats writes any missing days when opened, so both keep working without keeping Neon awake.
 
