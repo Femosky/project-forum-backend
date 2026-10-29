@@ -37,7 +37,9 @@ const router = Router();
 export function toPublicCommunity(community: Community) {
     return {
         id: community.id,
+        // The URL key (lowercase) and the handle as shown ("PremierLeague")
         name: community.name,
+        name_styled: community.name_styled ?? community.name,
         display_name: community.display_name,
         description: community.description,
         image_url: community.image_url,
@@ -102,13 +104,18 @@ router.get('/categories', async (request, response) => {
 router.post('/', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const input = parse(createCommunitySchema, request.body);
-    if (RESERVED_NAMES.has(input.name)) throw badRequest('That name is reserved.', 'name_reserved');
+    if (RESERVED_NAMES.has(input.name.toLowerCase())) throw badRequest('That name is reserved.', 'name_reserved');
+    // An old name still points at the community that had it
+    if (await prisma.communityAlias.findUnique({ where: { name: input.name } })) {
+        throw conflict('A community with that name already exists.', 'name_taken');
+    }
 
     try {
         const community = await prisma.$transaction(async (tx) => {
             const created = await tx.community.create({
                 data: {
-                    name: input.name,
+                    name: input.name.toLowerCase(),
+                    name_styled: input.name,
                     display_name: input.display_name ?? null,
                     description: input.description ?? null,
                     visibility: input.visibility,
@@ -160,6 +167,9 @@ router.patch('/:name', requireAuth, async (request: AuthRequest, response) => {
     const community = await findCommunity(String(request.params.name));
     await assertModerator(community.id, user);
     const input = parse(updateCommunitySchema, request.body);
+    if (input.name_styled && input.name_styled.toLowerCase() !== community.name) {
+        throw badRequest('Only capital letters can change: the letters must stay the same as the name.', 'name_style_mismatch');
+    }
 
     const updated = await prisma.community.update({
         where: { id: community.id },

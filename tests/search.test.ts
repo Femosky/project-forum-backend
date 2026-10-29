@@ -20,22 +20,22 @@ describe('search', () => {
 
     it('finds communities and autocompletes names', async () => {
         const alice = await signUp('alice');
-        await createCommunity(alice.agent, 'lagos_rent', { description: 'Housing and rent in Lagos' });
-        await createCommunity(alice.agent, 'london_naija', { description: 'Nigerians in London' });
+        await createCommunity(alice.agent, 'LagosRent', { description: 'Housing and rent in Lagos' });
+        await createCommunity(alice.agent, 'LondonNaija', { description: 'Nigerians in London' });
 
         const found = await api().get('/v1/search?type=communities&q=housing');
-        expect(found.body.communities.map((c: { name: string }) => c.name)).toEqual(['lagos_rent']);
+        expect(found.body.communities.map((c: { name: string }) => c.name)).toEqual(['lagosrent']);
 
         const complete = await api().get('/v1/search/autocomplete?q=l');
-        expect(complete.body.communities.map((c: { name: string }) => c.name).sort()).toEqual(['lagos_rent', 'london_naija']);
-        expect((await api().get('/v1/search/autocomplete?q=lo')).body.communities.map((c: { name: string }) => c.name)).toEqual(['london_naija']);
+        expect(complete.body.communities.map((c: { name: string }) => c.name).sort()).toEqual(['lagosrent', 'londonnaija']);
+        expect((await api().get('/v1/search/autocomplete?q=lo')).body.communities.map((c: { name: string }) => c.name)).toEqual(['londonnaija']);
         expect((await api().get('/v1/search/autocomplete?q=ali')).body.users.map((u: { username: string }) => u.username)).toEqual(['alice']);
         // Spaces stand for underscores, and any word in the name can start the match
         const names = async (q: string) =>
             (await api().get(`/v1/search/autocomplete?q=${encodeURIComponent(q)}`)).body.communities.map((c: { name: string }) => c.name);
-        expect(await names('lagos r')).toEqual(['lagos_rent']);
-        expect(await names('rent')).toEqual(['lagos_rent']);
-        expect(await names('naija')).toEqual(['london_naija']);
+        expect(await names('lagos r')).toEqual(['lagosrent']);
+        expect(await names('rent')).toEqual(['lagosrent']);
+        expect(await names('naija')).toEqual(['londonnaija']);
         expect(await names('ent')).toEqual([]);
         // LIKE wildcards in the query are treated literally
         expect((await api().get('/v1/search/autocomplete?q=%25')).body.communities).toEqual([]);
@@ -79,8 +79,8 @@ describe('search', () => {
 
     it('suggests a spelling and similar community names when little is found', async () => {
         const alice = await signUp('alice');
-        await createCommunity(alice.agent, 'lagos_rent', { description: 'Housing' });
-        await createPost(alice.agent, 'lagos_rent', { title: 'Landlord wants two years upfront', body: 'help' });
+        await createCommunity(alice.agent, 'lagosrent', { description: 'Housing' });
+        await createPost(alice.agent, 'lagosrent', { title: 'Landlord wants two years upfront', body: 'help' });
         await refreshSearchWords();
         expect(await prisma.searchWord.count()).toBeGreaterThan(3);
 
@@ -100,8 +100,8 @@ describe('search', () => {
         expect((await api().get('/v1/search?q=zzqxv')).body.did_you_mean).toBeNull();
 
         const fuzzy = await api().get('/v1/search?q=lagos rnt');
-        expect(fuzzy.body.related_communities.map((community: { name: string }) => community.name)).toEqual(['lagos_rent']);
+        expect(fuzzy.body.related_communities.map((community: { name: string }) => community.name)).toEqual(['lagosrent']);
         const communities = await api().get('/v1/search?type=communities&q=lagos rnt');
-        expect(communities.body.communities.map((community: { name: string }) => community.name)).toEqual(['lagos_rent']);
+        expect(communities.body.communities.map((community: { name: string }) => community.name)).toEqual(['lagosrent']);
     });
 });

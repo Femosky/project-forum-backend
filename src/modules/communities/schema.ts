@@ -18,6 +18,8 @@ export const createCommunitySchema = z.object({
 export const updateCommunitySchema = z
     .object({
         display_name: z.string().trim().max(50).nullable().optional(),
+        // The handle's capitals ("PremierLeague"); must be the community's name with only the case changed
+        name_styled: z.string().trim().max(LIMITS.COMMUNITY_NAME_MAX).nullable().optional(),
         description: z.string().trim().max(LIMITS.COMMUNITY_DESCRIPTION_MAX).nullable().optional(),
         image_url: z.string().trim().max(LIMITS.URL_MAX).pipe(z.url({ protocol: /^https$/ })).nullable().optional(),
         visibility: z.enum(['public', 'private']).optional(),

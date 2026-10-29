@@ -10,7 +10,7 @@ export const authorSelect = { username: true, display_name: true, avatar_id: tru
 export const postInclude = {
     // created_at feeds the indexing rule (posts by brand-new accounts wait for engagement); it is not sent out
     author: { select: { ...authorSelect, created_at: true } },
-    community: { select: { id: true, name: true, display_name: true, image_url: true, visibility: true, status: true } },
+    community: { select: { id: true, name: true, name_styled: true, display_name: true, image_url: true, visibility: true, status: true } },
     flair: { select: { id: true, name: true, color: true } },
 } satisfies Prisma.PostInclude;
 
@@ -92,7 +92,13 @@ export function toPublicPost(post: PostRow, context: ViewerContext, votes?: Vote
         comment_count: post.comment_count,
         // Whether search engines should index this post's page (see lib/indexing.ts)
         is_indexable: isIndexable(post),
-        community: { id: post.community.id, name: post.community.name, display_name: post.community.display_name, image_url: post.community.image_url },
+        community: {
+            id: post.community.id,
+            name: post.community.name,
+            name_styled: post.community.name_styled ?? post.community.name,
+            display_name: post.community.display_name,
+            image_url: post.community.image_url,
+        },
         author: revealAuthor ? publicAuthor(post.author) : null,
         viewer: context
             ? {

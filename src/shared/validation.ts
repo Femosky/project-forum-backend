@@ -30,13 +30,23 @@ export const username = z
     .max(LIMITS.USERNAME_MAX)
     .regex(/^[a-z][a-z0-9_]*$/, 'Use letters, numbers and underscores, starting with a letter');
 
+// A new community's name as typed: letters and digits, starting with a letter. It's stored lowercase as the URL key
+// (premierleague) and as typed as the styled handle (PremierLeague).
 export const communityName = z
     .string()
     .trim()
-    .toLowerCase()
     .min(LIMITS.COMMUNITY_NAME_MIN)
     .max(LIMITS.COMMUNITY_NAME_MAX)
-    .regex(/^[a-z][a-z0-9_]*$/, 'Use letters, numbers and underscores, starting with a letter');
+    .regex(/^[A-Za-z][A-Za-z0-9]*$/, 'Use letters and numbers only, starting with a letter');
+
+// A reference to an existing community, in any case, including names from before underscores were dropped
+// (lagos_rent finds LagosRent through its alias)
+export const communityRef = z
+    .string()
+    .trim()
+    .min(LIMITS.COMMUNITY_NAME_MIN)
+    .max(40)
+    .regex(/^[A-Za-z][A-Za-z0-9_-]*$/, 'Not a community name');
 
 export const email = z.string().trim().toLowerCase().max(254).pipe(z.email());
 

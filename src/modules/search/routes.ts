@@ -5,11 +5,11 @@ import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { parse } from '../../lib/http';
 import { commentInclude, postInclude, toPublicComment } from '../../lib/serializers';
-import { communityName } from '../../shared/validation';
+import { communityRef } from '../../shared/validation';
 import { commentViewerState } from '../votes/service';
 import { AuthRequest, optionalAuth } from '../../middlewares/auth';
 import { toPublicCommunity } from '../communities/routes';
-import { ViewerContext, viewerContext } from '../communities/access';
+import { findCommunity, ViewerContext, viewerContext } from '../communities/access';
 import { serializePosts } from '../posts/service';
 
 const router = Router();
@@ -25,7 +25,7 @@ const searchQuery = z.object({
     q: z.string().trim().min(2).max(200),
     type: z.enum(['posts', 'comments', 'communities']).default('posts'),
     // Only this community ("Search in c/x")
-    community: communityName.optional(),
+    community: communityRef.optional(),
     page: z.coerce.number().int().min(1).max(MAX_PAGE).default(1),
     // "Search instead for ...": the words exactly as typed, no correction
     exact: z.enum(['1', 'true']).optional(),
@@ -117,11 +117,8 @@ router.get('/', optionalAuth, async (request: AuthRequest, response) => {
     // A community filter that matches nothing public finds nothing, rather than searching everywhere
     let communityId: string | null = null;
     if (query.community) {
-        const community = await prisma.community.findFirst({
-            where: { name: query.community, status: 'active', visibility: 'public' },
-            select: { id: true },
-        });
-        if (!community) {
+        const community = await findCommunity(query.community).catch(() => null);
+        if (!community || community.status !== 'active' || community.visibility !== 'public') {
             return response.json({ [query.type]: [], next_page: null, did_you_mean: null, corrected_from: null, related_communities: [] });
         }
         communityId = community.id;
@@ -202,8 +199,8 @@ async function similarCommunities(q: string, exclude: string[]) {
     return prisma.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "Community"
         WHERE "status" = 'active' AND "visibility" = 'public' AND NOT ("id" = ANY(${exclude}::uuid[]))
-          AND (lower("name") % ${handle} OR word_similarity(${handle}, lower("name")) > 0.5)
-        ORDER BY greatest(similarity(lower("name"), ${handle}), word_similarity(${handle}, lower("name"))) DESC, "member_count" DESC
+          AND ("name"::text % ${handle} OR word_similarity(${handle}, "name"::text) > 0.5)
+        ORDER BY greatest(similarity("name"::text, ${handle}), word_similarity(${handle}, "name"::text)) DESC, "member_count" DESC
         LIMIT 5`;
 }
 
@@ -224,20 +221,23 @@ function trackSearch(request: AuthRequest, query: SearchQuery, found: number, co
 const autocompleteQuery = z.object({ q: z.string().trim().min(1).max(50) });
 
 // Prefix match on community names and usernames, served by trigram GIN indexes. Community names also match from the
-// start of any word, typed with spaces ("tech car" and "careers" both find tech_careers); whole-name prefixes rank first.
+// start of any word, in CamelCase or the display name, typed with or without spaces ("tech car" and "careers" both
+// find TechCareers); whole-name prefixes rank first. Case never matters.
 router.get('/autocomplete', async (request, response) => {
     const { q } = parse(autocompleteQuery, request.query);
     const escape = (text: string) => text.replace(/[\\%_]/g, (char) => `\\${char}`);
     const pattern = `${escape(q.toLowerCase())}%`;
-    const handle = escape(q.toLowerCase().replace(/[\s-]+/g, '_'));
+    const handle = escape(q.toLowerCase().replace(/[\s_-]+/g, ''));
+    // Words of the name and display name, lowercased: "LagosRent" / "Lagos Rent" -> " lagos rent"
+    const words = Prisma.sql`lower(' ' || regexp_replace(coalesce("name_styled", "name"::text), '([A-Z0-9]+)', ' \\1', 'g') || ' ' || coalesce("display_name", ''))`;
     // Mid-name matches need three characters for the trigram index to help; shorter ones only match the start
-    const wordStart = q.length >= 3 ? `%\\_${handle}%` : `${handle}%`;
+    const midName = handle.length >= 3 ? Prisma.sql`OR ("name"::text LIKE ${`%${handle}%`} AND ${words} LIKE ${`% ${escape(q.toLowerCase().trim())}%`})` : Prisma.empty;
 
     const [communities, users] = await Promise.all([
-        prisma.$queryRaw<{ name: string; display_name: string | null; image_url: string | null; member_count: number }[]>`
-            SELECT "name", "display_name", "image_url", "member_count" FROM "Community"
-            WHERE "status" = 'active' AND ("name" LIKE ${`${handle}%`} OR "name" LIKE ${wordStart})
-            ORDER BY ("name" LIKE ${`${handle}%`}) DESC, "member_count" DESC LIMIT 8`,
+        prisma.$queryRaw<{ name: string; name_styled: string; display_name: string | null; image_url: string | null; member_count: number }[]>`
+            SELECT "name", coalesce("name_styled", "name"::text) AS name_styled, "display_name", "image_url", "member_count" FROM "Community"
+            WHERE "status" = 'active' AND ("name"::text LIKE ${`${handle}%`} ${midName})
+            ORDER BY ("name"::text LIKE ${`${handle}%`}) DESC, "member_count" DESC LIMIT 8`,
         prisma.$queryRaw<{ username: string; display_name: string | null; avatar_id: string }[]>`
             SELECT "username", "display_name", "avatar_id" FROM "User"
             WHERE "status" = 'active' AND "username" LIKE ${pattern}

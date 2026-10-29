@@ -197,7 +197,7 @@ async function writeCommunityVisitors(keys: Set<string>) {
         SELECT v.day, c."id", v.visitor
         FROM unnest(${rows.map((row) => row[0])}::date[], ${rows.map((row) => row[1])}::text[], ${rows.map((row) => row[2])}::text[])
             AS v(day, name, visitor)
-        JOIN "Community" c ON c."name" = v.name
+        JOIN "Community" c ON c."name" = v.name::citext
         ON CONFLICT DO NOTHING`;
 }
 
@@ -216,7 +216,7 @@ async function writePageViews(site: Map<string, number>, communities: Map<string
             SELECT v.day, c."id", v.n
             FROM unnest(${rows.map((row) => row[0])}::date[], ${rows.map((row) => row[1])}::text[], ${rows.map((row) => row[2])}::int[])
                 AS v(day, name, n)
-            JOIN "Community" c ON c."name" = v.name
+            JOIN "Community" c ON c."name" = v.name::citext
             ON CONFLICT ("date", "community_id") DO UPDATE SET
                 "page_views" = "CommunityDailyTraffic"."page_views" + EXCLUDED."page_views"`;
     }

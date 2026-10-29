@@ -330,13 +330,13 @@ describe('admin panel', () => {
 describe('communities directory', () => {
     it('filters by category, searches and counts categories', async () => {
         const owner = await signUp('owner');
-        await createCommunity(owner.agent, 'lagos_homes', { category: 'housing', description: 'Flats and agents' });
+        await createCommunity(owner.agent, 'lagoshomes', { category: 'housing', description: 'Flats and agents' });
         await createCommunity(owner.agent, 'devs', { category: 'tech', description: 'Building software' });
         await createCommunity(owner.agent, 'misc');
         expect((await owner.agent.post('/v1/communities').send({ name: 'bad_cat', category: 'nope' })).status).toBe(400);
 
         const housing = await api().get('/v1/communities?category=housing');
-        expect(housing.body.communities.map((row: { name: string }) => row.name)).toEqual(['lagos_homes']);
+        expect(housing.body.communities.map((row: { name: string }) => row.name)).toEqual(['lagoshomes']);
         expect(housing.body.communities[0].category).toBe('housing');
         expect((await api().get('/v1/communities?q=software')).body.communities.map((row: { name: string }) => row.name)).toEqual(['devs']);
 

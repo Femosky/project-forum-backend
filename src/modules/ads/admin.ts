@@ -8,6 +8,7 @@ import { badRequest, notFound, parse, uuidParam } from '../../lib/http';
 import { AuthRequest, viewerOf } from '../../middlewares/auth';
 import { COMMUNITY_CATEGORIES, LIMITS } from '../../shared/validation';
 import { closeReports } from '../moderation/queue';
+import { findCommunity } from '../communities/access';
 import { linkProblem } from './urls';
 import { campaignSpend, clearAdCache, readTargeting, targetingSchema } from './decision';
 
@@ -87,11 +88,11 @@ const updateCreativeSchema = creativeFields.partial();
 async function validTargeting(targeting: z.infer<typeof targetingSchema>) {
     const categories = targeting.categories.filter((category) => !(category in COMMUNITY_CATEGORIES));
     if (categories.length > 0) throw badRequest(`Unknown category: ${categories.join(', ')}`, 'unknown_category');
-    const names = [...new Set(targeting.communities)];
-    const found = await prisma.community.findMany({ where: { name: { in: names } }, select: { name: true } });
-    const missing = names.filter((name) => !found.some((row) => row.name === name));
+    // Stored under each community's current name, whatever case or old name was typed
+    const found = await Promise.all(targeting.communities.map((name) => findCommunity(name).catch(() => null)));
+    const missing = targeting.communities.filter((_, index) => !found[index]);
     if (missing.length > 0) throw badRequest(`No community called ${missing.join(', ')}`, 'unknown_community');
-    return { communities: names, categories: [...new Set(targeting.categories)] };
+    return { communities: [...new Set(found.map((community) => community!.name))], categories: [...new Set(targeting.categories)] };
 }
 
 function checkDates(starts: Date | null | undefined, ends: Date | null | undefined) {

@@ -13,7 +13,7 @@ generator client {
 datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
-  extensions = [pg_trgm]
+  extensions = [pg_trgm, citext]
 }
 
 /**
@@ -267,8 +267,11 @@ model Community {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  // Lowercase, 3-21 chars; the URL key
-  name         String              @unique
+  // The URL key: 3-21 lowercase letters and digits, never changes (/c/premierleague). citext, so lookups in any case
+  // find it; old names (CommunityAlias) redirect to it.
+  name         String              @unique @db.Citext
+  // The same letters with the capitals the community chose ("PremierLeague"), shown as the handle; null = name
+  name_styled  String?
   display_name String?
   description  String?
   image_url    String?
@@ -298,16 +301,17 @@ model Community {
   mod_actions   ModAction[]
   reports       Report[]
 
+  aliases         CommunityAlias[]
   trending        TrendingCommunity[]
   trending_topics TrendingTopic[]
   daily_visitors  CommunityDailyVisitor[]
   daily_traffic   CommunityDailyTraffic[]
   daily_stats     CommunityDailyStat[]
+  // Plus a trigram GIN index on name for autocomplete (raw SQL in the migration)
 
   @@index([status, member_count(sort: Desc)])
   @@index([category, member_count(sort: Desc)])
   @@index([search_vector], type: Gin)
-  @@index([name(ops: raw("gin_trgm_ops"))], map: "Community_name_trgm_idx", type: Gin)
 }
 
 // Membership, moderator role and bans in one table
@@ -765,6 +769,16 @@ model Notification {
   @@unique([user_id, comment_id])
   @@index([user_id, created_at(sort: Desc), id(sort: Desc)])
   @@index([user_id, read_at])
+}
+
+// A community's earlier name; /c/{old name} redirects to the current one
+model CommunityAlias {
+  name         String    @id @db.Citext
+  community_id String    @db.Uuid
+  community    Community @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  created_at   DateTime  @default(now())
+
+  @@index([community_id])
 }
 
 /**

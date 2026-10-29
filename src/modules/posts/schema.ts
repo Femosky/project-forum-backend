@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { commentBody, communityName, httpUrl, pageQuery, postBody, title, voteValue, commentSort } from '../../shared/validation';
+import { commentBody, communityRef, httpUrl, pageQuery, postBody, title, voteValue, commentSort } from '../../shared/validation';
 
 export const createPostSchema = z
     .object({
-        community: communityName,
+        community: communityRef,
         type: z.enum(['text', 'link']).default('text'),
         title,
         body: postBody.default(''),

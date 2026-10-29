@@ -17,7 +17,7 @@ afterEach(() => {
 
 async function setup() {
     const admin = await signUp('adminy', { admin: true });
-    await createCommunity(admin.agent, 'lagos_jobs', { category: 'careers' });
+    await createCommunity(admin.agent, 'lagosjobs', { category: 'careers' });
     await createCommunity(admin.agent, 'cooking', { category: 'food' });
     return admin;
 }
@@ -51,12 +51,12 @@ describe('decision service', () => {
         const admin = await setup();
         Object.assign(env, ADSENSE);
 
-        const before = await feedAds('community=lagos_jobs&count=2');
+        const before = await feedAds('community=lagosjobs&count=2');
         expect(before.body.ads.map((ad: { kind: string }) => ad.kind)).toEqual(['adsense', 'adsense']);
         expect(before.body.ads[0]).toMatchObject({ client: ADSENSE.ADSENSE_CLIENT_ID, slot_id: '111', format: 'in-feed' });
 
-        const { creative } = await campaign(admin.agent, { targeting: { communities: ['lagos_jobs'] } });
-        const after = await feedAds('community=lagos_jobs&count=2');
+        const { creative } = await campaign(admin.agent, { targeting: { communities: ['lagosjobs'] } });
+        const after = await feedAds('community=lagosjobs&count=2');
         expect(after.body.ads.map((ad: { kind: string }) => ad.kind)).toEqual(['direct', 'adsense']);
         expect(after.body.ads[0]).toMatchObject({
             id: creative.id,
@@ -73,7 +73,7 @@ describe('decision service', () => {
         await campaign(admin.agent, { kind: 'house', name: 'Start a community' }, { headline: 'Start your own community' });
         await campaign(admin.agent, { targeting: { categories: ['careers'] } });
 
-        const careers = await feedAds('community=lagos_jobs&count=3');
+        const careers = await feedAds('community=lagosjobs&count=3');
         expect(careers.body.ads.map((ad: { kind: string }) => ad.kind)).toEqual(['direct', 'house']);
         const food = await feedAds('community=cooking&count=3');
         expect(food.body.ads.map((ad: { kind: string }) => ad.kind)).toEqual(['house']);
@@ -101,16 +101,16 @@ describe('decision service', () => {
 
     it('keeps ads off NSFW and sensitive communities unless an admin switches them on', async () => {
         const admin = await setup();
-        await createCommunity(admin.agent, 'after_dark', { is_nsfw: true });
-        await createCommunity(admin.agent, 'grief_support', { category: 'health' });
+        await createCommunity(admin.agent, 'afterdark', { is_nsfw: true });
+        await createCommunity(admin.agent, 'griefsupport', { category: 'health' });
         await campaign(admin.agent);
 
-        expect((await feedAds('community=after_dark&count=1')).body.ads).toHaveLength(0);
-        expect((await feedAds('community=grief_support&count=1')).body.ads).toHaveLength(0);
+        expect((await feedAds('community=afterdark&count=1')).body.ads).toHaveLength(0);
+        expect((await feedAds('community=griefsupport&count=1')).body.ads).toHaveLength(0);
         expect((await feedAds('community=cooking&count=1')).body.ads).toHaveLength(1);
 
-        await admin.agent.patch('/v1/admin/communities/grief_support/ads').send({ ads_enabled: true }).expect(200);
-        expect((await feedAds('community=grief_support&count=1')).body.ads).toHaveLength(1);
+        await admin.agent.patch('/v1/admin/communities/griefsupport/ads').send({ ads_enabled: true }).expect(200);
+        expect((await feedAds('community=griefsupport&count=1')).body.ads).toHaveLength(1);
         await admin.agent.patch('/v1/admin/communities/cooking/ads').send({ ads_enabled: false }).expect(200);
         expect((await feedAds('community=cooking&count=1')).body.ads).toHaveLength(0);
     });

@@ -21,7 +21,7 @@ export const SENSITIVE_CATEGORIES = new Set(['health']);
 export const MAX_ADS_PER_REQUEST = 6;
 
 export const targetingSchema = z.object({
-    communities: z.array(z.string().trim().toLowerCase().min(1).max(21)).max(100).default([]),
+    communities: z.array(z.string().trim().min(1).max(40)).max(100).default([]),
     categories: z.array(z.string().trim().min(1).max(30)).max(20).default([]),
 });
 export type Targeting = z.infer<typeof targetingSchema>;
@@ -158,7 +158,8 @@ function matches(targeting: Targeting, community: AdCommunity | null) {
     const runsEverywhere = targeting.communities.length === 0 && targeting.categories.length === 0;
     if (runsEverywhere) return true;
     if (!community) return false;
-    return targeting.communities.includes(community.name) || (community.category !== null && targeting.categories.includes(community.category));
+    const name = community.name.toLowerCase();
+    return targeting.communities.some((target) => target.toLowerCase() === name) || (community.category !== null && targeting.categories.includes(community.category));
 }
 
 // Lower ranks first: targeted direct, run-of-site direct, targeted house, run-of-site house

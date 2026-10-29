@@ -13,7 +13,7 @@ import { countryOf, visitorId } from './visitors';
 const router = Router();
 
 const visitSchema = z.object({ path: z.string().trim().min(1).max(300).startsWith('/') });
-const COMMUNITY_PATH = /^\/c\/([a-z][a-z0-9_]{2,20})(?:\/|$)/i;
+const COMMUNITY_PATH = /^\/c\/([a-z][a-z0-9_-]{2,39})(?:\/|$)/i;
 
 // Plain-text bodies are accepted too, like /ads/events: no CORS preflight, and it survives the page closing
 router.post('/visit', express.text({ type: 'text/plain', limit: '2kb' }), optionalAuth, async (request: AuthRequest, response) => {
@@ -32,6 +32,7 @@ router.post('/visit', express.text({ type: 'text/plain', limit: '2kb' }), option
         return;
     }
 
+    // Case doesn't matter (names are citext); counted under the lowercased name so casings share one counter
     const community = COMMUNITY_PATH.exec(path)?.[1]?.toLowerCase() ?? null;
     recordVisit({
         visitor: await visitorId(lagosDay(), request.ip, userAgent!),
