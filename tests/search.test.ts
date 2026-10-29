@@ -84,10 +84,17 @@ describe('search', () => {
         await refreshSearchWords();
         expect(await prisma.searchWord.count()).toBeGreaterThan(3);
 
+        // A weak correction is only suggested
         const typo = await api().get('/v1/search?q=landlrod');
         expect(typo.body.posts).toEqual([]);
         expect(typo.body.did_you_mean).toBe('landlord');
-        expect((await api().get('/v1/search?q=landlrod upfrnt')).body.did_you_mean).toBe('landlord upfront');
+        expect(typo.body.corrected_from).toBeNull();
+        // A confident one shows its results straight away, and exact=1 searches the words as typed
+        const corrected = await api().get('/v1/search?q=upfrnt');
+        expect(corrected.body.posts.map((post: { title: string }) => post.title)).toEqual(['Landlord wants two years upfront']);
+        expect(corrected.body).toMatchObject({ query: 'upfront', corrected_from: 'upfrnt', did_you_mean: null });
+        const exact = await api().get('/v1/search?q=upfrnt&exact=1');
+        expect(exact.body).toMatchObject({ posts: [], corrected_from: null, did_you_mean: null });
         // Nothing to suggest for words that are fine, or gibberish
         expect((await api().get('/v1/search?q=landlord')).body.did_you_mean).toBeNull();
         expect((await api().get('/v1/search?q=zzqxv')).body.did_you_mean).toBeNull();
