@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { env } from '../../config/env';
 import prisma from '../../prismaConnection';
 import { badRequest, notFound, parse, uuidParam } from '../../lib/http';
-import { AuthRequest, viewerOf } from '../../middlewares/auth';
+import { audit, staffOf } from '../staff/service';
 import { COMMUNITY_CATEGORIES, LIMITS } from '../../shared/validation';
 import { closeReports } from '../moderation/queue';
 import { findCommunity } from '../communities/access';
@@ -18,6 +18,18 @@ import { campaignSpend, clearAdCache, readTargeting, targetingSchema } from './d
 // creatives. Payment is a Paystack link tracked on the campaign.
 
 const router = Router();
+
+// Every change made here goes to the staff audit log, once it has succeeded
+router.use((request, response, next) => {
+    if (request.method !== 'GET') {
+        response.on('finish', () => {
+            if (response.statusCode < 400) {
+                void audit(request, `ads_${request.method.toLowerCase()}`, { type: 'ads', id: request.path }, { fields: Object.keys(request.body ?? {}) }).catch(() => undefined);
+            }
+        });
+    }
+    next();
+});
 
 const webUrl = z
     .string()
@@ -259,13 +271,12 @@ router.post('/campaigns/:id/creatives', async (request, response) => {
 });
 
 // Pausing a creative also settles open reports about it
-router.patch('/creatives/:id', async (request: AuthRequest, response) => {
-    const { user } = viewerOf(request);
+router.patch('/creatives/:id', async (request, response) => {
     const id = uuidParam(request.params.id, 'Ad not found');
     const input = parse(updateCreativeSchema, request.body);
     if (!(await prisma.adCreative.findUnique({ where: { id }, select: { id: true } }))) throw notFound('Ad not found');
     const creative = await prisma.adCreative.update({ where: { id }, data: input });
-    if (input.is_active === false) await closeReports('ad', id, 'resolved', user.id);
+    if (input.is_active === false) await closeReports('ad', id, 'resolved', { staffId: staffOf(request).id });
     clearAdCache();
     response.json({ creative });
 });

@@ -1,3 +1,4 @@
+import { avatarCode } from '../../lib/avatars';
 import { Router } from 'express';
 import { Community, CommunityMember, Prisma } from '@prisma/client';
 import prisma from '../../prismaConnection';
@@ -150,7 +151,7 @@ router.get('/:name', optionalAuth, async (request: AuthRequest, response) => {
         prisma.communityMember.findMany({
             where: { community_id: community.id, role: { in: ['owner', 'moderator'] }, is_banned: false },
             orderBy: { joined_at: 'asc' },
-            select: { role: true, user: { select: { username: true, display_name: true, avatar_id: true } } },
+            select: { role: true, user: { select: { username: true, display_name: true, avatar_id: true, avatar_config: true } } },
         }),
         userId ? activeMute(community.id, userId) : null,
     ]);
@@ -158,7 +159,7 @@ router.get('/:name', optionalAuth, async (request: AuthRequest, response) => {
     const queue = moderates ? await queueCount({ communityId: community.id }) : null;
     response.json({
         community: toPublicCommunity(community),
-        moderators: moderators.map((row) => ({ ...row.user, role: row.role })),
+        moderators: moderators.map(({ user: { avatar_config, ...user }, role }) => ({ ...user, avatar: avatarCode(avatar_config), role })),
         viewer: request.viewer ? viewerMembership(member, Boolean(pending), mute?.muted_until ?? null, queue) : null,
     });
 });

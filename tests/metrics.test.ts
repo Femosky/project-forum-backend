@@ -3,7 +3,7 @@ import prisma from '../src/prismaConnection';
 import { addDays, lagosDay, lagosDayBounds } from '../src/lib/days';
 import { ACTIVE_EVERY_MS, flushMetrics, recordActivity, recordPostView } from '../src/modules/metrics/buffer';
 import { dayTotals, ensureDailyStats, writeDailyStats } from '../src/modules/metrics/stats';
-import { api, createComment, createCommunity, createPost, signUp } from './helpers';
+import { api, createComment, createCommunity, createPost, signUp, signInStaff } from './helpers';
 
 const BROWSER = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36';
 
@@ -167,18 +167,18 @@ describe('daily stats', () => {
     });
 
     it('serves Admin -> Stats and CSV exports to admins only', async () => {
-        const admin = await signUp('boss', { admin: true });
+        const admin = await signInStaff('boss');
         const alice = await signUp('alice');
         await createCommunity(alice.agent, 'lounge');
         await createPost(alice.agent, 'lounge');
 
-        expect((await alice.agent.get('/v1/admin/stats')).status).toBe(403);
+        expect((await alice.agent.get('/v1/admin/stats')).status).toBe(401);
         expect((await api().get('/v1/admin/stats')).status).toBe(401);
 
         const stats = await admin.agent.get('/v1/admin/stats?days=7');
         expect(stats.status).toBe(200);
         expect(stats.body.days).toHaveLength(7);
-        expect(stats.body.today).toMatchObject({ date: lagosDay(), posts: 1, total_users: 2 });
+        expect(stats.body.today).toMatchObject({ date: lagosDay(), posts: 1, total_users: 1 });
         expect(stats.body.range.to).toBe(addDays(lagosDay(), -1));
         expect((await admin.agent.get('/v1/admin/stats?from=2026-10-10&to=2026-10-01')).status).toBe(400);
 

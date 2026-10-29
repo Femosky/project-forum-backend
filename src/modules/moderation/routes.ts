@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { User } from '@prisma/client';
+import { Report } from '@prisma/client';
 import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
@@ -9,9 +9,9 @@ import { AuthRequest, requireAuth, viewerOf } from '../../middlewares/auth';
 import { LIMITS, pageQuery, username } from '../../shared/validation';
 import { setCommentStatus } from '../comments/service';
 import { findVisibleComment } from '../comments/routes';
-import { assertModerator, findCommunity, findMembership, viewerContext } from '../communities/access';
+import { assertModerator, findCommunity, findMembership, ViewerContext, viewerContext } from '../communities/access';
 import { findVisiblePost } from '../posts/service';
-import { buildQueue, closeReports } from './queue';
+import { Actor, actorFields, buildQueue, closeReports } from './queue';
 
 // Reports, the mod queue, moderator actions on posts and comments, mutes, and the mod log.
 // Every action writes a ModAction row, which is the audit trail.
@@ -39,20 +39,14 @@ const reportSchema = z.object({
     note: z.string().trim().max(LIMITS.REPORT_NOTE_MAX).optional(),
 });
 
-const resolveSchema = z.object({ status: z.enum(['resolved', 'dismissed']) });
-
-const postActionSchema = z.object({
+export const postActionSchema = z.object({
     action: z.enum(['remove', 'approve', 'lock', 'unlock', 'pin', 'unpin', 'sponsor', 'unsponsor']),
     reason,
 });
 
-const commentActionSchema = z.object({ action: z.enum(['remove', 'approve', 'lock', 'unlock', 'pin', 'unpin']), reason });
+export const commentActionSchema = z.object({ action: z.enum(['remove', 'approve', 'lock', 'unlock', 'pin', 'unpin']), reason });
 
 const reportsQuery = pageQuery.extend({ status: z.enum(['open', 'resolved', 'dismissed']).default('open') });
-
-export const requireAdmin = (user: User) => {
-    if (user.role !== 'admin') throw forbidden('Only site admins can do that.', 'not_admin');
-};
 
 // Which community's moderators should see a report (null: site admins)
 async function reportCommunity(targetType: string, targetId: string) {
@@ -127,29 +121,25 @@ router.get('/communities/:name/reports', requireAuth, async (request: AuthReques
     response.json({ reports: items, next_cursor });
 });
 
-// Site-level reports (users and communities); the admin queue in admin/routes.ts shows everything
-router.get('/admin/reports', requireAuth, async (request: AuthRequest, response) => {
-    requireAdmin(viewerOf(request).user);
-    const { items, next_cursor } = await listReports({ community_id: null }, parse(reportsQuery, request.query));
-    response.json({ reports: items, next_cursor });
-});
-
-// Closes a report and every other open report on the same target
+// Closes a report and every other open report on the same target. Site-level reports (users, communities, ads) are
+// for staff, from the admin panel (POST /v1/admin/reports/:id/resolve).
 router.post('/reports/:id/resolve', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const { status } = parse(resolveSchema, request.body);
     const report = await prisma.report.findUnique({ where: { id: uuidParam(request.params.id, 'Report not found') } });
     if (!report) throw notFound('Report not found');
-    if (report.community_id) await assertModerator(report.community_id, user);
-    else requireAdmin(user);
+    if (!report.community_id) throw forbidden('Only site staff can close this report.', 'not_admin');
+    await assertModerator(report.community_id, user);
+    response.json({ success: true, closed: await resolveReport(report, status, { userId: user.id }) });
+});
 
-    const result = await prisma.report.updateMany({
-        where: { target_type: report.target_type, target_id: report.target_id, status: 'open' },
-        data: { status, resolved_by: user.id, resolved_at: new Date() },
-    });
+export const resolveSchema = z.object({ status: z.enum(['resolved', 'dismissed']) });
+
+export async function resolveReport(report: Report, status: 'resolved' | 'dismissed', actor: Actor) {
+    const result = await closeReports(report.target_type, report.target_id, status, actor);
     await prisma.modAction.create({
         data: {
-            actor_id: user.id,
+            ...actorFields(actor),
             community_id: report.community_id,
             action: status === 'resolved' ? 'resolve_reports' : 'dismiss_reports',
             target_type: report.target_type,
@@ -157,8 +147,8 @@ router.post('/reports/:id/resolve', requireAuth, async (request: AuthRequest, re
             details: { count: result.count },
         },
     });
-    response.json({ success: true, closed: result.count });
-});
+    return result.count;
+}
 
 // Reports and held items waiting for this community's moderators
 router.get('/communities/:name/mod-queue', requireAuth, async (request: AuthRequest, response) => {
@@ -278,8 +268,16 @@ router.post('/posts/:id/moderation', requireAuth, async (request: AuthRequest, r
     const context = await viewerContext(request.viewer);
     const post = await findVisiblePost(String(request.params.id), user, context);
 
-    if (input.action === 'sponsor' || input.action === 'unsponsor') requireAdmin(user);
-    else await assertModerator(post.community_id, user);
+    // Marking posts as sponsored is for staff (the admin panel)
+    if (input.action === 'sponsor' || input.action === 'unsponsor') throw forbidden('Only site staff can do that.', 'not_admin');
+    await assertModerator(post.community_id, user);
+    response.json({ post: await moderatePost(post, input, { userId: user.id }, context) });
+});
+
+type PostForModeration = Awaited<ReturnType<typeof findVisiblePost>>;
+
+// A moderator's or staff member's decision on a post, with the community's post count, the log and its reports
+export async function moderatePost(post: PostForModeration, input: z.infer<typeof postActionSchema>, actor: Actor, context: ViewerContext) {
     if (post.status === 'deleted') throw badRequest('The author deleted this post.', 'post_deleted');
 
     const data = (() => {
@@ -315,7 +313,7 @@ router.post('/posts/:id/moderation', requireAuth, async (request: AuthRequest, r
             : []),
         prisma.modAction.create({
             data: {
-                actor_id: user.id,
+                ...actorFields(actor),
                 community_id: post.community_id,
                 action: `${input.action}_post`,
                 target_type: 'post',
@@ -325,18 +323,24 @@ router.post('/posts/:id/moderation', requireAuth, async (request: AuthRequest, r
             },
         }),
     ]);
-    if (input.action === 'remove') await closeReports('post', post.id, 'resolved', user.id);
-    if (input.action === 'approve') await closeReports('post', post.id, 'dismissed', user.id);
-    response.json({ post: toPublicPost(updated as typeof updated & { community: typeof post.community }, context) });
-});
+    if (input.action === 'remove') await closeReports('post', post.id, 'resolved', actor);
+    if (input.action === 'approve') await closeReports('post', post.id, 'dismissed', actor);
+    return toPublicPost(updated as typeof updated & { community: typeof post.community }, context);
+}
 
 router.post('/comments/:id/moderation', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const input = parse(commentActionSchema, request.body);
     const context = await viewerContext(request.viewer);
     const comment = await findVisibleComment(String(request.params.id), user, context);
+    await assertModerator(comment.post.community_id, user);
+    response.json({ comment: await moderateComment(comment, input, { userId: user.id }, context) });
+});
+
+type CommentForModeration = Awaited<ReturnType<typeof findVisibleComment>>;
+
+export async function moderateComment(comment: CommentForModeration, input: z.infer<typeof commentActionSchema>, actor: Actor, context: ViewerContext) {
     const communityId = comment.post.community_id;
-    await assertModerator(communityId, user);
     if (comment.status === 'deleted') throw badRequest('The author deleted this comment.', 'comment_deleted');
     if ((input.action === 'pin' || input.action === 'unpin') && comment.depth !== 0) {
         throw badRequest('Only top-level comments can be pinned.', 'not_top_level');
@@ -365,7 +369,7 @@ router.post('/comments/:id/moderation', requireAuth, async (request: AuthRequest
     }
     await prisma.modAction.create({
         data: {
-            actor_id: user.id,
+            ...actorFields(actor),
             community_id: communityId,
             action: `${input.action}_comment`,
             target_type: 'comment',
@@ -373,9 +377,9 @@ router.post('/comments/:id/moderation', requireAuth, async (request: AuthRequest
             reason: input.reason ?? null,
         },
     });
-    if (input.action === 'remove') await closeReports('comment', comment.id, 'resolved', user.id);
-    if (input.action === 'approve') await closeReports('comment', comment.id, 'dismissed', user.id);
-    response.json({ comment: toPublicComment(updated, communityId, context) });
-});
+    if (input.action === 'remove') await closeReports('comment', comment.id, 'resolved', actor);
+    if (input.action === 'approve') await closeReports('comment', comment.id, 'dismissed', actor);
+    return toPublicComment(updated, communityId, context);
+}
 
 export default router;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import prisma from '../src/prismaConnection';
-import { api, createComment, createCommunity, createPost, makeModerator, signUp } from './helpers';
+import { api, createComment, createCommunity, createPost, makeModerator, signUp, signInStaff } from './helpers';
 
 // Regression tests for roadmap bugs 1, 3, 4, 5, 6, 7 and 16
 
@@ -48,9 +48,9 @@ describe('comment edit and delete (bug 1)', () => {
 });
 
 describe('sponsorship is not user-settable (bug 3)', () => {
-    it('ignores is_sponsored on posts and comments, and only admins can sponsor', async () => {
+    it('ignores is_sponsored on posts and comments, and only staff can sponsor', async () => {
         const alice = await signUp('alice');
-        const admin = await signUp('root', { admin: true });
+        const admin = await signInStaff('root');
         const community = await createCommunity(alice.agent, 'lounge');
         await makeModerator(alice.user.id, community.id);
         const post = await createPost(alice.agent, 'lounge', { is_sponsored: true });
@@ -61,7 +61,10 @@ describe('sponsorship is not user-settable (bug 3)', () => {
 
         // Even the community owner can't sponsor
         expect((await alice.agent.post(`/v1/posts/${post.id}/moderation`).send({ action: 'sponsor' })).status).toBe(403);
-        expect((await admin.agent.post(`/v1/posts/${post.id}/moderation`).send({ action: 'sponsor' })).status).toBe(200);
+        // Not even a forum account with the old admin role; staff do it from the admin panel
+        const oldAdmin = await signUp('oldadmin', { admin: true });
+        expect((await oldAdmin.agent.post(`/v1/posts/${post.id}/moderation`).send({ action: 'sponsor' })).status).toBe(403);
+        expect((await admin.agent.post(`/v1/admin/posts/${post.id}/moderation`).send({ action: 'sponsor' })).status).toBe(200);
         expect(await prisma.post.count({ where: { is_sponsored: true } })).toBe(1);
     });
 });

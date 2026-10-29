@@ -2,6 +2,8 @@ import request from 'supertest';
 import app from '../src/app';
 import prisma from '../src/prismaConnection';
 import { devOutbox } from '../src/lib/email';
+import { hashPassword } from '../src/modules/auth/service';
+import { encryptSecret, newTotpSecret, totpCode } from '../src/modules/staff/totp';
 
 export const api = () => request(app);
 export type Agent = ReturnType<typeof request.agent>;
@@ -74,3 +76,26 @@ export const cookieValue = (response: request.Response, name: string) => {
     const cookie = cookies.find((value) => value.startsWith(`${name}=`));
     return cookie ? decodeURIComponent(cookie.split(';')[0].slice(name.length + 1)) : undefined;
 };
+
+// A staff member signed in to the admin panel the real way (password, then an authenticator code). The agent carries
+// the staff_session cookie for /v1/admin.
+export async function signInStaff(name: string, role: 'owner' | 'admin' | 'ads' | 'moderator' = 'admin') {
+    const secret = newTotpSecret();
+    const account = await prisma.staffAccount.create({
+        data: {
+            email: `${name}@staff.test`,
+            name,
+            role,
+            password_hash: await hashPassword(PASSWORD),
+            totp_secret: encryptSecret(secret),
+            totp_enabled_at: new Date(),
+            recovery_codes: [],
+        },
+    });
+    const agent = request.agent(app);
+    const login = await agent.post('/v1/admin/auth/login').send({ email: account.email, password: PASSWORD });
+    if (login.status !== 200) throw new Error(`Staff login failed: ${JSON.stringify(login.body)}`);
+    const verify = await agent.post('/v1/admin/auth/2fa/verify').send({ code: totpCode(secret) });
+    if (verify.status !== 200) throw new Error(`Staff 2FA failed: ${JSON.stringify(verify.body)}`);
+    return { agent, account, secret };
+}

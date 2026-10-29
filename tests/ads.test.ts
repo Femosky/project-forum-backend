@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import prisma from '../src/prismaConnection';
 import { env } from '../src/config/env';
 import { decideAds } from '../src/modules/ads/decision';
-import { Agent, api, createCommunity, createPost, signUp } from './helpers';
+import { Agent, api, createCommunity, createPost, signUp, signInStaff } from './helpers';
 
 // Phase 6: the ad decision service, brand safety, frequency caps, budgets, impressions and clicks, the
 // advertiser stats page, admin campaign management and ad reports
@@ -16,10 +16,12 @@ afterEach(() => {
 });
 
 async function setup() {
-    const admin = await signUp('adminy', { admin: true });
-    await createCommunity(admin.agent, 'lagosjobs', { category: 'careers' });
-    await createCommunity(admin.agent, 'cooking', { category: 'food' });
-    return admin;
+    // Staff run the ads; a forum account owns the communities (staff accounts can't post)
+    const admin = await signInStaff('adminy');
+    const owner = await signUp('owner');
+    await createCommunity(owner.agent, 'lagosjobs', { category: 'careers' });
+    await createCommunity(owner.agent, 'cooking', { category: 'food' });
+    return { ...admin, owner };
 }
 
 async function campaign(agent: Agent, fields: Record<string, unknown> = {}, creative: Record<string, unknown> = {}) {
@@ -101,8 +103,8 @@ describe('decision service', () => {
 
     it('keeps ads off NSFW and sensitive communities unless an admin switches them on', async () => {
         const admin = await setup();
-        await createCommunity(admin.agent, 'afterdark', { is_nsfw: true });
-        await createCommunity(admin.agent, 'griefsupport', { category: 'health' });
+        await createCommunity(admin.owner.agent, 'afterdark', { is_nsfw: true });
+        await createCommunity(admin.owner.agent, 'griefsupport', { category: 'health' });
         await campaign(admin.agent);
 
         expect((await feedAds('community=afterdark&count=1')).body.ads).toHaveLength(0);
@@ -119,7 +121,7 @@ describe('decision service', () => {
         const admin = await setup();
         Object.assign(env, ADSENSE);
         await campaign(admin.agent, {}, { format: 'thread_comment' });
-        const post = await createPost(admin.agent, 'cooking', { title: 'Best jollof rice method', body: 'Share yours' });
+        const post = await createPost(admin.owner.agent, 'cooking', { title: 'Best jollof rice method', body: 'Share yours' });
 
         const ok = await api().get(`/v1/ads?placement=thread&post=${post.short_id}&count=2`);
         expect(ok.body.ads.map((ad: { kind: string }) => ad.kind)).toEqual(['direct', 'adsense']);
@@ -182,10 +184,15 @@ describe('impressions, clicks and stats', () => {
 });
 
 describe('admin campaign management', () => {
-    it('is for site admins only', async () => {
+    it('is for staff with an ads role only', async () => {
         await setup();
         const user = await signUp('regular');
-        expect((await user.agent.get('/v1/admin/ads')).status).toBe(403);
+        expect((await user.agent.get('/v1/admin/ads')).status).toBe(401);
+        const moderator = await signInStaff('mod', 'moderator');
+        expect((await moderator.agent.get('/v1/admin/ads')).status).toBe(403);
+        const adsManager = await signInStaff('adsy', 'ads');
+        expect((await adsManager.agent.get('/v1/admin/ads')).status).toBe(200);
+        expect((await adsManager.agent.get('/v1/admin/queue')).status).toBe(403);
         expect((await api().get('/v1/admin/ads')).status).toBe(401);
     });
 

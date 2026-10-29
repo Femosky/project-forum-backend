@@ -49,7 +49,7 @@ export async function processUpload(body: Buffer, purpose: ImagePurpose, uploade
     if (body.length === 0) throw badRequest('Choose a picture to upload.', 'image_missing');
     if (body.length > MAX_IMAGE_BYTES) throw badRequest('Pictures can be up to 5 MB.', 'image_too_large');
 
-    let meta: sharp.Metadata;
+    let meta: Awaited<ReturnType<ReturnType<typeof sharp>["metadata"]>>;
     try {
         meta = await sharp(body, { animated: false }).metadata();
     } catch {

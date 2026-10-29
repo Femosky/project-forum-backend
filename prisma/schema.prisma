@@ -587,12 +587,14 @@ model Report {
   community_id String?          @db.Uuid
   community    Community?       @relation(fields: [community_id], references: [id], onDelete: Cascade)
 
-  reason_code ReportReason
-  note        String?
-  status      ReportStatus @default(open)
-  resolved_by String?      @db.Uuid
-  resolver    User?        @relation("resolver", fields: [resolved_by], references: [id])
-  resolved_at DateTime?
+  reason_code       ReportReason
+  note              String?
+  status            ReportStatus  @default(open)
+  resolved_by       String?       @db.Uuid
+  resolver          User?         @relation("resolver", fields: [resolved_by], references: [id])
+  resolved_by_staff String?       @db.Uuid
+  staff_resolver    StaffAccount? @relation(fields: [resolved_by_staff], references: [id], onDelete: SetNull)
+  resolved_at       DateTime?
 
   @@unique([reporter_id, target_type, target_id])
   @@index([community_id, status, created_at])
@@ -605,10 +607,13 @@ model ModAction {
   id         String   @id @default(uuid(7)) @db.Uuid
   created_at DateTime @default(now())
 
-  actor_id     String     @db.Uuid
-  actor        User       @relation(fields: [actor_id], references: [id])
-  community_id String?    @db.Uuid
-  community    Community? @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  // A forum moderator, or a staff member acting from the admin panel
+  actor_id     String?       @db.Uuid
+  actor        User?         @relation(fields: [actor_id], references: [id], onDelete: Restrict)
+  staff_id     String?       @db.Uuid
+  staff        StaffAccount? @relation(fields: [staff_id], references: [id], onDelete: SetNull)
+  community_id String?       @db.Uuid
+  community    Community?    @relation(fields: [community_id], references: [id], onDelete: Cascade)
 
   // e.g. remove_post, approve_comment, lock_post, ban_user, set_role
   action      String
@@ -637,8 +642,10 @@ model BlockedTerm {
   value String
   note  String?
 
-  created_by String @db.Uuid
-  creator    User   @relation(fields: [created_by], references: [id])
+  created_by       String?       @db.Uuid
+  creator          User?         @relation(fields: [created_by], references: [id], onDelete: Restrict)
+  created_by_staff String?       @db.Uuid
+  staff_creator    StaffAccount? @relation(fields: [created_by_staff], references: [id], onDelete: SetNull)
 
   @@unique([kind, value])
 }
@@ -930,4 +937,97 @@ model CommunityDailyStat {
 
   @@id([date, community_id])
   @@index([community_id, date])
+}
+
+/**
+ * Staff: admin panel accounts (modules/staff), separate from forum accounts
+ */
+
+// owner: everything, including staff accounts. admin: everything but staff accounts. ads: ads and stats.
+// moderator: the site queue, users, communities, blocklist and logs.
+enum StaffRole {
+  owner
+  admin
+  ads
+  moderator
+}
+
+model StaffAccount {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  email              String    @unique @db.Citext
+  name               String
+  role               StaffRole @default(moderator)
+  // Null until an invite is accepted
+  password_hash      String?
+  // Set by the bootstrap script: must be changed after the first sign-in
+  password_temporary Boolean   @default(false)
+  // Authenticator secret, encrypted (staff/totp.ts); enabled once a first code was entered
+  totp_secret        String?
+  totp_enabled_at    DateTime?
+  // sha256 hashes of unused recovery codes
+  recovery_codes     Json?
+  disabled_at        DateTime?
+  last_login_at      DateTime?
+  failed_logins      Int       @default(0)
+  locked_until       DateTime?
+
+  created_by String?        @db.Uuid
+  creator    StaffAccount?  @relation("staff_created", fields: [created_by], references: [id], onDelete: SetNull)
+  created    StaffAccount[] @relation("staff_created")
+
+  sessions      StaffSession[]
+  tokens        StaffToken[]
+  audit         StaffAudit[]
+  mod_actions   ModAction[]
+  reports       Report[]
+  blocked_terms BlockedTerm[]
+}
+
+model StaffSession {
+  id              String       @id @default(uuid(7)) @db.Uuid
+  created_at      DateTime     @default(now())
+  staff_id        String       @db.Uuid
+  staff           StaffAccount @relation(fields: [staff_id], references: [id], onDelete: Cascade)
+  token_hash      String       @unique
+  expires_at      DateTime
+  last_used_at    DateTime     @default(now())
+  // Null until the second step (authenticator code) is done; until then the session can only finish signing in
+  mfa_verified_at DateTime?
+  revoked_at      DateTime?
+  ip_address      String?
+  user_agent      String?
+
+  @@index([staff_id])
+}
+
+model StaffToken {
+  id         String       @id @default(uuid(7)) @db.Uuid
+  created_at DateTime     @default(now())
+  staff_id   String       @db.Uuid
+  staff      StaffAccount @relation(fields: [staff_id], references: [id], onDelete: Cascade)
+  // 'invite'
+  purpose    String
+  token_hash String       @unique
+  expires_at DateTime
+  used_at    DateTime?
+
+  @@index([staff_id])
+}
+
+model StaffAudit {
+  id          String        @id @default(uuid(7)) @db.Uuid
+  created_at  DateTime      @default(now())
+  staff_id    String?       @db.Uuid
+  staff       StaffAccount? @relation(fields: [staff_id], references: [id], onDelete: SetNull)
+  action      String
+  target_type String?
+  target_id   String?
+  details     Json?
+  ip_address  String?
+
+  @@index([created_at(sort: Desc)])
+  @@index([staff_id, created_at(sort: Desc)])
 }

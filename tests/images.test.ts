@@ -4,7 +4,7 @@ import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import { AVATAR_PARTS, avatarCode } from '../src/lib/avatars';
 import { LOCAL_MEDIA_DIR } from '../src/lib/storage';
-import { createCommunity, signUp } from './helpers';
+import { createCommunity, signUp, signInStaff } from './helpers';
 
 // A JPEG with EXIF data (a camera make), to check uploads drop it
 const photo = () =>
@@ -48,10 +48,10 @@ describe('image uploads', () => {
     });
 
     it('takes ad pictures from admins only', async () => {
-        const admin = await signUp('boss', { admin: true });
+        const admin = await signInStaff('boss');
         const alice = await signUp('alice');
         const body = await photo();
-        expect((await alice.agent.post('/v1/admin/images?purpose=ad_logo').set('Content-Type', 'image/jpeg').send(body)).status).toBe(403);
+        expect((await alice.agent.post('/v1/admin/images?purpose=ad_logo').set('Content-Type', 'image/jpeg').send(body)).status).toBe(401);
         const logo = await admin.agent.post('/v1/admin/images?purpose=ad_image').set('Content-Type', 'image/jpeg').send(body);
         expect(logo.status).toBe(201);
         expect(logo.body.image).toMatchObject({ width: 1200, height: 628 });

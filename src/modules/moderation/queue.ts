@@ -155,9 +155,14 @@ export async function buildQueue(scope: Scope, context: ViewerContext): Promise<
 
 // Moderator decisions close the open reports on what they decided about: removing upholds them, approving
 // dismisses them
-export async function closeReports(targetType: ReportTargetType, targetId: string, status: 'resolved' | 'dismissed', actorId: string) {
+export async function closeReports(targetType: ReportTargetType, targetId: string, status: 'resolved' | 'dismissed', actor: string | Actor) {
+    const by = typeof actor === 'string' ? { resolved_by: actor } : 'staffId' in actor ? { resolved_by_staff: actor.staffId } : { resolved_by: actor.userId };
     return prisma.report.updateMany({
         where: { target_type: targetType, target_id: targetId, status: 'open' },
-        data: { status, resolved_by: actorId, resolved_at: new Date() },
+        data: { status, ...by, resolved_at: new Date() },
     });
 }
+
+// Who made a moderation decision: a forum moderator, or a staff member from the admin panel
+export type Actor = { userId: string } | { staffId: string };
+export const actorFields = (actor: Actor) => ('staffId' in actor ? { staff_id: actor.staffId } : { actor_id: actor.userId });

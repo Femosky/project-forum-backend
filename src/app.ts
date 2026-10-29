@@ -21,6 +21,7 @@ import moderationRoutes from './modules/moderation/routes';
 import notificationRoutes from './modules/notifications/routes';
 import seoRoutes from './modules/seo/routes';
 import adminRoutes from './modules/admin/routes';
+import { auditRoutes, staffAuthRoutes, staffRoutes } from './modules/staff/routes';
 import adsRoutes from './modules/ads/routes';
 import metricsRoutes from './modules/metrics/routes';
 import trendingRoutes from './modules/trending/routes';
@@ -89,7 +90,7 @@ const readLimiter = limiter({
 // --- v1 API ---
 const v1 = Router();
 v1.use(readLimiter);
-for (const path of ['/auth/signup', '/auth/login', '/auth/forgot-password', '/auth/reset-password', '/auth/google', '/auth/verify-email']) {
+for (const path of ['/auth/signup', '/auth/login', '/auth/forgot-password', '/auth/reset-password', '/auth/google', '/auth/verify-email', '/admin/auth']) {
     v1.use(path, authLimiter);
 }
 v1.post('/auth/signup', signupLimiter);
@@ -108,6 +109,10 @@ v1.use('/trending', trendingRoutes);
 v1.use('/images', imageRoutes);
 v1.use('/notifications', notificationRoutes);
 v1.use('/seo', seoRoutes);
+// The admin panel: staff sign-in first (rate-limited with the forum's sign-in), then everything else needs a staff session
+v1.use('/admin/auth', staffAuthRoutes);
+v1.use('/admin/staff', staffRoutes);
+v1.use('/admin/audit', auditRoutes);
 v1.use('/admin', adminRoutes);
 v1.use('/ads', adsRoutes);
 v1.use(moderationRoutes);
