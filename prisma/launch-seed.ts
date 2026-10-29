@@ -92,7 +92,9 @@ async function main() {
     if (!owner) throw new Error(`Owner account "${ownerName}" doesn't exist. Pass --owner=<username>.`);
 
     if (!reset) {
-        const existing = await prisma.community.count({ where: { name: { in: LAUNCH_COMMUNITIES.map((community) => community.name) } } });
+        const existing = await prisma.community.count({
+            where: { OR: LAUNCH_COMMUNITIES.map((community) => ({ name: { equals: community.name, mode: 'insensitive' as const } })) },
+        });
         if (existing > 0) throw new Error('Launch communities already exist. Use --reset to start over.');
     }
 

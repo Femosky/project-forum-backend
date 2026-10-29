@@ -23,7 +23,7 @@ const NO_SPAM = { title: 'No spam or self-promotion', description: 'No referral 
 
 export const LAUNCH_COMMUNITIES: SeedCommunity[] = [
     {
-        name: 'elections_2027',
+        name: 'Elections2027',
         display_name: 'Elections 2027',
         category: 'other',
         description: 'The 2027 general elections: candidates, issues, INEC updates and how to vote. Every side is welcome. Bring sources.',
@@ -110,7 +110,7 @@ If you see something in a group chat and you're not sure, post it here. Others c
         ],
     },
     {
-        name: 'bbnaija',
+        name: 'BBNaija',
         display_name: 'Big Brother Naija',
         category: 'entertainment',
         description: 'Everything Big Brother Naija: the house, the evictions, the fights and life after the show.',
@@ -168,7 +168,7 @@ Was it the right result for you?`,
         ],
     },
     {
-        name: 'super_eagles',
+        name: 'SuperEagles',
         display_name: 'Super Eagles',
         category: 'sports',
         description: 'The Super Eagles, the Super Falcons and Nigerian players abroad. Match threads, squad news and arguments about the coach.',
@@ -221,7 +221,7 @@ I don't think it's one thing. Midfield got overrun, the full-backs were caught h
         ],
     },
     {
-        name: 'premier_league',
+        name: 'PremierLeague',
         display_name: 'Premier League',
         category: 'sports',
         description: 'English Premier League talk for fans everywhere. Match threads, transfers, tactics and banter (keep it friendly).',
@@ -272,7 +272,7 @@ I don't think it's one thing. Midfield got overrun, the full-backs were caught h
         ],
     },
     {
-        name: 'afrobeats',
+        name: 'Afrobeats',
         display_name: 'Afrobeats',
         category: 'entertainment',
         description: 'Afrobeats, Afropop, Amapiano and alté. New releases, old classics, concerts and the business of the music.',
@@ -324,7 +324,7 @@ With the election in January, do you expect any of the big names to say anything
         ],
     },
     {
-        name: 'japa',
+        name: 'Japa',
         display_name: 'Japa',
         category: 'relocation',
         description: 'Moving abroad: visas, jobs, schools, costs and what settling in is really like. Help people make informed decisions.',
@@ -401,7 +401,7 @@ Would I do it again? Yes. But I would have come with more savings.`,
         ],
     },
     {
-        name: 'lagos_rent',
+        name: 'LagosRent',
         display_name: 'Lagos Rent',
         category: 'housing',
         description: 'Renting in Lagos: prices by area, agents, landlords, tenancy law and house hunting tips.',
@@ -467,7 +467,7 @@ What would you add?`,
         ],
     },
     {
-        name: 'naija_tech',
+        name: 'NaijaTech',
         display_name: 'Naija Tech',
         category: 'tech',
         description: 'Tech in and from Nigeria: startups, funding, products, policy and building things.',
@@ -516,7 +516,7 @@ Five months is generous compared with what we usually see here. But it's another
         ],
     },
     {
-        name: 'tech_careers',
+        name: 'TechCareers',
         display_name: 'Tech Careers',
         category: 'careers',
         description: 'Getting into tech, getting promoted and getting paid. CVs, interviews, salaries and remote work.',
@@ -562,7 +562,7 @@ Five months is generous compared with what we usually see here. But it's another
         ],
     },
     {
-        name: 'money_matters',
+        name: 'MoneyMatters',
         display_name: 'Money Matters',
         category: 'money',
         description: 'Personal finance in Nigeria: saving, investing, budgeting, banking and the cost of living. No get-rich-quick schemes.',
@@ -616,7 +616,7 @@ A lower inflation rate means prices are rising more slowly. It doesn't mean they
         ],
     },
     {
-        name: 'small_business',
+        name: 'SmallBusiness',
         display_name: 'Small Business',
         category: 'business',
         description: 'Running a small business in Nigeria: customers, suppliers, power, payments, registration and growth.',
@@ -662,7 +662,7 @@ A lower inflation rate means prices are rising more slowly. It doesn't mean they
         ],
     },
     {
-        name: 'naija_food',
+        name: 'NaijaFood',
         display_name: 'Naija Food',
         category: 'food',
         description: 'Cooking, eating and arguing about Nigerian food. Recipes, restaurants, market prices and the jollof wars.',
@@ -710,7 +710,7 @@ A lower inflation rate means prices are rising more slowly. It doesn't mean they
         ],
     },
     {
-        name: 'study_abroad',
+        name: 'StudyAbroad',
         display_name: 'Study Abroad',
         category: 'education',
         description: 'Admissions, scholarships, visas and student life abroad. Ask questions, share what worked.',
@@ -742,7 +742,7 @@ A lower inflation rate means prices are rising more slowly. It doesn't mean they
         ],
     },
     {
-        name: 'relationships',
+        name: 'Relationships',
         display_name: 'Relationships',
         category: 'relationships',
         description: 'Dating, marriage, family and friendships. Ask for advice, share your story, be kind.',
