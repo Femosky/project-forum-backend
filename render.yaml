@@ -1,11 +1,13 @@
-# Render Blueprint for the API (docs/DEPLOY.md). Free web service in Ohio, next to the Neon database (us-east-2).
+# Render Blueprint for the API (docs/DEPLOY.md). Starter web service in Frankfurt, next to the Neon database in
+# AWS Europe Central 1 (Frankfurt): the closest region to Nigeria either host offers. The move from the old Ohio
+# setup is step by step in docs/LAUNCH.md (project root), "Moving to Frankfurt".
 # Deploys are triggered by GitHub Actions after CI passes and migrations have run, so autoDeploy is off.
 services:
   - type: web
     name: forum-api
     runtime: node
-    plan: free
-    region: ohio
+    plan: starter
+    region: frankfurt
     branch: main
     autoDeploy: false
     buildCommand: npm ci --include=dev && npm run build
@@ -29,7 +31,8 @@ services:
         sync: false
       - key: COOKIE_DOMAIN
         sync: false
-      # The free instance sleeps when idle; inline jobs keep Neon free to scale to zero as well
+      # Inline jobs keep Neon free to scale to zero. Trending and daily stats still refresh: their readers recompute
+      # stale snapshots (docs/DEPLOY.md, "Jobs"). Set to true to run them on a schedule instead.
       - key: JOBS_ENABLED
         value: "false"
       - key: RATE_LIMIT_STORE

@@ -67,6 +67,12 @@ const envSchema = z.object({
 
     // Error alerts (Sentry project DSN). Without it errors are only logged.
     SENTRY_DSN: z.string().url().optional(),
+
+    // Site metrics (modules/metrics). Optional path to a GeoLite2-Country .mmdb for visitor countries; by default
+    // src/dependencies/GeoLite2-Country.mmdb is used when it's there.
+    GEOIP_COUNTRY_DB: z.string().optional(),
+    // How often buffered view counts, visits and last-active times are written, in seconds
+    METRICS_FLUSH_SECONDS: z.coerce.number().int().min(5).max(600).default(45),
 });
 
 const parsed = envSchema.safeParse(process.env);

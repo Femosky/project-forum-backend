@@ -91,7 +91,7 @@ async function benchSeed() {
          WHERE c."name" LIKE 'bench_%' AND u."username" LIKE 'bench_user_%'`
     );
 
-    // Posts spread over 90 days with a long-tailed score; hot_rank uses the same formula as src/lib/ranking.ts
+    // Posts spread over 90 days with a long-tailed score; hot_rank is set once comment counts are in
     await run(
         'posts',
         `WITH u AS (SELECT array_agg("id") AS ids FROM "User" WHERE "username" LIKE 'bench_user_%'),
@@ -105,8 +105,7 @@ async function benchSeed() {
          SELECT gen_random_uuid(), 'p' || lpad(to_hex(i), 7, '0'), 'benchmark-post-' || i,
                 u.ids[1 + (i % ${users})], c.ids[1 + (i % ${communities})],
                 'Benchmark post ' || i || ' about rent, jobs and fuel prices',
-                repeat('Lorem ipsum dolor sit amet. ', 20), created_at, created_at, ups, downs, ups - downs,
-                sign(ups - downs) * log(greatest(abs(ups - downs), 1)) + (extract(epoch from created_at) - 1134028003) / 45000
+                repeat('Lorem ipsum dolor sit amet. ', 20), created_at, created_at, ups, downs, ups - downs, 0
          FROM raw, u, c`
     );
 
@@ -160,6 +159,11 @@ async function benchSeed() {
     await run(
         'post comment counts',
         `UPDATE "Post" p SET "comment_count" = r.n FROM (SELECT "post_id", count(*) AS n FROM "Comment" GROUP BY 1) r WHERE p."id" = r."post_id"`
+    );
+    // Same formula as hotRank() in src/lib/ranking.ts (the forum_hot_rank function from the migrations)
+    await run(
+        'hot ranks',
+        `UPDATE "Post" SET "hot_rank" = forum_hot_rank("score", "comment_count", "created_at") WHERE "slug" LIKE 'benchmark-post-%'`
     );
     await run(
         'community counts',

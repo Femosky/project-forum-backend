@@ -46,6 +46,8 @@ const campaignFields = z.object({
     currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, 'Use a 3-letter currency code like NGN'),
     frequency_cap: optional(z.number().int().min(1).max(100)),
     priority: z.number().int().min(-100).max(100),
+    // House campaigns: percent of slots they take even when paid campaigns exist (decision.ts)
+    house_share: z.number().int().min(0).max(50),
     payment_url: optional(webUrl),
     paid: z.boolean(),
 });

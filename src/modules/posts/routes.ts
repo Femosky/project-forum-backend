@@ -17,6 +17,8 @@ import { postViewerState, votePost } from '../votes/service';
 import { commentsQuery, createCommentSchema, createPostSchema, updatePostSchema, voteSchema } from './schema';
 import { createPost, findVisiblePost, relatedPosts, serializePosts } from './service';
 import { indexNowJob, postPath } from '../seo/jobs';
+import { isBot } from '../../lib/bots';
+import { recordPostView } from '../metrics/buffer';
 
 const router = Router();
 
@@ -101,26 +103,19 @@ router.get('/:id', optionalAuth, async (request: AuthRequest, response) => {
 });
 
 // A person opened this post's page. Counts one view for the post and one for each comment that was on screen (sent
-// by the page, at most 100). Bots and the author's own visits don't count. Counts are shown to authors only.
-const VIEW_BOT_PATTERN = /bot|crawl|spider|slurp|preview|facebookexternalhit|whatsapp|telegram/i;
+// by the page, at most 100). Bots and the author's own visits don't count. Counts are shown to authors only. Views
+// are buffered in memory and written in batches (modules/metrics/buffer.ts), so a page view costs no write.
 const viewSchema = z.object({ comment_ids: z.array(z.uuid()).max(100).default([]) });
 
 router.post('/:id/view', optionalAuth, async (request: AuthRequest, response) => {
     const { comment_ids } = parse(viewSchema, request.body ?? {});
-    if (VIEW_BOT_PATTERN.test(request.get('user-agent') ?? '')) {
+    if (isBot(request.get('user-agent'))) {
         response.status(204).end();
         return;
     }
     const context = await viewerContext(request.viewer);
     const post = await findVisiblePost(String(request.params.id), request.viewer?.user, context);
-    const viewerId = request.viewer?.user.id ?? null;
-    await prisma.$transaction([
-        ...(post.author_id === viewerId ? [] : [prisma.post.update({ where: { id: post.id }, data: { view_count: { increment: 1 } } })]),
-        prisma.comment.updateMany({
-            where: { id: { in: comment_ids }, post_id: post.id, ...(viewerId ? { author_id: { not: viewerId } } : {}) },
-            data: { view_count: { increment: 1 } },
-        }),
-    ]);
+    recordPostView(post, [...new Set(comment_ids.map((id) => id.toLowerCase()))], request.viewer?.user.id ?? null);
     response.status(204).end();
 });
 

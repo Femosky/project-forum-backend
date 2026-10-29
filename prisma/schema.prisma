@@ -153,8 +153,10 @@ model User {
   // Users confirm they are 18+ at signup; we keep the time of the attestation, not a birth date
   adult_attested_at DateTime?
 
-  karma         Int       @default(0)
-  last_login_at DateTime?
+  karma          Int       @default(0)
+  last_login_at  DateTime?
+  // Last request as a signed-in user, written at most every 15 minutes (lib/activity.ts)
+  last_active_at DateTime?
 
   // Site-admin actions. A suspension with no end date is permanent; an expired one is lifted at the next sign-in.
   suspended_until          DateTime?
@@ -188,11 +190,13 @@ model User {
   notifications      Notification[] @relation("notification_recipient")
   notifications_sent Notification[] @relation("notification_actor")
 
-  mutes         CommunityMute[] @relation("muted_user")
-  mutes_given   CommunityMute[] @relation("muted_by")
+  mutes         CommunityMute[]   @relation("muted_user")
+  mutes_given   CommunityMute[]   @relation("muted_by")
   blocked_terms BlockedTerm[]
+  active_days   DailyActiveUser[]
 
   @@index([status])
+  @@index([last_active_at])
   @@index([username(ops: raw("gin_trgm_ops"))], map: "User_username_trgm_idx", type: Gin)
 }
 
@@ -293,6 +297,12 @@ model Community {
   flairs        Flair[]
   mod_actions   ModAction[]
   reports       Report[]
+
+  trending        TrendingCommunity[]
+  trending_topics TrendingTopic[]
+  daily_visitors  CommunityDailyVisitor[]
+  daily_traffic   CommunityDailyTraffic[]
+  daily_stats     CommunityDailyStat[]
 
   @@index([status, member_count(sort: Desc)])
   @@index([category, member_count(sort: Desc)])
@@ -430,6 +440,7 @@ model Post {
   votes         PostVote[]
   saves         SavedPost[]
   notifications Notification[]
+  trending      TrendingPost[]
 
   // Feed indexes. Status is left out on purpose: almost every post is listed, so scanning in rank order and
   // filtering status (and community visibility) stops after one page, while a status column in the index
@@ -484,6 +495,9 @@ model Comment {
   // Wilson score lower bound, for "best" sort
   best_rank      Float @default(0)
 
+  // Generated tsvector over the body (raw SQL in the migration)
+  search_vector Unsupported("tsvector")?
+
   votes         CommentVote[]
   saves         SavedComment[]
   notifications Notification[]
@@ -493,6 +507,7 @@ model Comment {
   @@index([parent_id, best_rank(sort: Desc), id(sort: Desc)])
   @@index([root_id, path])
   @@index([author_id, created_at(sort: Desc)])
+  @@index([search_vector], type: Gin)
   // The mod queue's held comments
   @@index([status, post_id])
 }
@@ -674,6 +689,9 @@ model Campaign {
   frequency_cap Int?
   // Higher wins among campaigns that target the same pages
   priority      Int            @default(0)
+  // House campaigns only: percent of slots (0-50) this campaign takes even when paid campaigns want them, so the
+  // site's own products get seen. 0 means it only fills slots nobody paid for.
+  house_share   Int            @default(0)
   // Invoice tracking for direct deals (Paystack payment link)
   payment_url   String?
   paid_at       DateTime?
@@ -747,4 +765,151 @@ model Notification {
   @@unique([user_id, comment_id])
   @@index([user_id, created_at(sort: Desc), id(sort: Desc)])
   @@index([user_id, read_at])
+}
+
+/**
+ * Discovery: trending snapshots (modules/trending) and the word list behind "Did you mean ...?"
+ */
+
+// Each table is replaced as a whole every 10 minutes; rank 1 is the top
+model TrendingPost {
+  rank        Int      @id
+  post_id     String   @db.Uuid
+  post        Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  score       Float
+  // Distinct accounts that voted or replied in the window
+  voters      Int
+  repliers    Int
+  computed_at DateTime
+
+  @@index([post_id])
+}
+
+model TrendingCommunity {
+  rank         Int       @id
+  community_id String    @db.Uuid
+  community    Community @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  score        Float
+  // Last 7 days
+  new_members  Int
+  posts        Int
+  comments     Int
+  computed_at  DateTime
+
+  @@index([community_id])
+}
+
+model TrendingTopic {
+  rank         Int        @id
+  // 'term' (a word or two-word phrase from titles) or 'flair'
+  kind         String
+  term         String
+  // The flair's community
+  community_id String?    @db.Uuid
+  community    Community? @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  posts        Int
+  authors      Int
+  score        Float
+  computed_at  DateTime
+
+  @@index([community_id])
+}
+
+model SearchWord {
+  word String @id
+  docs Int
+
+  @@index([word(ops: raw("gin_trgm_ops"))], map: "SearchWord_word_trgm_idx", type: Gin)
+}
+
+/**
+ * Site metrics (modules/metrics). Days are Lagos dates. Visitors are hashes, never IPs.
+ */
+
+model DailySalt {
+  date DateTime @id @db.Date
+  salt String
+}
+
+model DailyVisitor {
+  date      DateTime @db.Date
+  // sha256 of the day's salt, IP and user agent
+  visitor   String
+  // ISO country code when known
+  country   String?
+  signed_in Boolean  @default(false)
+
+  @@id([date, visitor])
+}
+
+model CommunityDailyVisitor {
+  date         DateTime  @db.Date
+  community_id String    @db.Uuid
+  community    Community @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  visitor      String
+
+  @@id([date, community_id, visitor])
+}
+
+model DailyActiveUser {
+  date    DateTime @db.Date
+  user_id String   @db.Uuid
+  user    User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@id([date, user_id])
+}
+
+model DailyTraffic {
+  date       DateTime @id @db.Date
+  page_views Int      @default(0)
+}
+
+model CommunityDailyTraffic {
+  date         DateTime  @db.Date
+  community_id String    @db.Uuid
+  community    Community @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  page_views   Int       @default(0)
+
+  @@id([date, community_id])
+}
+
+// Written nightly for the day before; Admin -> Stats reads these
+model DailyStat {
+  date              DateTime @id @db.Date
+  total_users       Int
+  new_signups       Int
+  // Accounts active that day, in the 7 and 30 days up to it
+  dau               Int
+  wau               Int
+  mau               Int
+  // Guests included; bots excluded
+  unique_visitors   Int
+  page_views        Int
+  posts             Int
+  comments          Int
+  votes             Int
+  // Paid (direct) campaigns only; house ads are counted apart
+  ad_impressions    Int
+  ad_clicks         Int
+  house_impressions Int      @default(0)
+  house_clicks      Int      @default(0)
+  // { "NG": 120, "GB": 8, ... } unique visitors by country, when known
+  countries         Json?
+  computed_at       DateTime @default(now())
+}
+
+model CommunityDailyStat {
+  date            DateTime  @db.Date
+  community_id    String    @db.Uuid
+  community       Community @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  members         Int
+  new_members     Int
+  posts           Int
+  comments        Int
+  votes           Int
+  unique_visitors Int
+  page_views      Int
+
+  @@id([date, community_id])
+  @@index([community_id, date])
 }

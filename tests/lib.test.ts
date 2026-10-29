@@ -14,6 +14,16 @@ describe('ranking', () => {
         expect(hotRank(-10, now)).toBeLessThan(hotRank(0, now));
     });
 
+    it('counts replies at half a vote each, still log-scaled, and keeps the old two-argument call', () => {
+        const now = new Date('2026-10-23T12:00:00Z');
+        expect(hotRank(5, now)).toBe(hotRank(5, now, 0));
+        expect(hotRank(0, now, 20)).toBeCloseTo(hotRank(10, now), 7);
+        expect(hotRank(0, now, 4)).toBeGreaterThan(hotRank(0, now));
+        // A downvoted post people are arguing under climbs back
+        expect(hotRank(-3, now, 10)).toBeGreaterThan(hotRank(-3, now));
+        expect(hotRank(10, now, 180)).toBeCloseTo(hotRank(1, now, 18) + 1, 5);
+    });
+
     it('prefers many upvotes over a lucky single one for "best"', () => {
         expect(wilsonLowerBound(0, 0)).toBe(0);
         expect(wilsonLowerBound(30, 2)).toBeGreaterThan(wilsonLowerBound(1, 0));

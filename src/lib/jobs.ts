@@ -9,6 +9,7 @@ type Handler<T> = (data: T) => Promise<void>;
 type JobOptions = { retryLimit?: number; retryDelay?: number; retryBackoff?: boolean; singletonKey?: string };
 
 const handlers = new Map<string, { handler: Handler<any>; options: JobOptions }>();
+const schedules = new Map<string, { cron: string; tz: string }>();
 let boss: PgBoss | null = null;
 
 export function defineJob<T extends object>(name: string, handler: Handler<T>, options: JobOptions = {}) {
@@ -17,6 +18,15 @@ export function defineJob<T extends object>(name: string, handler: Handler<T>, o
         name,
         enqueue: (data: T) => enqueue(name, data),
     };
+}
+
+// A job pg-boss runs on a cron schedule (one instance runs each tick, however many API processes there are).
+// Without the queue (JOBS_ENABLED=false) nothing is scheduled, so callers that need fresh data also call run()
+// when what they read is stale; see modules/trending and modules/metrics.
+export function defineScheduledJob(name: string, cron: string, handler: () => Promise<void>, options: { tz?: string } = {}) {
+    handlers.set(name, { handler, options: { retryLimit: 1 } });
+    schedules.set(name, { cron, tz: options.tz ?? 'Africa/Lagos' });
+    return { name, run: handler };
 }
 
 async function enqueue(name: string, data: object) {
@@ -45,6 +55,9 @@ export async function startJobs() {
         await boss.work(name, async (jobs) => {
             for (const job of jobs) await handler(job.data);
         });
+    }
+    for (const [name, { cron, tz }] of schedules) {
+        await boss.schedule(name, cron, {}, { tz, singletonKey: name });
     }
     logger.info({ jobs: [...handlers.keys()] }, 'Job queue started');
 }

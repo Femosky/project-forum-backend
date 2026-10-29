@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import prisma from '../src/prismaConnection';
 import { env } from '../src/config/env';
+import { decideAds } from '../src/modules/ads/decision';
 import { Agent, api, createCommunity, createPost, signUp } from './helpers';
 
 // Phase 6: the ad decision service, brand safety, frequency caps, budgets, impressions and clicks, the
@@ -225,5 +226,38 @@ describe('reporting ads', () => {
 
         await admin.agent.patch(`/v1/admin/ads/creatives/${creative.id}`).send({ is_active: false }).expect(200);
         expect((await admin.agent.get('/v1/admin/queue')).body.items).toHaveLength(0);
+    });
+});
+
+describe('house ads with a share of slots', () => {
+    it('lets the site promote its own product even when paid campaigns fill every slot', async () => {
+        const admin = await setup();
+        const paid = await campaign(admin.agent, { priority: 10 }, { headline: 'Paid ad number one' });
+        const paidTwo = await campaign(admin.agent, { priority: 10 }, { headline: 'Paid ad number two' });
+        const house = await campaign(admin.agent, { kind: 'house', house_share: 30, frequency_cap: 2 }, { headline: 'Try Cardernir, our app' });
+        expect(house.campaign.house_share).toBe(30);
+        expect((await admin.agent.patch(`/v1/admin/ads/campaigns/${house.campaign.id}`).send({ house_share: 80 })).status).toBe(400);
+
+        const cooking = await prisma.community.findUniqueOrThrow({ where: { name: 'cooking' } });
+        const decide = (rolls: number[], seen = new Map<string, number>()) => {
+            let index = 0;
+            return decideAds({ placement: 'feed', community: cooking, count: 2, seen, random: () => rolls[index++ % rolls.length] });
+        };
+        // Rolls are taken for the shuffle (three candidates) and then one per slot: 0.9 = paid, 0.1 = under 30%
+        const ids = async (rolls: number[], seen?: Map<string, number>) => (await decide(rolls, seen)).map((ad) => ad.id);
+        expect(await ids([0.5, 0.5, 0.5, 0.9, 0.9])).toEqual(expect.arrayContaining([paid.creative.id, paidTwo.creative.id]));
+        expect((await ids([0.5, 0.5, 0.5, 0.1, 0.9]))[0]).toBe(house.creative.id);
+        // Shown once per page, and frequency caps still apply
+        expect((await ids([0.5, 0.5, 0.5, 0.1, 0.1])).filter((id) => id === house.creative.id)).toHaveLength(1);
+        expect(await ids([0.5, 0.5, 0.5, 0.1, 0.1], new Map([[house.campaign.id, 2]]))).not.toContain(house.creative.id);
+
+        // Brand safety too: no ads at all on NSFW communities
+        const spicy = { ...cooking, is_nsfw: true };
+        expect(await decideAds({ placement: 'feed', community: spicy, count: 2, seen: new Map(), random: () => 0 })).toEqual([]);
+
+        // House impressions are kept apart from paid ones in the daily stats
+        await api().post('/v1/ads/events').send({ impressions: [house.creative.id, paid.creative.id] });
+        const stats = await admin.agent.get('/v1/admin/stats?days=1');
+        expect(stats.body.today).toMatchObject({ ad_impressions: 1, house_impressions: 1 });
     });
 });

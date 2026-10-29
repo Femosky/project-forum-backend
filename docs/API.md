@@ -116,10 +116,12 @@ Rules live in `src/modules/safety/policy.ts` (numbers) and `filters.ts` (pattern
 | GET/POST | `/blocklist` | POST `{ kind: domain\|keyword, value, note? }`. Domains also match subdomains |
 | DELETE | `/blocklist/:id` | |
 | GET | `/mod-log` | Every moderator and admin action |
+| GET | `/stats?days=30` or `?from=YYYY-MM-DD&to=` | `{ range, today, days, top_communities }`. `today` is live (partial); `days` are the nightly `DailyStat` snapshots up to yesterday (missing days are written on the spot): `total_users, new_signups, dau, wau, mau, unique_visitors, page_views, posts, comments, votes, ad_impressions, ad_clicks, countries`. `top_communities` sums `CommunityDailyStat` over the range. Days are Lagos dates; ranges up to a year |
+| GET | `/stats/export?days=&from=&to=&kind=daily\|communities` | The same as CSV |
 | PATCH | `/communities/:name/ads` | `{ ads_enabled: boolean \| null }`. null follows the default (off in sensitive categories) |
 | GET | `/ads` | Advertisers with their campaigns (totals, spend for CPM) and whether AdSense is on and configured |
 | POST/PATCH | `/ads/advertisers`, `/ads/advertisers/:id` | `{ name, contact_email?, logo_url?, website?, notes? }` |
-| POST | `/ads/campaigns` | `{ advertiser_id, name, kind: direct\|house, status, starts_at?, ends_at?, targeting: { communities[], categories[] }, pricing_model: cpm\|flat, budget_minor?, price_minor?, currency, frequency_cap?, priority, payment_url?, paid }`. Money is in minor units (kobo). Empty targeting runs everywhere |
+| POST | `/ads/campaigns` | `{ advertiser_id, name, kind: direct\|house, status, starts_at?, ends_at?, targeting: { communities[], categories[] }, pricing_model: cpm\|flat, budget_minor?, price_minor?, currency, frequency_cap?, priority, house_share?, payment_url?, paid }`. Money is in minor units (kobo). Empty targeting runs everywhere. `house_share` (0-50, house campaigns): the percent of slots it wins even when paid campaigns want them, for promoting the site's own products |
 | GET/PATCH | `/ads/campaigns/:id` | GET adds creatives with totals and the last 30 days |
 | POST | `/ads/campaigns/:id/creatives` | `{ format: feed_post\|thread_comment, headline, body?, image_url? (https), click_url, cta_label? }` |
 | PATCH | `/ads/creatives/:id` | Same fields plus `is_active`. Pausing resolves open reports on the ad |
@@ -132,6 +134,8 @@ Rules live in `src/modules/safety/policy.ts` (numbers) and `filters.ts` (pattern
 | POST | `/events` | `{ impressions: creativeId[] }` (max 50), JSON or plain text. Added to today's `AdDailyStat` row (Lagos time) |
 | GET | `/click/:creativeId` | Counts a click and 302s to the advertiser |
 | GET | `/stats/:token` | The advertiser's read-only stats: totals, per day, per creative |
+
+Self-promotion: a house campaign with `house_share` takes that percent of slots before paid campaigns (all shares together capped at 50%), still subject to frequency caps, targeting and brand safety; with 0 it only fills slots nobody paid for. The web app labels house ads "From us" instead of "Sponsored". Admin stats count paid (`ad_*`) and house (`house_*`) impressions and clicks separately.
 
 `AdUnit` is `{ kind: 'direct' \| 'house', id, campaign_id, frequency_cap, creative: { advertiser_name, advertiser_logo, title, body, image_url, cta_label, display_url } }` or `{ kind: 'adsense', id, client, slot_id, format: 'in-feed' \| 'in-article', layout_key }`. Settings: `ADS_ENABLED` (default on) is the master switch; `ADSENSE_ENABLED` plus `ADSENSE_CLIENT_ID`, `ADSENSE_FEED_SLOT`, `ADSENSE_FEED_LAYOUT_KEY` and `ADSENSE_THREAD_SLOT` turn AdSense on. Reports take `target_type: 'ad'` with the creative id; they go to the site queue.
 
@@ -146,8 +150,26 @@ Rules live in `src/modules/safety/policy.ts` (numbers) and `filters.ts` (pattern
 | GET | `/users/me/saved?type=posts\|comments` | Saved comments carry `post: { short_id, slug, title, community }` |
 | GET | `/users/me/export` | Everything the account wrote or chose, as a JSON download |
 | DELETE | `/users/me` | `{ password }`; detaches your name from past content |
-| GET | `/search?q=&type=posts\|communities&page=` | Postgres full-text search; supports `"phrases"` and `-exclusions` |
+| GET | `/search?q=&type=posts\|comments\|communities&community=&page=` | Postgres full-text search; supports `"phrases"` and `-exclusions`. Public active communities only. `community` limits posts and comments to one community ("Search in"). Comments come in the saved-comments shape, with `post: { short_id, slug, title, community }` for the permalink `/c/{community}/{short_id}/{slug}?comment={id}`. When a first page finds fewer than 3: `did_you_mean` (the query with misspelt words swapped for words titles actually use, only if that finds something; else null) and, for posts and comments, `related_communities` (names like the query); a communities search adds the similar names to its results |
 | GET | `/search/autocomplete?q=` | Community and username prefixes |
+
+## Trending `/v1/trending`
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/?type=posts\|communities\|topics&limit=` | From snapshots recomputed every 10 minutes; `computed_at` says when. `limit` 1-50, default 20 |
+
+- **posts**: engagement in the last 48 hours (net votes plus 2 per distinct replier) divided by (age in hours + 2)^1.5, for posts under a week old. Needs at least 3 different people and engagement of 3. Each person counts once however often they vote or reply; the author, shadow-banned accounts and new accounts (under a day old and under 10 reputation) don't count. Same post shape as the feed.
+- **communities**: 7-day growth (new members + 2 x posts + comments, from at least 3 different people) divided by the square root of (members + 10), so a small community growing fast can lead. Each carries `trending: { new_members, posts, comments }`.
+- **topics**: `{ kind: 'term' \| 'flair', term, community, posts, authors }`. Terms are words and two-word phrases from the last 3 days of titles used by at least 3 different people, scored against how common they were in the 30 days before, so everyday words never trend. Flairs are busy flairs with their community. Link a term to `/search?q={term}` and a flair to `/search?q={term}&community={community}`.
+
+Only public, active, non-NSFW communities, and never removed, held, shadow-hidden, sponsored or NSFW posts; items are checked again when served.
+
+## Metrics `/v1/metrics`
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/visit` | `{ path }`, JSON or plain text. One per page view from the browser. Counts a unique visitor (a daily-salted hash of IP and user agent: no cookie, no stored IP) and a page view, for the site and for `/c/{name}` pages their community. Bots are ignored. 204 |
 
 ## Notifications `/v1/notifications`
 
@@ -174,6 +196,7 @@ A post is indexable when it is active or locked in a public community, isn't a v
 ## Operations
 
 - **Rate limits**: signups 5 per day per IP, auth 20 per 15 minutes per IP, writes 60 per minute per account, reads 300 per minute per IP. Auth and write counters live in Postgres (`RATE_LIMIT_STORE=postgres`, the default), so they hold across instances without Redis.
-- **Jobs**: pg-boss on the same Postgres runs email sending and link previews. `JOBS_ENABLED=false` runs them inline instead.
+- **Jobs**: pg-boss on the same Postgres runs email sending and link previews, plus the trending snapshot every 10 minutes and the daily stats snapshot at 00:20 Lagos time. `JOBS_ENABLED=false` runs jobs inline instead, and trending and stats are then recomputed when read stale.
+- **Counters**: post and comment views, visits and last-active times are buffered in memory and written in batches every `METRICS_FLUSH_SECONDS` (default 45) and on shutdown. The post hot rank counts replies (net votes + half the comment count) and is recomputed when comments come and go.
 - **Logs**: JSON lines via pino, one per request with a request id. Send `X-Request-Id` to set it; it comes back on every response.
 - **Seeds**: `npm run seed` (small dev data), `npm run seed:bench` then `npm run bench` (100k posts / 1M comments and timings).

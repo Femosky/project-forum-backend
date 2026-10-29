@@ -22,6 +22,8 @@ import notificationRoutes from './modules/notifications/routes';
 import seoRoutes from './modules/seo/routes';
 import adminRoutes from './modules/admin/routes';
 import adsRoutes from './modules/ads/routes';
+import metricsRoutes from './modules/metrics/routes';
+import trendingRoutes from './modules/trending/routes';
 
 const app = express();
 
@@ -89,6 +91,8 @@ for (const path of ['/auth/signup', '/auth/login', '/auth/forgot-password', '/au
     v1.use(path, authLimiter);
 }
 v1.post('/auth/signup', signupLimiter);
+// Page-view beacons arrive once per page, so they skip the write limit (the read limit still applies)
+v1.use('/metrics', metricsRoutes);
 // Identify the caller before the write limiter so limits are per account where possible
 v1.use(optionalAuth, writeLimiter);
 v1.use('/auth', authRoutes);
@@ -98,6 +102,7 @@ v1.use('/posts', postRoutes);
 v1.use('/comments', commentRoutes);
 v1.use('/users', userRoutes);
 v1.use('/search', searchRoutes);
+v1.use('/trending', trendingRoutes);
 v1.use('/notifications', notificationRoutes);
 v1.use('/seo', seoRoutes);
 v1.use('/admin', adminRoutes);

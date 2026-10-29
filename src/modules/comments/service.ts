@@ -254,6 +254,7 @@ export async function createComment(input: CreateCommentInput) {
             // Held and shadow-hidden comments aren't counted until (unless) they become visible
             if (!input.heldReason && !input.shadowHidden) {
                 await tx.post.update({ where: { id: input.postId }, data: { comment_count: { increment: 1 } } });
+                await refreshHotRank(tx, input.postId);
                 if (parent) {
                     await tx.comment.update({ where: { id: parent.id }, data: { reply_count: { increment: 1 } } });
                 }
@@ -278,12 +279,19 @@ export async function setCommentStatus(
         const updated = await tx.comment.update({ where: { id: comment.id }, data: { status, ...extra }, include: commentInclude });
         if (change !== 0) {
             await tx.post.update({ where: { id: comment.post_id }, data: { comment_count: { increment: change } } });
+            await refreshHotRank(tx, comment.post_id);
         }
         if (treeChange !== 0 && comment.parent_id) {
             await tx.comment.update({ where: { id: comment.parent_id }, data: { reply_count: { increment: treeChange } } });
         }
         return updated;
     });
+}
+
+// Replies count towards the hot rank (lib/ranking.ts), so it moves with the comment count. Same formula, in SQL.
+export async function refreshHotRank(tx: Prisma.TransactionClient, postId: string) {
+    await tx.$executeRaw`
+        UPDATE "Post" SET "hot_rank" = forum_hot_rank("score", "comment_count", "created_at") WHERE "id" = ${postId}::uuid`;
 }
 
 export function assertCommentable(post: { status: string }) {

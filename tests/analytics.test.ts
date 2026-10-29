@@ -42,8 +42,8 @@ describe('analytics', () => {
         await api().get('/v1/search?q=nothingmatches');
 
         expect(events('search').map((event) => [event.distinct_id, event.properties])).toEqual([
-            ['guest', { type: 'posts', query: 'yaba', results: 1, no_results: false, $process_person_profile: false }],
-            ['guest', { type: 'posts', query: 'nothingmatches', results: 0, no_results: true, $process_person_profile: false }],
+            ['guest', { type: 'posts', in_community: false, query: 'yaba', results: 1, no_results: false, $process_person_profile: false }],
+            ['guest', { type: 'posts', in_community: false, query: 'nothingmatches', results: 0, no_results: true, $process_person_profile: false }],
         ]);
     });
 });

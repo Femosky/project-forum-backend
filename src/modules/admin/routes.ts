@@ -12,6 +12,7 @@ import { buildQueue, queueCount } from '../moderation/queue';
 import { requireAdmin } from '../moderation/routes';
 import { clearBlocklistCache } from '../safety/filters';
 import adsAdmin from '../ads/admin';
+import statsAdmin from '../metrics/admin';
 import { clearAdCache } from '../ads/decision';
 
 // Site-admin panel (role=admin): the site-wide queue, user suspension and shadow-bans, community takedowns,
@@ -164,6 +165,9 @@ async function recountAfterVisibilityChange(tx: Prisma.TransactionClient, userId
             WHERE c."post_id" = p."id" AND c."status" IN ('active', 'locked') AND NOT c."shadow_hidden")
         WHERE p."id" IN (SELECT "post_id" FROM "Comment" WHERE "author_id" = ${userId}::uuid)`;
     await tx.$executeRaw`
+        UPDATE "Post" SET "hot_rank" = forum_hot_rank("score", "comment_count", "created_at")
+        WHERE "id" IN (SELECT "post_id" FROM "Comment" WHERE "author_id" = ${userId}::uuid)`;
+    await tx.$executeRaw`
         UPDATE "Comment" pc SET "reply_count" = (
             SELECT count(*) FROM "Comment" c
             WHERE c."parent_id" = pc."id" AND c."status" <> 'pending' AND NOT c."shadow_hidden")
@@ -237,6 +241,7 @@ router.patch('/communities/:name/ads', async (request: AuthRequest, response) =>
 // --- Ads ---
 
 router.use('/ads', adsAdmin);
+router.use('/stats', statsAdmin);
 
 // --- Blocklist ---
 
