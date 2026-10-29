@@ -219,7 +219,7 @@ async function main() {
 
         communities.push({
             id: communityId,
-            name: data.name,
+            name: data.name.toLowerCase(),
             display_name: data.display_name,
             description: data.description,
             category: data.category,
