@@ -2,6 +2,7 @@ import { AdFormat, CampaignKind, Community, Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { env } from '../../config/env';
 import prisma from '../../prismaConnection';
+import { onSitePath } from './urls';
 
 // The ad decision service: which ads fill the slots on a page. Priority order is direct campaigns that target
 // this community or its category, then direct campaigns that run everywhere, then house ads (same order), then
@@ -37,8 +38,9 @@ type NativeCreative = {
     body: string | null;
     image_url: string | null;
     cta_label: string;
-    // Host shown on the card; the click itself goes through /v1/ads/click/:id
-    display_url: string;
+    // Host shown on the card, or null when the ad leads to a page on this site (the card then shows the site's
+    // name). The click itself goes through /v1/ads/click/:id either way.
+    display_url: string | null;
 };
 
 export type AdUnit =
@@ -60,11 +62,12 @@ type LiveCreative = {
 // All house shares together never take more than this percent of slots
 export const MAX_HOUSE_SHARE = 50;
 
-function hostOf(url: string) {
+function hostOf(url: string): string | null {
+    if (onSitePath(url) !== null) return null;
     try {
         return new URL(url).hostname.replace(/^www\./, '');
     } catch {
-        return url;
+        return null;
     }
 }
 

@@ -8,6 +8,7 @@ import { badRequest, notFound, parse, uuidParam } from '../../lib/http';
 import { AuthRequest, viewerOf } from '../../middlewares/auth';
 import { COMMUNITY_CATEGORIES, LIMITS } from '../../shared/validation';
 import { closeReports } from '../moderation/queue';
+import { linkProblem } from './urls';
 import { campaignSpend, clearAdCache, readTargeting, targetingSchema } from './decision';
 
 // Ad campaign management for site admins, mounted at /v1/admin/ads (the admin router has already checked the
@@ -20,8 +21,20 @@ const webUrl = z
     .string()
     .trim()
     .max(LIMITS.URL_MAX)
-    .url()
-    .refine((value) => /^https?:\/\//i.test(value), 'Use an http or https link');
+    .superRefine((value, context) => {
+        const problem = linkProblem(value, { allowSitePath: false });
+        if (problem) context.addIssue({ code: 'custom', message: problem });
+    });
+// Where an ad leads: an advertiser's https link, or a page on this site ("/communities"), which is resolved
+// against WEB_URL when served (ads/urls.ts)
+const destinationUrl = z
+    .string()
+    .trim()
+    .max(LIMITS.URL_MAX)
+    .superRefine((value, context) => {
+        const problem = linkProblem(value, { allowSitePath: true });
+        if (problem) context.addIssue({ code: 'custom', message: problem });
+    });
 const imageUrl = webUrl.refine((value) => value.startsWith('https://'), 'Images must use https');
 const optional = <T extends z.ZodType>(schema: T) => schema.nullable().optional();
 
@@ -63,7 +76,7 @@ const creativeFields = z.object({
     headline: z.string().trim().min(3).max(120),
     body: optional(z.string().trim().max(500)),
     image_url: optional(imageUrl),
-    click_url: webUrl,
+    click_url: destinationUrl,
     cta_label: z.string().trim().min(2).max(24),
     is_active: z.boolean(),
 });

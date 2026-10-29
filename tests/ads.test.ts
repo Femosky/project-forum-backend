@@ -261,3 +261,37 @@ describe('house ads with a share of slots', () => {
         expect(stats.body.today).toMatchObject({ ad_impressions: 1, house_impressions: 1 });
     });
 });
+
+describe('ad destinations', () => {
+    it('shows links to this site as the site itself and sends clicks to WEB_URL, never to localhost', async () => {
+        const admin = await setup();
+        const local = await campaign(admin.agent, { kind: 'house' }, { headline: 'Start a community today', click_url: 'http://localhost:3000/communities?new=1' });
+        const relative = await campaign(admin.agent, { kind: 'house' }, { headline: 'Start a community now', click_url: '/communities' });
+        const ads = (await feedAds('community=cooking&count=3')).body.ads as { id: string; creative: { display_url: string | null } }[];
+        const byId = new Map(ads.map((ad) => [ad.id, ad]));
+        expect(byId.get(local.creative.id)!.creative.display_url).toBeNull();
+        expect(byId.get(relative.creative.id)!.creative.display_url).toBeNull();
+
+        const click = await api().get(`/v1/ads/click/${local.creative.id}`);
+        expect(click.headers.location).toBe(`${env.WEB_URL}/communities?new=1`);
+        expect((await api().get(`/v1/ads/click/${relative.creative.id}`)).headers.location).toBe(`${env.WEB_URL}/communities`);
+    });
+
+    it('accepts only public https links in production', async () => {
+        const admin = await setup();
+        const advertiser = await admin.agent.post('/v1/admin/ads/advertisers').send({ name: 'Local Test' });
+        const created = await admin.agent
+            .post('/v1/admin/ads/campaigns')
+            .send({ advertiser_id: advertiser.body.advertiser.id, name: 'Check', status: 'active' });
+        const add = (click_url: string) =>
+            admin.agent.post(`/v1/admin/ads/campaigns/${created.body.campaign.id}/creatives`).send({ format: 'feed_post', headline: 'Checking links', click_url });
+
+        Object.assign(env, { IS_PRODUCTION: true });
+        for (const bad of ['http://localhost:3000/x', 'https://127.0.0.1/x', 'https://192.168.1.4/x', 'https://printer.local/x', 'http://acme.example/x', '//evil.example/x', 'javascript:alert(1)']) {
+            expect((await add(bad)).status, bad).toBe(400);
+        }
+        expect((await add('https://acme.example/offer')).status).toBe(201);
+        expect((await add('/communities')).status).toBe(201);
+        expect((await admin.agent.post('/v1/admin/ads/advertisers').send({ name: 'Bad', website: 'http://localhost:3000' })).status).toBe(400);
+    });
+});

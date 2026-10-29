@@ -95,6 +95,22 @@ For Admin → Stats and advertiser decks, without Redis or a tracking script:
 - **Unique visitors**: the browser sends `POST /v1/metrics/visit` after each page (so CDN-cached pages count). A visitor is `sha256(day's salt, IP, user agent)`; the salt is random per Lagos day and deleted after two days, so ids can't be linked across days or recomputed. IPs are never stored. Bots (by user agent) are skipped.
 - **DAU/WAU/MAU**: accounts with a signed-in request that day (`DailyActiveUser`), and `User.last_active_at` moves at most every 15 minutes.
 
+## Ads pointing at localhost
+
+Ad links that lead to this site (`/communities`, or a link to `WEB_URL`) show the site's name and redirect to `WEB_URL` plus the path, and so do leftovers pointing at a local test server, so a test campaign saved with `http://localhost:3000/...` no longer shows "localhost". In production the admin panel only accepts public `https://` links or site paths starting with `/`. To list affected rows (read-only; run it in Neon's SQL editor):
+
+```sql
+SELECT c."name" AS campaign, c."kind", c."status", a."id" AS creative_id, a."headline",
+       a."click_url", a."image_url", adv."name" AS advertiser, adv."website", adv."logo_url", c."payment_url"
+FROM "AdCreative" a
+JOIN "Campaign" c ON c."id" = a."campaign_id"
+JOIN "Advertiser" adv ON adv."id" = c."advertiser_id"
+WHERE concat_ws(' ', a."click_url", a."image_url", adv."website", adv."logo_url", c."payment_url")
+      ~* '(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|\.local(/|:|$)|//10\.|//192\.168\.|//172\.(1[6-9]|2[0-9]|3[01])\.)';
+```
+
+Fix a row in Admin → Ads (edit the creative's link, e.g. to `/communities`) rather than in SQL.
+
 ## Backups
 
 `.github/workflows/backup.yml` runs every Sunday at 03:00 UTC (and on demand: Actions → Backup → Run workflow). It dumps the database over the direct connection, restores the dump into a scratch Postgres 17 and compares tables and row counts (`scripts/backup-check.sh`), then encrypts it with `BACKUP_PASSPHRASE` and keeps it as a workflow artifact for 35 days. The repo is public, so the dump is never stored unencrypted. A failed run emails you.
