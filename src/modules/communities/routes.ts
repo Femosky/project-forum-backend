@@ -159,7 +159,7 @@ router.get('/:name', optionalAuth, async (request: AuthRequest, response) => {
     const queue = moderates ? await queueCount({ communityId: community.id }) : null;
     response.json({
         community: toPublicCommunity(community),
-        moderators: moderators.map(({ user: { avatar_config, ...user }, role }) => ({ ...user, avatar: avatarCode(avatar_config), role })),
+        moderators: moderators.map(({ user: { avatar_config, ...user }, role }) => ({ ...user, avatar: avatarCode(avatar_config, user.username), role })),
         viewer: request.viewer ? viewerMembership(member, Boolean(pending), mute?.muted_until ?? null, queue) : null,
     });
 });

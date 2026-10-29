@@ -244,7 +244,7 @@ router.get('/autocomplete', async (request, response) => {
             WHERE "status" = 'active' AND "username" LIKE ${pattern}
             ORDER BY "karma" DESC LIMIT 5`,
     ]);
-    response.json({ communities, users: users.map(({ avatar_config, ...user }) => ({ ...user, avatar: avatarCode(avatar_config) })) });
+    response.json({ communities, users: users.map(({ avatar_config, ...user }) => ({ ...user, avatar: avatarCode(avatar_config, user.username) })) });
 });
 
 export default router;

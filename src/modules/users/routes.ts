@@ -208,7 +208,7 @@ router.get('/:username', async (request, response) => {
             username: user.username,
             display_name: user.display_name,
             avatar_id: user.avatar_id,
-            avatar: avatarCode(user.avatar_config),
+            avatar: avatarCode(user.avatar_config, user.username),
             karma: user.karma,
             is_suspended: user.status !== 'active',
             created_at: user.created_at,

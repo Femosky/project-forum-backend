@@ -37,7 +37,7 @@ function toPublicNotification(row: NotificationRow) {
         created_at: row.created_at,
         read_at: row.read_at,
         actor: showActor
-            ? { username: row.actor!.username, display_name: row.actor!.display_name, avatar_id: row.actor!.avatar_id, avatar: avatarCode(row.actor!.avatar_config) }
+            ? { username: row.actor!.username, display_name: row.actor!.display_name, avatar_id: row.actor!.avatar_id, avatar: avatarCode(row.actor!.avatar_config, row.actor!.username) }
             : null,
         post: { short_id: row.post.short_id, slug: row.post.slug, title: row.post.title, community: row.post.community.name },
         comment: { short_id: row.comment.short_id, excerpt: row.comment.body.slice(0, EXCERPT_LENGTH) },

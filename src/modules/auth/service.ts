@@ -40,8 +40,8 @@ export function toPrivateUser(user: User) {
         email: user.email,
         display_name: user.display_name,
         avatar_id: user.avatar_id,
-        // Drawn avatar: the code (null = derived from the username) and its parts, for the avatar editor
-        avatar: avatarCode(user.avatar_config),
+        // Drawn avatar: its code (/avatar/{code}.svg on the web app) and the parts chosen, for the avatar editor
+        avatar: avatarCode(user.avatar_config, user.username),
         avatar_config: user.avatar_config,
         role: user.role,
         status: user.status,

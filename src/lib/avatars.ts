@@ -34,9 +34,24 @@ export const avatarConfigSchema = z.object(
 export const randomAvatar = (): AvatarConfig =>
     Object.fromEntries(PARTS.map((part) => [part, randomInt(AVATAR_PARTS[part])])) as AvatarConfig;
 
-// "a3k0..." one base-36 character per part, in AVATAR_PARTS order. Null when the account never chose one: the web
-// app then derives the avatar from the username, so everyone looks different without anything stored.
-export function avatarCode(config: Prisma.JsonValue | null | undefined): string | null {
+const encode = (config: AvatarConfig) => PARTS.map((part) => config[part].toString(36)).join('');
+
+// The same picture for a username every time, for accounts that never chose one: FNV-1a, then one slice of the
+// hash per part. The web app's avatars/code.ts has the same function; keep them in step.
+export function avatarFromName(name: string): AvatarConfig {
+    let hash = 2166136261;
+    for (const char of name.toLowerCase()) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619) >>> 0;
+    const config = {} as AvatarConfig;
+    for (const part of PARTS) {
+        config[part] = hash % AVATAR_PARTS[part];
+        hash = Math.imul(hash ^ (hash >>> 13), 2654435761) >>> 0;
+    }
+    return config;
+}
+
+// "a3k0..." one base-36 character per part, in AVATAR_PARTS order: what the web app draws at /avatar/{code}.svg.
+// Accounts that never chose get the one derived from their username, so everyone looks different by default.
+export function avatarCode(config: Prisma.JsonValue | null | undefined, username: string): string {
     const parsed = avatarConfigSchema.safeParse(config);
-    return parsed.success ? PARTS.map((part) => parsed.data[part].toString(36)).join('') : null;
+    return encode(parsed.success ? parsed.data : avatarFromName(username));
 }

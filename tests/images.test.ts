@@ -66,11 +66,11 @@ describe('drawn avatars', () => {
 
         const config = Object.fromEntries(Object.keys(AVATAR_PARTS).map((part) => [part, 1]));
         const saved = await alice.agent.patch('/v1/users/me').send({ avatar_config: config });
-        expect(saved.body.user.avatar).toBe(avatarCode(config));
+        expect(saved.body.user.avatar).toBe(avatarCode(config, 'alice'));
         expect((await alice.agent.patch('/v1/users/me').send({ avatar_config: { ...config, hair: 99 } })).status).toBe(400);
-        expect((await alice.agent.get('/v1/users/alice')).body.user.avatar).toBe(avatarCode(config));
+        expect((await alice.agent.get('/v1/users/alice')).body.user.avatar).toBe(avatarCode(config, 'alice'));
 
-        // Back to the one derived from the username
-        expect((await alice.agent.patch('/v1/users/me').send({ avatar_config: null })).body.user.avatar).toBeNull();
+        // Back to the one derived from the username (the web app derives the same)
+        expect((await alice.agent.patch('/v1/users/me').send({ avatar_config: null })).body.user.avatar).toBe(avatarCode(null, 'alice'));
     });
 });

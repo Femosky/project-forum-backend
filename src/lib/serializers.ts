@@ -54,7 +54,7 @@ export const isHiddenFrom = (item: { shadow_hidden: boolean; author_id: string }
 
 function publicAuthor(author: AuthorRow) {
     if (!author || author.status === 'deleted') return null;
-    return { username: author.username, display_name: author.display_name, avatar_id: author.avatar_id, avatar: avatarCode(author.avatar_config) };
+    return { username: author.username, display_name: author.display_name, avatar_id: author.avatar_id, avatar: avatarCode(author.avatar_config, author.username) };
 }
 
 export type VoteMap = Map<string, number>;
