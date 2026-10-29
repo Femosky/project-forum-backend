@@ -51,3 +51,14 @@ services:
         sync: false
       - key: ADSENSE_ENABLED
         value: "false"
+      # Image uploads (Cloudflare R2); docs/LAUNCH.md at the project root, Part 13
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_PUBLIC_URL
+        sync: false

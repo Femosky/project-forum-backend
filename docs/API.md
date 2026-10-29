@@ -100,11 +100,35 @@ Rules live in `src/modules/safety/policy.ts` (numbers) and `filters.ts` (pattern
 - **Mutes** answer `403 muted`; bans `403 banned`.
 - The signed-in user (`/auth/me`, login, signup) carries `can_post_links` and `can_post_anonymously` so the composer can explain limits up front.
 
-## Admin `/v1/admin` (site admins only)
+## Admin sign-in `/v1/admin/auth` (staff accounts)
+
+The admin panel uses **staff accounts**, separate from forum accounts: a forum session opens nothing under `/v1/admin`, and a staff session has no forum identity. Signing in is two steps; the session lives in the `staff_session` cookie (HttpOnly, SameSite=Strict, sent only to `/v1/admin` and the web app's `/admin`), lasts 12 hours or 2 hours unused. Rate-limited with the forum's sign-in; Turnstile when configured; 5 wrong passwords lock the account for 15 minutes.
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/login` | `{ email, password, turnstile_token? }` → `{ step: 'setup_2fa' \| 'verify_2fa' }` and a half-signed-in session (15 minutes) |
+| GET | `/2fa/setup` | First sign-in: `{ secret, otpauth_url, qr_svg }` for an authenticator app |
+| POST | `/2fa/setup` | `{ code }` → `{ recovery_codes (10, shown once), staff }`; signed in |
+| POST | `/2fa/verify` | `{ code }` or `{ recovery_code }` (each works once) → `{ staff, recovery_codes_left }`; signed in |
+| GET | `/me` | `{ staff: { id, email, name, role, has_2fa, password_change_required, ... } }` |
+| POST | `/password` | `{ current_password, new_password }`. Accounts on a temporary password can do nothing else until they've done this |
+| POST | `/logout` | |
+| GET/POST | `/invite/:token` | GET shows who the invite is for; POST `{ password }` sets the password (two-factor is set up at the first sign-in) |
+
+Roles: **owner** (everything, including staff accounts), **admin** (everything else), **moderator** (queue, users, communities, blocklist, logs), **ads** (ads and stats). The first owner comes from `npm run admin:create-owner -- --email ... --name ...` (a temporary password). User.role `admin` on forum accounts no longer opens the panel.
+
+## Admin `/v1/admin` (staff session)
 
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/overview` | Queue size and 24-hour counts |
+| GET/POST | `/staff` | Owner: list staff; invite `{ email, name, role }` → `{ staff, invite_url }` (also emailed; one use, 7 days) |
+| PATCH | `/staff/:id` | Owner: `{ name?, role?, disabled? }`. Not yourself; there is always at least one active owner |
+| POST | `/staff/:id/reset-2fa`, `/staff/:id/invite` | Owner: lost phone (signs them out; set up again at next sign-in); a new set-password link |
+| GET | `/audit?cursor=&staff=` | Owner and admins: every panel action and sign-in, who, what, target, IP |
+| POST | `/posts/:id/moderation`, `/comments/:id/moderation` | Site-wide moderation in any community (same actions as moderators, plus `sponsor`/`unsponsor` on posts). Logged as staff |
+| POST | `/reports/:id/resolve` | `{ status: resolved \| dismissed }`, any report (site-level ones only here) |
+| POST | `/images?purpose=ad_logo\|ad_image` | The picture as the request body (see Images) |
 | GET | `/queue` | Every open report and held item on the site, in the mod-queue shape |
 | GET | `/users?q=&filter=all\|suspended\|shadow_banned\|new` | Username or email prefix |
 | POST | `/users/:username/suspend` | `{ days?, reason? }` (no days = until lifted). Signs the account out everywhere; an expired suspension is lifted at the next sign-in |
@@ -164,6 +188,14 @@ Self-promotion: a house campaign with `house_share` takes that percent of slots 
 - **topics**: `{ kind: 'term' \| 'flair', term, community: { name, name_styled, display_name } \| null, posts, authors }`. Terms are words and two-word phrases from the last 3 days of titles used by at least 3 different people, scored against how common they were in the 30 days before, so everyday words never trend. Flairs are busy flairs with their community. Link a term to `/search?q={term}` and a flair to `/search?q={term}&community={community}`.
 
 Only public, active, non-NSFW communities, and never removed, held, shadow-hidden, sponsored or NSFW posts; items are checked again when served.
+
+## Images
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/images?purpose=community_icon\|community_banner&community=` | Moderators. The picture is the request body (`Content-Type: image/jpeg\|png\|webp\|gif`, up to 5 MB). Returns `{ image: { url, width, height, variants } }`; set it with `PATCH /communities/:name { image_url, banner_url }` |
+
+Every picture is decoded and redrawn (metadata such as location dropped, turned upright, cut to its slot: logos and icons 256×256, ad pictures 1200×628 + 600×314, banners 1600×400 + 800×200) and stored as WebP in Cloudflare R2 (local disk in development, served at `/media`). `scanImage` in `src/modules/images/service.ts` is where automatic moderation plugs in before anything is stored. There are no profile photos: people have drawn avatars (`avatar` on users and authors, a short code; null = derived from the username; set with `PATCH /users/me { avatar_config }`).
 
 ## Metrics `/v1/metrics`
 

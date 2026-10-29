@@ -57,6 +57,7 @@ Optional; each feature turns itself off without its key, and the boot log warns 
 | `SENTRY_DSN` | Error alerts: unexpected errors (500s, crashes) with the route and request id, never bodies or cookies. Repeats within a minute are sent once. | sentry.io → project (Node.js) → Settings → Client Keys (DSN) |
 | `INDEXNOW_KEY` | Pings Bing when a post is created. Leave unset while the site is private. | any 8-128 letters/digits, same value in the web app |
 | `JOBS_ENABLED` | `false` keeps Neon free to scale to zero: emails and link previews run inline, and trending and daily stats are recomputed by whoever reads them stale (see Jobs below). `true` runs pg-boss with its schedules | |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL` | Cloudflare R2 for uploaded images (ad logos and pictures, community icons and banners). Without all five, uploads go to the server's disk, which Render wipes on each deploy | Steps in the project-root `docs/LAUNCH.md`, Part 13 |
 | `METRICS_FLUSH_SECONDS` | How often buffered view counts, visits and last-active times are written. Default 45 | |
 | `GEOIP_COUNTRY_DB` | Optional path to a GeoLite2-Country `.mmdb` for visitor countries. Without it, `src/dependencies/GeoLite2-Country.mmdb` is used if present; otherwise countries are only known from a CDN header | free MaxMind account → Download databases → GeoLite2 Country (mmdb) |
 | `ADSENSE_ENABLED` + `ADSENSE_*` ids | Only after AdSense approves the site | AdSense → Ads → By ad unit |
@@ -75,6 +76,16 @@ Events go from the API to PostHog's batch endpoint every 10 seconds (`src/lib/an
 | `search` | first page of a search | `type`, `query` (lowercased), `results`, `no_results` |
 
 Page views and shares come from the web app. Return visits (D1/D7/D30) are a PostHog Retention insight: first event `signup`, returning event `user_active`.
+
+## Admin panel accounts
+
+The admin panel (`/admin`) uses staff accounts, separate from forum accounts, with a password and an authenticator app (two-factor) for everyone. After the deploy that adds them, create the first owner once, from Render → forum-api → **Shell**:
+
+```
+npm run admin:create-owner -- --email you@example.com --name "Your name"
+```
+
+It prints a temporary password. Sign in at `https://forum.oskeylabs.com/admin/login`, scan the QR code with an authenticator app, save the recovery codes, then choose a new password. Invite everyone else from Admin → Admins. The old forum-account admin role no longer opens the panel.
 
 ## Jobs
 
