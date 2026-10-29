@@ -161,7 +161,7 @@ Self-promotion: a house campaign with `house_share` takes that percent of slots 
 
 - **posts**: engagement in the last 48 hours (net votes plus 2 per distinct replier) divided by (age in hours + 2)^1.5, for posts under a week old. Needs at least 3 different people and engagement of 3. Each person counts once however often they vote or reply; the author, shadow-banned accounts and new accounts (under a day old and under 10 reputation) don't count. Same post shape as the feed.
 - **communities**: 7-day growth (new members + 2 x posts + comments, from at least 3 different people) divided by the square root of (members + 10), so a small community growing fast can lead. Each carries `trending: { new_members, posts, comments }`.
-- **topics**: `{ kind: 'term' \| 'flair', term, community, posts, authors }`. Terms are words and two-word phrases from the last 3 days of titles used by at least 3 different people, scored against how common they were in the 30 days before, so everyday words never trend. Flairs are busy flairs with their community. Link a term to `/search?q={term}` and a flair to `/search?q={term}&community={community}`.
+- **topics**: `{ kind: 'term' \| 'flair', term, community: { name, name_styled, display_name } \| null, posts, authors }`. Terms are words and two-word phrases from the last 3 days of titles used by at least 3 different people, scored against how common they were in the 30 days before, so everyday words never trend. Flairs are busy flairs with their community. Link a term to `/search?q={term}` and a flair to `/search?q={term}&community={community}`.
 
 Only public, active, non-NSFW communities, and never removed, held, shadow-hidden, sponsored or NSFW posts; items are checked again when served.
 

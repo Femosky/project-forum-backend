@@ -64,13 +64,16 @@ router.get('/', optionalAuth, async (request: AuthRequest, response) => {
         where: { OR: [{ community_id: null }, { community: { status: 'active', visibility: 'public', is_nsfw: false } }] },
         orderBy: { rank: 'asc' },
         take: limit,
-        include: { community: { select: { name: true } } },
+        include: { community: { select: { name: true, name_styled: true, display_name: true } } },
     });
     response.json({
         topics: rows.map((row) => ({
             kind: row.kind,
             term: row.term,
-            community: row.community?.name ?? null,
+            // A flair's community: { name, name_styled, display_name }
+            community: row.community
+                ? { name: row.community.name, name_styled: row.community.name_styled ?? row.community.name, display_name: row.community.display_name }
+                : null,
             posts: row.posts,
             authors: row.authors,
         })),
