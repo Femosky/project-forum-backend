@@ -114,6 +114,14 @@ enum CampaignStatus {
 enum AdFormat {
   feed_post
   thread_comment
+  // Both places: the big card in feeds, the compact one between comments
+  any
+}
+
+// How an ad's picture fills its 1.91:1 frame: cropped around a focal point, or shown whole on a blurred copy of itself
+enum AdImageFit {
+  cover
+  contain
 }
 
 // direct: a paying advertiser. house: the site's own promotions, shown when no direct campaign fills a slot.
@@ -727,13 +735,21 @@ model AdCreative {
 
   updated_at DateTime @updatedAt
 
-  format    AdFormat
-  headline  String
-  body      String?
-  image_url String?
-  click_url String
-  cta_label String   @default("Learn more")
-  is_active Boolean  @default(true)
+  format                AdFormat
+  headline              String
+  body                  String?
+  image_url             String?
+  // Where the picture's focus is (0-100 across and down) when it's cropped to the frame, and how it fills the frame
+  image_focus_x         Int        @default(50)
+  image_focus_y         Int        @default(50)
+  image_fit             AdImageFit @default(cover)
+  // With no picture: use the destination page's own preview image, copied into our storage (never hotlinked)
+  use_link_image        Boolean    @default(true)
+  link_image_url        String?
+  link_image_checked_at DateTime?
+  click_url             String
+  cta_label             String     @default("Learn more")
+  is_active             Boolean    @default(true)
 
   daily_stats AdDailyStat[]
 }

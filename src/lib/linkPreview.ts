@@ -112,3 +112,42 @@ export async function fetchLinkPreview(rawUrl: string): Promise<LinkPreview | nu
     }
     return null;
 }
+
+// Downloads a picture from a public address (the same checks as pages: public hosts only, redirects checked hop by
+// hop, 5 s), up to maxBytes. Null when it isn't a picture or is too big.
+export async function fetchPublicImage(rawUrl: string, maxBytes: number): Promise<Buffer | null> {
+    let url = new URL(rawUrl);
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+        await assertSafeUrl(url);
+        const response = await fetch(url, {
+            redirect: 'manual',
+            headers: { 'User-Agent': 'ProjectForumBot/1.0 (+link preview)', Accept: 'image/*' },
+            signal: AbortSignal.timeout(5_000),
+        });
+        if (response.status >= 300 && response.status < 400) {
+            const location = response.headers.get('location');
+            if (!location) return null;
+            url = new URL(location, url);
+            continue;
+        }
+        if (!response.ok || !response.body) return null;
+        if (!(response.headers.get('content-type') ?? '').startsWith('image/')) return null;
+        if (Number(response.headers.get('content-length') ?? 0) > maxBytes) return null;
+
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let size = 0;
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            size += value.length;
+            if (size > maxBytes) {
+                await reader.cancel().catch(() => undefined);
+                return null;
+            }
+            chunks.push(value);
+        }
+        return Buffer.concat(chunks);
+    }
+    return null;
+}

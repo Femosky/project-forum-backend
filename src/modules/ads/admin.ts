@@ -5,11 +5,13 @@ import { z } from 'zod';
 import { env } from '../../config/env';
 import prisma from '../../prismaConnection';
 import { badRequest, notFound, parse, uuidParam } from '../../lib/http';
+import { addDays, lagosDay } from '../../lib/days';
 import { audit, staffOf } from '../staff/service';
 import { COMMUNITY_CATEGORIES, LIMITS } from '../../shared/validation';
 import { closeReports } from '../moderation/queue';
 import { findCommunity } from '../communities/access';
 import { linkProblem } from './urls';
+import { needsLinkImage, refreshLinkImage } from './linkImage';
 import { isStoredMedia } from '../../lib/storage';
 import { campaignSpend, clearAdCache, readTargeting, targetingSchema } from './decision';
 
@@ -90,16 +92,30 @@ const createCampaignSchema = campaignFields
     .extend({ advertiser_id: z.uuid() });
 const updateCampaignSchema = campaignFields.partial();
 
+const focus = z.number().int().min(0).max(100);
 const creativeFields = z.object({
-    format: z.enum(['feed_post', 'thread_comment']),
+    format: z.enum(['feed_post', 'thread_comment', 'any']),
     headline: z.string().trim().min(3).max(120),
     body: optional(z.string().trim().max(500)),
     image_url: optional(imageUrl),
+    image_focus_x: focus,
+    image_focus_y: focus,
+    image_fit: z.enum(['cover', 'contain']),
+    use_link_image: z.boolean(),
     click_url: destinationUrl,
     cta_label: z.string().trim().min(2).max(24),
     is_active: z.boolean(),
 });
-const createCreativeSchema = creativeFields.partial({ body: true, image_url: true, cta_label: true, is_active: true });
+const createCreativeSchema = creativeFields.partial({
+    body: true,
+    image_url: true,
+    image_focus_x: true,
+    image_focus_y: true,
+    image_fit: true,
+    use_link_image: true,
+    cta_label: true,
+    is_active: true,
+});
 const updateCreativeSchema = creativeFields.partial();
 
 // Checks targeting names against real communities and categories, so a typo doesn't silently target nothing
@@ -128,9 +144,14 @@ async function campaignData(input: CampaignInput) {
     };
 }
 
-const statsTotals = async (creativeIds: string[]) => {
+// Views and clicks per creative, all time or since a Lagos day (YYYY-MM-DD)
+const statsTotals = async (creativeIds: string[], since?: string) => {
     const rows = creativeIds.length
-        ? await prisma.adDailyStat.groupBy({ by: ['creative_id'], where: { creative_id: { in: creativeIds } }, _sum: { impressions: true, clicks: true } })
+        ? await prisma.adDailyStat.groupBy({
+              by: ['creative_id'],
+              where: { creative_id: { in: creativeIds }, ...(since ? { date: { gte: new Date(`${since}T00:00:00Z`) } } : {}) },
+              _sum: { impressions: true, clicks: true },
+          })
         : [];
     return new Map(rows.map((row) => [row.creative_id, { impressions: row._sum.impressions ?? 0, clicks: row._sum.clicks ?? 0 }]));
 };
@@ -146,12 +167,14 @@ router.get('/', async (request, response) => {
         include: {
             campaigns: {
                 orderBy: { created_at: 'desc' },
-                include: { creatives: { select: { id: true, is_active: true } } },
+                include: { creatives: { select: { id: true, is_active: true, format: true } } },
             },
         },
     });
     const campaigns = advertisers.flatMap((advertiser) => advertiser.campaigns);
-    const totals = await statsTotals(campaigns.flatMap((campaign) => campaign.creatives.map((creative) => creative.id)));
+    const creativeIds = campaigns.flatMap((campaign) => campaign.creatives.map((creative) => creative.id));
+    // The last 7 days, today included
+    const [totals, week] = await Promise.all([statsTotals(creativeIds), statsTotals(creativeIds, addDays(lagosDay(), -6))]);
     const spend = await campaignSpend(campaigns.filter((campaign) => campaign.pricing_model === 'cpm').map((campaign) => campaign.id));
 
     response.json({
@@ -163,18 +186,26 @@ router.get('/', async (request, response) => {
         advertisers: advertisers.map(({ campaigns: own, ...advertiser }) => ({
             ...advertiser,
             campaigns: own.map(({ creatives, ...campaign }) => {
-                const sum = creatives.reduce(
-                    (acc, creative) => {
-                        const total = totals.get(creative.id);
-                        return { impressions: acc.impressions + (total?.impressions ?? 0), clicks: acc.clicks + (total?.clicks ?? 0) };
-                    },
-                    { impressions: 0, clicks: 0 }
-                );
+                const add = (source: Map<string, { impressions: number; clicks: number }>) =>
+                    creatives.reduce(
+                        (acc, creative) => {
+                            const total = source.get(creative.id);
+                            return { impressions: acc.impressions + (total?.impressions ?? 0), clicks: acc.clicks + (total?.clicks ?? 0) };
+                        },
+                        { impressions: 0, clicks: 0 }
+                    );
+                const live = creatives.filter((creative) => creative.is_active);
                 return {
                     ...campaignOut(campaign),
                     creative_count: creatives.length,
-                    active_creatives: creatives.filter((creative) => creative.is_active).length,
-                    ...sum,
+                    active_creatives: live.length,
+                    // Where its live ads run
+                    placements: {
+                        feed: live.some((creative) => creative.format !== 'thread_comment'),
+                        comments: live.some((creative) => creative.format !== 'feed_post'),
+                    },
+                    ...add(totals),
+                    last_7_days: add(week),
                     spent_minor: campaign.pricing_model === 'cpm' ? (spend.get(campaign.id) ?? 0) : null,
                 };
             }),
@@ -265,7 +296,8 @@ router.patch('/campaigns/:id', async (request, response) => {
 router.post('/campaigns/:id/creatives', async (request, response) => {
     const campaign = await findCampaign(request.params.id);
     const input = parse(createCreativeSchema, request.body);
-    const creative = await prisma.adCreative.create({ data: { ...input, campaign_id: campaign.id } });
+    let creative = await prisma.adCreative.create({ data: { ...input, campaign_id: campaign.id } });
+    if (needsLinkImage(creative, true)) creative = await refreshLinkImage(creative.id, staffOf(request).id);
     clearAdCache();
     response.status(201).json({ creative });
 });
@@ -274,9 +306,25 @@ router.post('/campaigns/:id/creatives', async (request, response) => {
 router.patch('/creatives/:id', async (request, response) => {
     const id = uuidParam(request.params.id, 'Ad not found');
     const input = parse(updateCreativeSchema, request.body);
-    if (!(await prisma.adCreative.findUnique({ where: { id }, select: { id: true } }))) throw notFound('Ad not found');
-    const creative = await prisma.adCreative.update({ where: { id }, data: input });
+    const before = await prisma.adCreative.findUnique({ where: { id }, select: { click_url: true } });
+    if (!before) throw notFound('Ad not found');
+    const clickUrlChanged = input.click_url !== undefined && input.click_url !== before.click_url;
+    let creative = await prisma.adCreative.update({
+        where: { id },
+        // A new destination makes the old preview image wrong
+        data: clickUrlChanged ? { ...input, link_image_url: null, link_image_checked_at: null } : input,
+    });
+    if (needsLinkImage(creative, clickUrlChanged)) creative = await refreshLinkImage(id, staffOf(request).id);
     if (input.is_active === false) await closeReports('ad', id, 'resolved', { staffId: staffOf(request).id });
+    clearAdCache();
+    response.json({ creative });
+});
+
+// Looks for the destination's preview image again (the advertiser changed it, or the first try failed)
+router.post('/creatives/:id/link-image', async (request, response) => {
+    const id = uuidParam(request.params.id, 'Ad not found');
+    if (!(await prisma.adCreative.findUnique({ where: { id }, select: { id: true } }))) throw notFound('Ad not found');
+    const creative = await refreshLinkImage(id, staffOf(request).id);
     clearAdCache();
     response.json({ creative });
 });
