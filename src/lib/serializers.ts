@@ -80,6 +80,8 @@ export function toPublicPost(post: PostRow, context: ViewerContext, votes?: Vote
         body: isDeleted ? '' : post.body,
         url: isDeleted ? null : post.url,
         link_preview: isDeleted ? null : isMature && preview?.image ? { ...preview, image: undefined } : post.link_preview,
+        // Picture posts: { url, width, height, variants }; blurred on the page like the text when mature
+        image: isDeleted ? null : post.image,
         ai_summary: isDeleted ? null : post.ai_summary,
         is_anonymous: post.is_anonymous,
         is_nsfw: isMature,

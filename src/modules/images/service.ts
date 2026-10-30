@@ -7,14 +7,13 @@ import { putObject } from '../../lib/storage';
 import { checkImage } from '../safety/imageCheck';
 import { openAiVerdict } from '../safety/moderation';
 
-// Image uploads: ad logos and pictures, community icons and banners. (No profile photos, by decision: people keep
-// drawn avatars, which protects anonymity and saves storage. Images in posts and comments come later, with automatic
-// moderation on every upload.)
+// Image uploads: ad logos and pictures, community icons and banners, and pictures in posts. (No profile photos, by
+// decision: people keep drawn avatars, which protects anonymity and saves storage.)
 //
 // Every upload is decoded and redrawn: EXIF and other metadata are dropped (location, camera), the picture is turned
 // upright, cut to the shape its slot needs and saved as WebP in a couple of sizes. The original is never stored.
 
-export const IMAGE_PURPOSES = ['ad_logo', 'ad_image', 'community_icon', 'community_banner'] as const;
+export const IMAGE_PURPOSES = ['ad_logo', 'ad_image', 'community_icon', 'community_banner', 'post_image'] as const;
 export type ImagePurpose = (typeof IMAGE_PURPOSES)[number];
 
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -30,6 +29,9 @@ const VARIANTS: Record<ImagePurpose, { width: number; height?: number }[]> = {
     // picks or shown whole (AdCreative.image_focus_x/y, image_fit), so nothing is cut off here
     ad_image: [{ width: 1200 }, { width: 600 }],
     community_icon: [{ width: 256, height: 256 }],
+    // Pictures in posts keep their shape too (the page reserves space from the stored width and height): the full one,
+    // its long edge at most 2048 px, for the post's page, and a 720 px one for feeds and cards
+    post_image: [{ width: 2048 }, { width: 720 }],
     // 4:1 header banner
     community_banner: [
         { width: 1600, height: 400 },
@@ -40,12 +42,15 @@ const VARIANTS: Record<ImagePurpose, { width: number; height?: number }[]> = {
 export type StoredImage = { url: string; width: number; height: number; variants: { url: string; width: number; height: number }[] };
 
 // Every upload is checked before anything is stored: the site's own picture classifier (modules/safety/
-// imageCheck.ts), plus OpenAI's check when it's switched on. Icons, banners and ad pictures have no review step, so
-// anything clearly or possibly sexual is refused (ads also refuse revealing pictures). If the classifier can't run,
-// the upload goes through and a log line says so.
+// imageCheck.ts), plus OpenAI's check when it's switched on. A clearly sexual picture is refused for every purpose,
+// since porn isn't allowed anywhere. Icons, banners and ad pictures have no review step, so anything possibly sexual
+// is refused too (ads also refuse revealing pictures). A borderline picture in a post may go up: the post is checked
+// again with it and held for the admins (or labelled mature). If a check can't run, the upload goes through and a log
+// line says so.
 export async function scanImage(input: { image: Buffer; purpose: ImagePurpose; uploaderId: string }): Promise<{ allowed: boolean; reason?: string }> {
+    const isPost = input.purpose === 'post_image';
     const local = await checkImage(input.image, input.purpose);
-    if (local.action === 'refuse' || local.action === 'hold_for_admins') {
+    if (local.action === 'refuse' || (local.action === 'hold_for_admins' && !isPost)) {
         logger.warn({ purpose: input.purpose, uploaderId: input.uploaderId }, 'Picture refused by the automatic check');
         return { allowed: false, reason: local.action === 'refuse' ? local.reason : "This picture can't be used here." };
     }
@@ -53,7 +58,11 @@ export async function scanImage(input: { image: Buffer; purpose: ImagePurpose; u
     if (!env.OPENAI_API_KEY) return { allowed: true };
     const sample = await sharp(input.image, { animated: false }).rotate().resize(512, 512, { fit: 'inside' }).jpeg({ quality: 70 }).toBuffer();
     const extra = await openAiVerdict({ imageUrls: [`data:image/jpeg;base64,${sample.toString('base64')}`] });
-    if (extra.action === 'hold_for_admins' || extra.action === 'hold') return { allowed: false, reason: "This picture can't be used here." };
+    if (extra.action === 'hold_for_admins') {
+        logger.warn({ purpose: input.purpose, uploaderId: input.uploaderId, reason: extra.reason }, 'Picture refused by the automatic check');
+        return { allowed: false, reason: "This picture can't be posted here. Sexual content isn't allowed on the site." };
+    }
+    if (extra.action === 'hold' && !isPost) return { allowed: false, reason: "This picture can't be used here." };
     return { allowed: true };
 }
 
@@ -75,11 +84,13 @@ export async function processUpload(body: Buffer, purpose: ImagePurpose, uploade
     const verdict = await scanImage({ image: body, purpose, uploaderId });
     if (!verdict.allowed) throw badRequest(verdict.reason ?? "This picture can't be used here.", 'image_refused');
 
+    // A moving GIF in a post stays moving, as animated WebP (smaller than the GIF); everything else is one still frame
+    const animated = purpose === 'post_image' && meta.format === 'gif' && (meta.pages ?? 1) > 1;
     const id = randomUUID();
     const variants = await Promise.all(
         VARIANTS[purpose].map(async ({ width, height }) => {
-            // rotate() applies the EXIF orientation; WebP output carries no metadata
-            const { data, info } = await sharp(body, { animated: false })
+            // rotate() applies the EXIF orientation; WebP output carries no metadata (no camera, no location)
+            const { data, info } = await sharp(body, { animated })
                 .rotate()
                 .resize(
                     width,
@@ -89,7 +100,8 @@ export async function processUpload(body: Buffer, purpose: ImagePurpose, uploade
                 .webp({ quality: 82 })
                 .toBuffer({ resolveWithObject: true });
             const url = await putObject(`img/${purpose}/${id}-${width}.webp`, data, 'image/webp');
-            return { url, width: info.width, height: info.height };
+            // An animation's height counts every frame; one frame's is pageHeight
+            return { url, width: info.width, height: info.pageHeight ?? info.height };
         })
     );
     logger.info({ purpose, uploaderId, bytes: body.length }, 'Image stored');

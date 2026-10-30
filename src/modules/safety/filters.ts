@@ -75,6 +75,8 @@ export type ScreenInput = {
     title?: string;
     body: string;
     url?: string;
+    // Pictures in the post (our storage), for the automatic content check
+    imageUrls?: string[];
     // For the repeated-content check: the post being commented on, or the community being posted to
     postId?: string;
     communityId?: string;

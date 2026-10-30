@@ -75,10 +75,11 @@ export async function findVisiblePost(idOrShort: string, viewerUser: User | unde
 type CreatePostInput = {
     communityId: string;
     authorId: string;
-    type: 'text' | 'link';
+    type: 'text' | 'link' | 'image';
     title: string;
     body: string;
     url?: string;
+    image?: Prisma.InputJsonValue;
     is_anonymous: boolean;
     is_nsfw: boolean;
     flair_id?: string;
@@ -104,6 +105,7 @@ export async function createPost(input: CreatePostInput) {
                     body: input.body,
                     url: input.url ?? null,
                     url_key: input.url ? urlKey(input.url) : null,
+                    image: input.image ?? Prisma.DbNull,
                     is_anonymous: input.is_anonymous,
                     is_nsfw: input.is_nsfw,
                     flair_id: input.flair_id ?? null,
