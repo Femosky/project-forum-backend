@@ -139,3 +139,15 @@ describe('profiles and accounts', () => {
         expect(mine.body.communities).toMatchObject([{ name: 'lounge', role: 'owner' }]);
     });
 });
+
+describe('community icons', () => {
+    it('takes one of the default icons, but no other outside address', async () => {
+        const alice = await signUp('alice');
+        await createCommunity(alice.agent, 'lounge');
+        const set = (image_url: string) => alice.agent.patch('/v1/communities/lounge').send({ image_url });
+        expect((await set('/community-icons/7.svg')).status).toBe(200);
+        expect((await alice.agent.get('/v1/communities/lounge')).body.community.image_url).toBe('/community-icons/7.svg');
+        expect((await set('/community-icons/13.svg')).status).toBe(400);
+        expect((await set('https://example.com/a.png')).status).toBe(400);
+    });
+});
