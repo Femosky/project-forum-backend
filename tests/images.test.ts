@@ -75,3 +75,33 @@ describe('drawn avatars', () => {
         expect((await alice.agent.patch('/v1/users/me').send({ avatar_config: null })).body.user.avatar).toBe(avatarCode(null, 'alice'));
     });
 });
+
+describe('moving the bucket to a new public address', () => {
+    it('rewrites stored image addresses with the old base, and nothing else', async () => {
+        const { rebaseMediaUrls } = await import('../src/modules/images/rebase');
+        const prisma = (await import('../src/prismaConnection')).default;
+        const owner = await signUp('owner');
+        await createCommunity(owner.agent, 'Lounge');
+        await createCommunity(owner.agent, 'Garden');
+        const old = 'https://pub-abc.r2.dev';
+        await prisma.community.update({
+            where: { name: 'lounge' },
+            data: { image_url: `${old}/img/community_icon/1-256.webp`, banner_url: `${old}/img/community_banner/1-1600.webp` },
+        });
+        // A look-alike host must not match
+        await prisma.community.update({ where: { name: 'garden' }, data: { image_url: 'https://pub-abc.r2.dev.evil.test/x.webp' } });
+
+        const dryRun = await rebaseMediaUrls(`${old}/`, 'https://media.forum.example', false);
+        expect(dryRun).toMatchObject({ 'Community.image_url': 1, 'Community.banner_url': 1, 'Advertiser.logo_url': 0 });
+        expect((await prisma.community.findUnique({ where: { name: 'lounge' } }))?.image_url).toBe(`${old}/img/community_icon/1-256.webp`);
+
+        await rebaseMediaUrls(old, 'https://media.forum.example', true);
+        const lounge = await prisma.community.findUnique({ where: { name: 'lounge' } });
+        expect(lounge).toMatchObject({
+            image_url: 'https://media.forum.example/img/community_icon/1-256.webp',
+            banner_url: 'https://media.forum.example/img/community_banner/1-1600.webp',
+        });
+        expect((await prisma.community.findUnique({ where: { name: 'garden' } }))?.image_url).toBe('https://pub-abc.r2.dev.evil.test/x.webp');
+        await expect(rebaseMediaUrls(old, `${old}/`, false)).rejects.toThrow('same');
+    });
+});

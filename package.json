@@ -16,7 +16,8 @@
         "seed:bench": "ts-node prisma/seed.ts --bench",
         "seed:launch": "ts-node prisma/launch-seed.ts",
         "bench": "ts-node scripts/bench.ts",
-        "admin:create-owner": "ts-node scripts/create-owner.ts"
+        "admin:create-owner": "ts-node scripts/create-owner.ts",
+        "media:rebase": "ts-node scripts/media-rebase.ts"
     },
     "prisma": {
         "seed": "ts-node prisma/seed.ts"
