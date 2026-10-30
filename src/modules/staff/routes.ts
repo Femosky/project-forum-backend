@@ -170,6 +170,13 @@ staffAuthRoutes.get('/me', requirePendingSession, async (request: StaffRequest, 
     response.json({ staff: publicStaff(account) });
 });
 
+// Whether this account gets emails about the admin queue
+staffAuthRoutes.put('/alerts', requireStaff('owner', 'admin'), async (request: StaffRequest, response) => {
+    const { email } = parse(z.object({ email: z.boolean() }), request.body);
+    const account = await prisma.staffAccount.update({ where: { id: request.staff!.account.id }, data: { alert_email: email } });
+    response.json({ staff: publicStaff(account) });
+});
+
 const passwordSchema = z.object({ current_password: z.string().min(1).max(200), new_password: password });
 
 staffAuthRoutes.post('/password', requirePendingSession, async (request: StaffRequest, response) => {
