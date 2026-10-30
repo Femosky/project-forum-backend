@@ -92,7 +92,10 @@ const envSchema = z.object({
     METRICS_FLUSH_SECONDS: z.coerce.number().int().min(5).max(600).default(45),
 });
 
-const parsed = envSchema.safeParse(process.env);
+// A setting left empty (a blank box on the hosting dashboard) counts as not set, so optional ones fall back to their
+// defaults instead of failing validation
+const provided = Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined && value.trim() !== ''));
+const parsed = envSchema.safeParse(provided);
 
 if (!parsed.success) {
     console.error('Invalid environment configuration:');
