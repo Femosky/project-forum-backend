@@ -126,3 +126,51 @@ describe('telling moderators', () => {
         expect(await prisma.modAction.count({ where: { action: 'accept_join_request' } })).toBe(1);
     });
 });
+
+describe('Lead mods and handing communities over', () => {
+    it('lets a Lead mod manage moderators, but not other Leads or the community itself', async () => {
+        const alice = await signUp('alice');
+        const bob = await signUp('bob');
+        const carol = await signUp('carol');
+        await community(alice);
+        await inviteAndAccept(alice, bob, 'lead');
+
+        const lead = await bob.agent.post('/v1/communities/lounge/team/invites').send({ username: 'carol', permission: 'lead' });
+        expect(lead.status).toBe(403);
+        await inviteAndAccept(bob, carol);
+        await bob.agent.patch('/v1/communities/lounge/team/carol').send({ permission: 'posts' }).expect(200);
+        expect((await bob.agent.post('/v1/communities/lounge/transfer').send({ username: 'carol' })).status).toBe(403);
+    });
+
+    it('passes a deleted owner\'s community to the chosen successor, the longest-serving moderator, or the site', async () => {
+        const alice = await signUp('alice');
+        const bob = await signUp('bob');
+        const carol = await signUp('carol');
+        await community(alice);
+        await community(alice, 'cafe');
+        await community(alice, 'quiet');
+        await inviteAndAccept(alice, bob);
+        await alice.agent.post('/v1/communities/cafe/team/invites').send({ username: 'bob' }).expect(201);
+        await alice.agent.post('/v1/communities/cafe/team/invites').send({ username: 'carol' }).expect(201);
+        for (const person of [bob, carol]) {
+            const { invites } = (await person.agent.get('/v1/moderation/overview')).body;
+            for (const invite of invites) await person.agent.post(`/v1/moderation/invites/${invite.id}`).send({ decision: 'accept' }).expect(200);
+        }
+
+        const owned = (await alice.agent.get('/v1/users/me/owned-communities')).body.communities;
+        expect(owned).toHaveLength(3);
+        await alice.agent.delete('/v1/users/me').send({ password: alice.password, successors: { cafe: 'carol' } }).expect(200);
+
+        const ownerOf = async (name: string) =>
+            (await prisma.communityMember.findFirstOrThrow({ where: { community: { name }, role: 'owner' }, select: { user: { select: { username: true } } } })).user.username;
+        expect(await ownerOf('lounge')).toBe('bob');
+        expect(await ownerOf('cafe')).toBe('carol');
+        expect(await ownerOf('quiet')).toBe('site_team');
+        expect((await prisma.community.findUniqueOrThrow({ where: { name: 'quiet' } })).needs_moderator).toBe(true);
+    });
+
+    it('keeps the site account out of reach', async () => {
+        const taken = await api().post('/v1/auth/signup').send({ email: 'x@example.test', username: 'site_team', password: 'Passw0rd!Passw0rd', is_adult: true });
+        expect(taken.body.error.code).toBe('username_taken');
+    });
+});

@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { avatarCode, avatarConfigSchema } from '../../lib/avatars';
 import { Router } from 'express';
+import { handOverOwnership, setOwner } from '../communities/ownership';
 import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
@@ -174,12 +175,44 @@ router.get('/me/export', requireAuth, async (request: AuthRequest, response) => 
 
 // Deletes the account: signs out everywhere, frees the email, and detaches the name from past content.
 // Posts and comments stay so threads still make sense, but show no author.
+const deleteAccountSchema = z.object({ password: z.string().max(256).optional(), successors: z.record(z.string().max(40), z.string().max(40)).optional() });
+
+// For the delete-account warning: communities this person owns and who could take over
+router.get('/me/owned-communities', requireAuth, async (request: AuthRequest, response) => {
+    const { user } = viewerOf(request);
+    const rows = await prisma.communityMember.findMany({
+        where: { user_id: user.id, role: 'owner' },
+        select: {
+            community: {
+                select: {
+                    name: true,
+                    members: { where: { role: 'moderator', is_banned: false, user: { status: 'active' } }, orderBy: { joined_at: 'asc' }, select: { user: { select: { username: true } } } },
+                },
+            },
+        },
+    });
+    response.json({ communities: rows.map(({ community }) => ({ name: community.name, moderators: community.members.map((member) => member.user.username) })) });
+});
+
 router.delete('/me', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
-    const { password } = parse(z.object({ password: z.string().max(256).optional() }), request.body);
+    const { password, successors } = parse(deleteAccountSchema, request.body);
     if (user.password_hash && !(await verifyPassword(password ?? '', user.password_hash))) {
         throw badRequest('Your password is wrong.', 'wrong_password');
     }
+    // Who the person chose to take over, then the automatic handover for the rest
+    for (const [communityName, username] of Object.entries(successors ?? {})) {
+        const member = await prisma.communityMember.findFirst({
+            where: {
+                role: 'moderator',
+                community: { name: communityName, members: { some: { user_id: user.id, role: 'owner' } } },
+                user: { username, status: 'active' },
+            },
+        });
+        if (member) await setOwner(member.community_id, member.user_id, { action: 'transfer_ownership', actorId: user.id, previousRole: 'member' });
+    }
+    await handOverOwnership(user.id);
+    await prisma.communityMember.updateMany({ where: { user_id: user.id, role: 'moderator' }, data: { role: 'member', mod_permission: 'all' } });
     await prisma.user.update({
         where: { id: user.id },
         data: {

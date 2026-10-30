@@ -5,12 +5,14 @@ import { hotRank, wilsonLowerBound } from '../src/lib/ranking';
 import { slugify } from '../src/lib/slug';
 import { SEED_ACCOUNTS } from './launch/accounts';
 import { LAUNCH_COMMUNITIES, type SeedComment } from './launch/content';
+import { SITE_ACCOUNT_NAME, SITE_ACCOUNT_USERNAME } from '../src/shared/site';
 
 // Launch content: the communities, threads and replies in prisma/launch/, written by the seed accounts there.
 //
 //   npm run seed:launch                                  add the launch content (stops if it is already there)
 //   npm run seed:launch -- --reset --confirm=<db host>   first wipe ALL content, then add the launch content
-//   add --owner=<username> to choose who owns the communities (default femi; the account must exist)
+//   add --lead=<username> to choose who is Lead mod of the communities (default femi; the account must exist). The
+//   site's own account owns them.
 //
 // --reset deletes every community, post, comment, vote, save, notification and content report, and the mod log
 // for them. Users, sessions, ads and the blocklist are kept, and karma goes back to 0 because the votes are gone.
@@ -87,9 +89,14 @@ async function main() {
         throw new Error(`--reset wipes all content. Add --confirm=${host} to confirm this database.`);
     }
 
-    const ownerName = option('owner') ?? 'femi';
-    const owner = await prisma.user.findUnique({ where: { username: ownerName } });
-    if (!owner) throw new Error(`Owner account "${ownerName}" doesn't exist. Pass --owner=<username>.`);
+    const leadName = option('lead') ?? 'femi';
+    const lead = await prisma.user.findUnique({ where: { username: leadName } });
+    if (!lead) throw new Error(`Lead account "${leadName}" doesn't exist. Pass --lead=<username>.`);
+    const owner = await prisma.user.upsert({
+        where: { username: SITE_ACCOUNT_USERNAME },
+        create: { username: SITE_ACCOUNT_USERNAME, email: 'site-team@invalid.local', display_name: SITE_ACCOUNT_NAME, email_verified_at: new Date() },
+        update: {},
+    });
 
     if (!reset) {
         const existing = await prisma.community.count({
@@ -149,7 +156,7 @@ async function main() {
     for (const [index, data] of LAUNCH_COMMUNITIES.entries()) {
         const communityId = randomUUID();
         const communityCreated = now - (14 - (index % 4)) * DAY;
-        const memberIds = new Set<string>([owner.id]);
+        const memberIds = new Set<string>([owner.id, lead.id]);
 
         for (const thread of data.threads) {
             const postId = randomUUID();
@@ -235,7 +242,8 @@ async function main() {
             members.push({
                 community_id: communityId,
                 user_id: id,
-                role: id === owner.id ? 'owner' : 'member',
+                role: id === owner.id ? 'owner' : id === lead.id ? 'moderator' : 'member',
+                mod_permission: id === lead.id ? 'lead' : 'all',
                 joined_at: new Date(id === owner.id ? communityCreated : communityCreated + Math.floor(random() * 3 * DAY)),
             });
         }
@@ -260,7 +268,7 @@ async function main() {
 
     console.log(
         `Added ${communities.length} communities, ${posts.length} posts, ${comments.length} comments, ` +
-            `${postVotes.length + commentVotes.length} votes from ${accounts.length} seed accounts. Owner: ${ownerName}.`
+            `${postVotes.length + commentVotes.length} votes from ${accounts.length} seed accounts. Lead mod: ${leadName}.`
     );
 }
 

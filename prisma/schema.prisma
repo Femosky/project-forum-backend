@@ -315,6 +315,9 @@ model Community {
   search_vector Unsupported("tsvector")?
 
   members       CommunityMember[]
+  // No owner or moderator left to run it: shown to the site's admins
+  needs_moderator Boolean @default(false)
+
   join_requests CommunityJoinRequest[]
   mod_invites   ModInvite[]
   mod_email_settings ModEmailSetting[]
@@ -346,7 +349,7 @@ model CommunityMember {
   user         User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   role      MemberRole @default(member)
-  // What a moderator may do: all, or posts only (the queue and reports)
+  // What a moderator may do: lead (also manages moderators), all, or posts only (the queue and reports)
   mod_permission ModPermission @default(all)
   joined_at DateTime   @default(now())
 
@@ -792,6 +795,8 @@ model AdDailyStat {
 enum ModPermission {
   all
   posts
+  // Everything, including managing the other moderators
+  lead
 }
 
 enum ModInviteStatus {
