@@ -34,6 +34,8 @@ const envSchema = z.object({
     // suspend; the next request starts it again. 0 keeps it running all the time (lib/jobs.ts).
     JOBS_IDLE_SUSPEND_MINUTES: z.coerce.number().min(0).max(1440).default(5),
     LINK_PREVIEWS_ENABLED: booleanFlag(true),
+    // Checks new passwords against Have I Been Pwned (only a hash prefix is sent; allowed if the service is down)
+    PASSWORD_BREACH_CHECK: booleanFlag(true),
 
     // Email (Resend). Without a key, emails are logged instead of sent.
     RESEND_API_KEY: z.string().optional(),

@@ -214,11 +214,14 @@ export async function issueToken(userId: string, purpose: TokenPurpose, newEmail
 }
 
 // Marks a token used and returns it, or throws if it is unknown, used or expired
-export async function consumeToken(token: string, purpose: TokenPurpose) {
+// beforeUse runs once the token is known to be good but before it is spent, so a check that fails (like a weak new
+// password) leaves the link usable
+export async function consumeToken(token: string, purpose: TokenPurpose, beforeUse?: (record: { user_id: string }) => Promise<void>) {
     const record = await prisma.verificationToken.findUnique({ where: { token_hash: hashToken(token) } });
     if (!record || record.purpose !== purpose || record.used_at || record.expires_at <= new Date()) {
         throw badRequest('This link is invalid or has expired.', 'invalid_token');
     }
+    await beforeUse?.(record);
     const claimed = await prisma.verificationToken.updateMany({
         where: { id: record.id, used_at: null },
         data: { used_at: new Date() },

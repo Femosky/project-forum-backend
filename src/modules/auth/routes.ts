@@ -5,7 +5,9 @@ import { createStore } from '../../lib/rateLimit';
 import { track } from '../../lib/analytics';
 import { isTurnstileEnabled, requireTurnstile } from '../../lib/turnstile';
 import { AuthRequest, requireAuth, viewerOf } from '../../middlewares/auth';
+import { username } from '../../shared/validation';
 import { verifyGoogleIdToken } from './google';
+import { assertStrongPassword } from './passwordPolicy';
 import {
     changeEmailSchema,
     changePasswordSchema,
@@ -93,6 +95,7 @@ router.post('/signup', async (request, response) => {
     const input = parse(signupSchema, request.body);
     await requireTurnstile(input.turnstile_token, request.ip);
     await assertAvailable(input.email, input.username);
+    await assertStrongPassword(input.password, input);
 
     const user = await createUser({
         email: input.email,
@@ -104,6 +107,17 @@ router.post('/signup', async (request, response) => {
 
     setAuthCookies(response, await createSession(user, request));
     response.status(201).json({ user: toPrivateUser(user) });
+});
+
+// Live check for the sign-up form: format first, then whether it's taken. Same rules as signing up.
+router.get('/username-available', async (request, response) => {
+    const result = username.safeParse(String(request.query.username ?? ''));
+    if (!result.success) {
+        response.json({ available: false, reason: result.error.issues[0]?.message ?? 'Not a valid username' });
+        return;
+    }
+    const taken = await prisma.user.findUnique({ where: { username: result.data }, select: { id: true } });
+    response.json({ available: !taken, ...(taken ? { reason: 'That username is taken' } : {}) });
 });
 
 router.post('/login', login);
@@ -139,7 +153,10 @@ router.post('/forgot-password', async (request, response) => {
 
 router.post('/reset-password', async (request, response) => {
     const input = parse(resetPasswordSchema, request.body);
-    const record = await consumeToken(input.token, 'reset_password');
+    const record = await consumeToken(input.token, 'reset_password', async ({ user_id }) => {
+        const owner = await prisma.user.findUnique({ where: { id: user_id }, select: { username: true, email: true } });
+        await assertStrongPassword(input.password, owner ?? {});
+    });
     await prisma.user.update({
         where: { id: record.user_id },
         // Clicking the emailed link also proves the address
@@ -156,6 +173,7 @@ router.post('/change-password', requireAuth, async (request: AuthRequest, respon
     if (user.password_hash && !(await verifyPassword(input.current_password ?? '', user.password_hash))) {
         throw badRequest('Your current password is wrong.', 'wrong_password');
     }
+    await assertStrongPassword(input.new_password, user);
     await prisma.user.update({ where: { id: user.id }, data: { password_hash: await hashPassword(input.new_password) } });
     await revokeAllSessions(user.id, sessionId);
     response.json({ success: true });

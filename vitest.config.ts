@@ -18,6 +18,7 @@ export default defineConfig({
             RATE_LIMIT_STORE: 'postgres',
             JOBS_ENABLED: 'false',
             LINK_PREVIEWS_ENABLED: 'false',
+            PASSWORD_BREACH_CHECK: 'false',
         },
     },
 });
