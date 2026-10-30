@@ -10,7 +10,7 @@ import { isTurnstileEnabled, requireTurnstile } from '../../lib/turnstile';
 import { AuthRequest, optionalAuth, requireAuth, viewerOf } from '../../middlewares/auth';
 import { assertCanParticipate, assertCanPost, findCommunity, viewerContext } from '../communities/access';
 import { reviewContent } from '../safety/review';
-import { assertAnonymousAllowed, assertLinksAllowed, assertWithinYoungAccountLimits } from '../safety/policy';
+import { assertAnonymousAllowed, assertLinksAllowed, assertWithinYoungAccountLimits, canPostLinks } from '../safety/policy';
 import { assertCommentable, createComment, listPostComments } from '../comments/service';
 import { notifyForComment } from '../notifications/service';
 import { postViewerState, votePost } from '../votes/service';
@@ -36,6 +36,7 @@ router.post('/', requireAuth, async (request: AuthRequest, response) => {
     const community = await findCommunity(input.community);
     await assertCanPost(community, user);
     const url = input.type === 'link' ? input.url : undefined;
+    const image = input.type === 'image' ? input.image : undefined;
     assertAnonymousAllowed(user, input.is_anonymous);
     assertLinksAllowed(user, [input.title, input.body], url);
     await assertWithinYoungAccountLimits(user, 'post');
@@ -43,7 +44,9 @@ router.post('/', requireAuth, async (request: AuthRequest, response) => {
         throw badRequest('That flair is not part of this community.', 'invalid_flair');
     }
 
-    const review = await reviewContent({ user, kind: 'post', title: input.title, body: input.body, url, communityId: community.id });
+    if (image && !canPostLinks(user)) throw forbidden("New accounts can't post pictures yet. You can once your account is a day old.", 'new_account_pictures');
+    // The picture was checked when it was uploaded; the post (words and picture together) is checked again here
+    const review = await reviewContent({ user, kind: 'post', title: input.title, body: input.body, url, imageUrls: image ? [image.url] : [], communityId: community.id });
     const post = await createPost({
         communityId: community.id,
         authorId: user.id,
@@ -51,6 +54,7 @@ router.post('/', requireAuth, async (request: AuthRequest, response) => {
         title: input.title,
         body: input.body,
         url,
+        image,
         is_anonymous: input.is_anonymous,
         // The automatic check adds the mature label to graphic posts the author didn't mark
         is_nsfw: input.is_nsfw || community.is_nsfw || review.mature,

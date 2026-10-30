@@ -3,15 +3,15 @@ import sharp from 'sharp';
 import { badRequest } from '../../lib/http';
 import logger from '../../lib/logger';
 import { putObject } from '../../lib/storage';
+import { checkContent } from '../safety/moderation';
 
-// Image uploads: ad logos and pictures, community icons and banners. (No profile photos, by decision: people keep
-// drawn avatars, which protects anonymity and saves storage. Images in posts and comments come later, with automatic
-// moderation on every upload.)
+// Image uploads: ad logos and pictures, community icons and banners, and pictures in posts. (No profile photos, by
+// decision: people keep drawn avatars, which protects anonymity and saves storage.)
 //
 // Every upload is decoded and redrawn: EXIF and other metadata are dropped (location, camera), the picture is turned
 // upright, cut to the shape its slot needs and saved as WebP in a couple of sizes. The original is never stored.
 
-export const IMAGE_PURPOSES = ['ad_logo', 'ad_image', 'community_icon', 'community_banner'] as const;
+export const IMAGE_PURPOSES = ['ad_logo', 'ad_image', 'community_icon', 'community_banner', 'post_image'] as const;
 export type ImagePurpose = (typeof IMAGE_PURPOSES)[number];
 
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -27,6 +27,8 @@ const VARIANTS: Record<ImagePurpose, { width: number; height?: number }[]> = {
     // picks or shown whole (AdCreative.image_focus_x/y, image_fit), so nothing is cut off here
     ad_image: [{ width: 1200 }, { width: 600 }],
     community_icon: [{ width: 256, height: 256 }],
+    // Pictures in posts keep their shape too; the page reserves space from the stored width and height
+    post_image: [{ width: 1600 }, { width: 800 }],
     // 4:1 header banner
     community_banner: [
         { width: 1600, height: 400 },
@@ -36,11 +38,21 @@ const VARIANTS: Record<ImagePurpose, { width: number; height?: number }[]> = {
 
 export type StoredImage = { url: string; width: number; height: number; variants: { url: string; width: number; height: number }[] };
 
-// The place to check what's in a picture before it goes public (nudity, gore, scams). Today's uploads come only from
-// admins and community moderators, so nothing is scanned yet; the scanning service plugs in here, and a refusal
-// stops the upload before anything is stored.
+// Every upload is checked before anything is stored (modules/safety/moderation.ts): a sexual picture, or one that
+// suggests a minor, is refused outright for every purpose, since porn isn't allowed anywhere. Severe violence is
+// refused for icons, banners and ads; in a post it may still go up, and the post itself is checked again (held, or
+// labelled mature). Fails open like the text check: with no OPENAI_API_KEY or the service down, uploads go through.
 export async function scanImage(input: { image: Buffer; purpose: ImagePurpose; uploaderId: string }): Promise<{ allowed: boolean; reason?: string }> {
-    void input;
+    // A small copy is enough to judge, and keeps the request light
+    const sample = await sharp(input.image, { animated: false }).rotate().resize(512, 512, { fit: 'inside' }).jpeg({ quality: 70 }).toBuffer();
+    const verdict = await checkContent({ imageUrls: [`data:image/jpeg;base64,${sample.toString('base64')}`] });
+    if (verdict.action === 'hold_for_admins') {
+        logger.warn({ purpose: input.purpose, uploaderId: input.uploaderId, reason: verdict.reason }, 'Picture refused by the automatic check');
+        return { allowed: false, reason: "This picture can't be posted here. Sexual content isn't allowed on the site." };
+    }
+    if (verdict.action === 'hold' && input.purpose !== 'post_image') {
+        return { allowed: false, reason: "This picture can't be used here." };
+    }
     return { allowed: true };
 }
 

@@ -15,7 +15,7 @@ export type Review = {
 export async function reviewContent(input: ScreenInput): Promise<Review> {
     const [filterReason, verdict] = await Promise.all([
         screenContent(input),
-        checkContent({ text: [input.title, input.body, input.url].filter(Boolean).join('\n') }),
+        checkContent({ text: [input.title, input.body, input.url].filter(Boolean).join('\n'), imageUrls: input.imageUrls }),
     ]);
     if (verdict.action === 'hold_for_admins') return { held_reason: verdict.reason, held_for_admins: true, mature: false };
     if (verdict.action === 'hold') return { held_reason: verdict.reason, held_for_admins: false, mature: false };

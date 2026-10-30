@@ -27,7 +27,8 @@ let warnedNoKey = false;
 // Category scores (0 to 1) for some text and pictures, or null when the check couldn't run
 export async function moderationScores(input: { text?: string; imageUrls?: string[] }): Promise<ModerationScores | null> {
     const text = input.text?.trim();
-    const images = (input.imageUrls ?? []).filter((url) => url.startsWith('https://'));
+    // Public https addresses (OpenAI fetches them) or inline pictures (data:image/...), e.g. an upload before it's stored
+    const images = (input.imageUrls ?? []).filter((url) => url.startsWith('https://') || url.startsWith('data:image/'));
     if (!text && images.length === 0) return null;
     if (!env.OPENAI_API_KEY) {
         if (!warnedNoKey) logger.warn('OPENAI_API_KEY is not set, so posts, comments and pictures are not checked automatically');

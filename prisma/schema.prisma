@@ -427,6 +427,9 @@ model Post {
   url_key      String?
   // { title, description, image, site } filled in by the link-preview job
   link_preview Json?
+  // Picture posts: { url, width, height, variants: [{ url, width, height }] }, uploaded to our storage (never hotlinked),
+  // redrawn without EXIF or location data and checked before it can be posted
+  image        Json?
   ai_summary   String?
 
   is_anonymous Boolean @default(false)
