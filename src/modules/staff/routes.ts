@@ -35,7 +35,9 @@ import { decryptSecret, encryptSecret, hashRecoveryCode, newRecoveryCodes, newTo
 export const staffAuthRoutes = Router();
 export const staffRoutes = Router();
 
-const ISSUER = 'Project Forum admin';
+// The name authenticator apps show. Test copies add their address, so a phone can hold the live entry and a local
+// one side by side without mixing them up (same email, different site)
+const ISSUER = env.IS_PRODUCTION ? 'Project Forum admin' : `Project Forum admin (${new URL(env.WEB_URL).host})`;
 
 // Only failed attempts count towards the sign-in limit: a wrong password or a wrong code. Page loads, session checks
 // and successful steps never do. 5 failures per account from one network in 15 minutes, and 20 from one network

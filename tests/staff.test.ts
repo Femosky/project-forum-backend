@@ -1,6 +1,7 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import app from '../src/app';
+import { env } from '../src/config/env';
 import prisma from '../src/prismaConnection';
 import { devOutbox } from '../src/lib/email';
 import { hashPassword } from '../src/modules/auth/service';
@@ -41,6 +42,8 @@ describe('staff sign-in', () => {
 
         const setup = await agent.get('/v1/admin/auth/2fa/setup');
         expect(setup.body.otpauth_url).toContain('otpauth://totp/');
+        // Outside production the entry is named after the site, so it can't be confused with the live one
+        expect(decodeURIComponent(setup.body.otpauth_url)).toContain(`issuer=Project Forum admin (${new URL(env.WEB_URL).host})`);
         expect(setup.body.qr_svg).toContain('<svg');
         expect((await agent.post('/v1/admin/auth/2fa/setup').send({ code: '000000' })).body.error.code).toBe('invalid_code');
         const done = await agent.post('/v1/admin/auth/2fa/setup').send({ code: totpCode(setup.body.secret) });
