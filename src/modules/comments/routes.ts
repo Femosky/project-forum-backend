@@ -74,7 +74,7 @@ router.patch('/:id', requireAuth, async (request: AuthRequest, response) => {
     const updated = heldReason
         ? await setCommentStatus(comment, 'pending', { body, edited_at: new Date(), held_reason: heldReason, held_for_admins: review!.held_for_admins, pinned_at: null })
         : await prisma.comment.update({ where: { id: comment.id }, data: { body, edited_at: new Date() }, include: commentInclude });
-    if (heldReason && !review!.held_for_admins) alertModerators(comment.post.community_id, 'mod_queue');
+    if (heldReason && !review!.held_for_admins) await alertModerators(comment.post.community_id, 'mod_queue');
     response.json({ comment: toPublicComment(updated, comment.post.community_id, context) });
 });
 
