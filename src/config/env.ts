@@ -70,6 +70,10 @@ const envSchema = z.object({
     POSTHOG_API_KEY: z.string().optional(),
     POSTHOG_HOST: z.string().url().default('https://eu.i.posthog.com'),
 
+    // Automatic content checks (OpenAI's free moderation endpoint, modules/safety/moderation.ts). Without a key nothing
+    // is checked and everything publishes as before (a log line says so).
+    OPENAI_API_KEY: z.string().optional(),
+
     // Error alerts (Sentry project DSN). Without it errors are only logged.
     SENTRY_DSN: z.string().url().optional(),
 

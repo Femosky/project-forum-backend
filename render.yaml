@@ -54,6 +54,9 @@ services:
         sync: false
       - key: POSTHOG_API_KEY
         sync: false
+      # Automatic content checks (OpenAI moderation, free). Empty: nothing is checked automatically
+      - key: OPENAI_API_KEY
+        sync: false
       - key: ADSENSE_ENABLED
         value: "false"
       # Image uploads (Cloudflare R2); docs/LAUNCH.md at the project root, Part 13

@@ -10,7 +10,7 @@ import { communityRef } from '../../shared/validation';
 import { commentViewerState } from '../votes/service';
 import { AuthRequest, optionalAuth } from '../../middlewares/auth';
 import { toPublicCommunity } from '../communities/routes';
-import { findCommunity, ViewerContext, viewerContext } from '../communities/access';
+import { findCommunity, showsMature, ViewerContext, viewerContext } from '../communities/access';
 import { serializePosts } from '../posts/service';
 
 const router = Router();
@@ -36,14 +36,18 @@ type SearchQuery = z.infer<typeof searchQuery>;
 type Scope = { type: SearchQuery['type']; page: number; communityId: string | null; context: ViewerContext };
 
 const inCommunity = (communityId: string | null) => (communityId ? Prisma.sql`AND c."id" = ${communityId}::uuid` : Prisma.empty);
+// Mature (NSFW) posts and communities only turn up for viewers who switched on "Show mature content"
+const matureOk = (context: ViewerContext, sql: Prisma.Sql) => (showsMature(context) ? Prisma.empty : sql);
+const noMaturePosts = (context: ViewerContext) => matureOk(context, Prisma.sql`AND NOT p."is_nsfw" AND NOT c."is_nsfw"`);
+const noMatureCommunities = (context: ViewerContext) => matureOk(context, Prisma.sql`AND NOT "is_nsfw"`);
 
 // One page of matching ids, best first, plus one extra to tell whether there's a next page
-function matchingIds(q: string, { type, page, communityId }: Scope) {
+function matchingIds(q: string, { type, page, communityId, context }: Scope) {
     const offset = (page - 1) * PAGE_SIZE;
     if (type === 'communities') {
         return prisma.$queryRaw<{ id: string }[]>`
             SELECT "id" FROM "Community"
-            WHERE "status" = 'active' AND "search_vector" @@ websearch_to_tsquery('english', ${q})
+            WHERE "status" = 'active' ${noMatureCommunities(context)} AND "search_vector" @@ websearch_to_tsquery('english', ${q})
             ORDER BY ts_rank_cd("search_vector", websearch_to_tsquery('english', ${q})) DESC, "member_count" DESC
             LIMIT ${PAGE_SIZE + 1} OFFSET ${offset}`;
     }
@@ -54,7 +58,7 @@ function matchingIds(q: string, { type, page, communityId }: Scope) {
             JOIN "Community" c ON c."id" = p."community_id"
             WHERE cm."status" IN ('active', 'locked') AND NOT cm."shadow_hidden"
               AND p."status" IN ('active', 'locked') AND NOT p."shadow_hidden" AND c."status" = 'active' AND c."visibility" = 'public'
-              ${inCommunity(communityId)}
+              ${inCommunity(communityId)} ${noMaturePosts(context)}
               AND cm."search_vector" @@ websearch_to_tsquery('english', ${q})
             ORDER BY ts_rank_cd(cm."search_vector", websearch_to_tsquery('english', ${q})) DESC, cm."score" DESC
             LIMIT ${PAGE_SIZE + 1} OFFSET ${offset}`;
@@ -63,7 +67,7 @@ function matchingIds(q: string, { type, page, communityId }: Scope) {
         SELECT p."id" FROM "Post" p
         JOIN "Community" c ON c."id" = p."community_id"
         WHERE p."status" IN ('active', 'locked') AND NOT p."shadow_hidden" AND c."status" = 'active' AND c."visibility" = 'public'
-          ${inCommunity(communityId)}
+          ${inCommunity(communityId)} ${noMaturePosts(context)}
           AND p."search_vector" @@ websearch_to_tsquery('english', ${q})
         ORDER BY ts_rank_cd(p."search_vector", websearch_to_tsquery('english', ${q})) DESC, p."hot_rank" DESC
         LIMIT ${PAGE_SIZE + 1} OFFSET ${offset}`;
@@ -144,7 +148,7 @@ router.get('/', optionalAuth, async (request: AuthRequest, response) => {
 
     const pageIds = ids.slice(0, PAGE_SIZE).map((row) => row.id);
     // Few matches for communities: add ones whose names look like what was typed ("lagos rnt" finds LagosRent)
-    const similar = query.page === 1 && ids.length < FEW_RESULTS ? await similarCommunities(query.q, query.type === 'communities' ? pageIds : []) : [];
+    const similar = query.page === 1 && ids.length < FEW_RESULTS ? await similarCommunities(query.q, query.type === 'communities' ? pageIds : [], scope.context) : [];
     const results = await serialize(query.type === 'communities' ? [...pageIds, ...similar.map((row) => row.id)] : pageIds, scope);
     const related =
         query.type !== 'communities' && !communityId && similar.length
@@ -195,11 +199,11 @@ async function correct(text: string, scope: Scope): Promise<{ query: string; con
 }
 
 // Public communities whose name is close to the query (trigram similarity on the indexed name), best first
-async function similarCommunities(q: string, exclude: string[]) {
+async function similarCommunities(q: string, exclude: string[], context: ViewerContext) {
     const handle = q.toLowerCase().trim().replace(/[\s_-]+/g, '');
     return prisma.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "Community"
-        WHERE "status" = 'active' AND "visibility" = 'public' AND NOT ("id" = ANY(${exclude}::uuid[]))
+        WHERE "status" = 'active' AND "visibility" = 'public' ${noMatureCommunities(context)} AND NOT ("id" = ANY(${exclude}::uuid[]))
           AND ("name"::text % ${handle} OR word_similarity(${handle}, "name"::text) > 0.5)
         ORDER BY greatest(similarity("name"::text, ${handle}), word_similarity(${handle}, "name"::text)) DESC, "member_count" DESC
         LIMIT 5`;
@@ -224,8 +228,9 @@ const autocompleteQuery = z.object({ q: z.string().trim().min(1).max(50) });
 // Prefix match on community names and usernames, served by trigram GIN indexes. Community names also match from the
 // start of any word, in CamelCase or the display name, typed with or without spaces ("tech car" and "careers" both
 // find TechCareers); whole-name prefixes rank first. Case never matters.
-router.get('/autocomplete', async (request, response) => {
+router.get('/autocomplete', optionalAuth, async (request: AuthRequest, response) => {
     const { q } = parse(autocompleteQuery, request.query);
+    const context = await viewerContext(request.viewer);
     const escape = (text: string) => text.replace(/[\\%_]/g, (char) => `\\${char}`);
     const pattern = `${escape(q.toLowerCase())}%`;
     const handle = escape(q.toLowerCase().replace(/[\s_-]+/g, ''));
@@ -237,7 +242,7 @@ router.get('/autocomplete', async (request, response) => {
     const [communities, users] = await Promise.all([
         prisma.$queryRaw<{ name: string; name_styled: string; display_name: string | null; image_url: string | null; member_count: number }[]>`
             SELECT "name", coalesce("name_styled", "name"::text) AS name_styled, "display_name", "image_url", "member_count" FROM "Community"
-            WHERE "status" = 'active' AND ("name"::text LIKE ${`${handle}%`} ${midName})
+            WHERE "status" = 'active' ${noMatureCommunities(context)} AND ("name"::text LIKE ${`${handle}%`} ${midName})
             ORDER BY ("name"::text LIKE ${`${handle}%`}) DESC, "member_count" DESC LIMIT 8`,
         prisma.$queryRaw<{ username: string; display_name: string | null; avatar_id: string; avatar_config: Prisma.JsonValue }[]>`
             SELECT "username", "display_name", "avatar_id", "avatar_config" FROM "User"

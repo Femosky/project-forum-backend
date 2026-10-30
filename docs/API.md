@@ -170,7 +170,7 @@ Self-promotion: a house campaign with `house_share` takes that percent of slots 
 |---|---|---|
 | GET | `/users/:username` | Public profile |
 | GET | `/users/:username/posts`, `/users/:username/comments` | Never includes anonymous content or private communities |
-| PATCH | `/users/me` | `display_name, avatar_id` |
+| PATCH | `/users/me` | `display_name, avatar_id, avatar_config, show_mature`. `show_mature` ("Show mature content", off by default) puts NSFW posts and communities in feeds, search, autocomplete and the directory, unblurred |
 | GET | `/users/me/communities` | Joined communities with your role |
 | GET | `/users/me/saved?type=posts\|comments` | Saved comments carry `post: { short_id, slug, title, community }` |
 | GET | `/users/me/export` | Everything the account wrote or chose, as a JSON download |
@@ -233,3 +233,9 @@ A post is indexable when it is active or locked in a public community, isn't a v
 - **Counters**: post and comment views, visits and last-active times are buffered in memory and written in batches every `METRICS_FLUSH_SECONDS` (default 45) and on shutdown. The post hot rank counts replies (net votes + half the comment count) and is recomputed when comments come and go.
 - **Logs**: JSON lines via pino, one per request with a request id. Send `X-Request-Id` to set it; it comes back on every response.
 - **Seeds**: `npm run seed` (small dev data), `npm run seed:bench` then `npm run bench` (100k posts / 1M comments and timings).
+
+### Mature (NSFW) content and automatic checks
+
+- A post is mature when it is marked `is_nsfw` or its community is. Posts carry `is_nsfw` and `blur_mature` (true unless the viewer switched on `show_mature`; always true for guests). Mature posts never carry a link-preview picture, aren't indexed (`is_indexable: false`), and get no ads.
+- Feeds (home and all), search, autocomplete, the community directory and related threads leave mature posts and communities out unless the viewer has `show_mature`. Trending never includes them. Direct links still open them.
+- New and edited posts and comments, and link-preview pictures, are checked with OpenAI's moderation endpoint when `OPENAI_API_KEY` is set (modules/safety/moderation.ts). Sexual content is held for the site's admins only (`held_for_admins`; community moderators can remove it but not approve it), and possible sexual content involving minors is held the same way with a warning. Severe violence, self-harm intent or instructions and threats are held for the community's moderators. Graphic content short of that is published with the mature label. If the check is unavailable, content publishes as before.

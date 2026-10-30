@@ -1,10 +1,11 @@
-import { Community, CommunityMember, User } from '@prisma/client';
+import { Community, CommunityMember, Prisma, User } from '@prisma/client';
 import prisma from '../../prismaConnection';
 import { forbidden, HttpError, notFound } from '../../lib/http';
 import { Viewer } from '../../middlewares/auth';
 
-// What a request knows about who is looking: used by every serializer to decide what to reveal
-export type ViewerContext = { userId: string; isAdmin: boolean; moderates: Set<string> } | null;
+// What a request knows about who is looking: used by every serializer to decide what to reveal.
+// showMature: the viewer switched on "Show mature content" (lists include NSFW posts and communities, unblurred)
+export type ViewerContext = { userId: string; isAdmin: boolean; moderates: Set<string>; showMature: boolean } | null;
 
 export async function viewerContext(viewer: Viewer | undefined): Promise<ViewerContext> {
     if (!viewer) return null;
@@ -16,8 +17,16 @@ export async function viewerContext(viewer: Viewer | undefined): Promise<ViewerC
         userId: viewer.user.id,
         isAdmin: viewer.user.role === 'admin',
         moderates: new Set(rows.map((row) => row.community_id)),
+        showMature: viewer.user.show_mature,
     };
 }
+
+// Mature (NSFW) posts and communities only appear in lists (feeds, search, the directory) for viewers who asked for
+// them; everyone else, guests included, can still open them directly, behind a blur
+export const showsMature = (context: ViewerContext) => Boolean(context?.showMature);
+export const notMaturePost = (context: ViewerContext): Prisma.PostWhereInput =>
+    showsMature(context) ? {} : { is_nsfw: false, community: { is_nsfw: false } };
+export const notMatureCommunity = (context: ViewerContext): Prisma.CommunityWhereInput => (showsMature(context) ? {} : { is_nsfw: false });
 
 export const canModerate = (context: ViewerContext, communityId: string) =>
     Boolean(context && (context.isAdmin || context.moderates.has(communityId)));

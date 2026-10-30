@@ -10,7 +10,7 @@ import { assertCanParticipate, assertCanView, canModerate, viewerContext, Viewer
 import { commentViewerState, voteComment } from '../votes/service';
 import { repliesQuery, updateCommentSchema, voteSchema } from './schema';
 import { listReplies, setCommentStatus } from './service';
-import { screenContent } from '../safety/filters';
+import { reviewContent } from '../safety/review';
 import { assertLinksAllowed } from '../safety/policy';
 
 const router = Router();
@@ -67,11 +67,11 @@ router.patch('/:id', requireAuth, async (request: AuthRequest, response) => {
 
     // Edits go through the same checks as new comments
     assertLinksAllowed(user, [body]);
-    const heldReason =
-        comment.status === 'active' ? await screenContent({ user, kind: 'comment', body, postId: comment.post_id }) : null;
+    const review = comment.status === 'active' ? await reviewContent({ user, kind: 'comment', body, postId: comment.post_id }) : null;
+    const heldReason = review?.held_reason ?? null;
 
     const updated = heldReason
-        ? await setCommentStatus(comment, 'pending', { body, edited_at: new Date(), held_reason: heldReason, pinned_at: null })
+        ? await setCommentStatus(comment, 'pending', { body, edited_at: new Date(), held_reason: heldReason, held_for_admins: review!.held_for_admins, pinned_at: null })
         : await prisma.comment.update({ where: { id: comment.id }, data: { body, edited_at: new Date() }, include: commentInclude });
     response.json({ comment: toPublicComment(updated, comment.post.community_id, context) });
 });

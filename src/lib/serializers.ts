@@ -1,5 +1,5 @@
 import { ContentStatus, Prisma } from '@prisma/client';
-import { canModerate, ViewerContext } from '../modules/communities/access';
+import { canModerate, showsMature, ViewerContext } from '../modules/communities/access';
 import { isIndexable } from './indexing';
 import { avatarCode } from './avatars';
 
@@ -11,7 +11,7 @@ export const authorSelect = { username: true, display_name: true, avatar_id: tru
 export const postInclude = {
     // created_at feeds the indexing rule (posts by brand-new accounts wait for engagement); it is not sent out
     author: { select: { ...authorSelect, created_at: true } },
-    community: { select: { id: true, name: true, name_styled: true, display_name: true, image_url: true, visibility: true, status: true } },
+    community: { select: { id: true, name: true, name_styled: true, display_name: true, image_url: true, visibility: true, status: true, is_nsfw: true } },
     flair: { select: { id: true, name: true, color: true } },
 } satisfies Prisma.PostInclude;
 
@@ -65,6 +65,10 @@ export function toPublicPost(post: PostRow, context: ViewerContext, votes?: Vote
     // A tombstone shows no author (not even to moderators or the author), no body and no counts
     const isDeleted = post.status === 'deleted';
     const revealAuthor = !isDeleted && (!post.is_anonymous || isAuthor || canModerate(context, post.community_id));
+    // Mature (NSFW): marked so itself or by its community. No preview picture, and blurred for viewers who haven't
+    // switched on "Show mature content" (guests always)
+    const isMature = post.is_nsfw || Boolean(post.community.is_nsfw);
+    const preview = post.link_preview as { image?: string } | null;
 
     return {
         id: post.id,
@@ -75,10 +79,11 @@ export function toPublicPost(post: PostRow, context: ViewerContext, votes?: Vote
         // Wiped on delete; also blanked here for posts deleted before tombstones existed
         body: isDeleted ? '' : post.body,
         url: isDeleted ? null : post.url,
-        link_preview: isDeleted ? null : post.link_preview,
+        link_preview: isDeleted ? null : isMature && preview?.image ? { ...preview, image: undefined } : post.link_preview,
         ai_summary: isDeleted ? null : post.ai_summary,
         is_anonymous: post.is_anonymous,
-        is_nsfw: post.is_nsfw,
+        is_nsfw: isMature,
+        blur_mature: isMature && !showsMature(context),
         is_sponsored: post.is_sponsored,
         status: post.status,
         // Why the filters held it; moderators only

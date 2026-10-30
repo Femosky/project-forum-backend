@@ -32,12 +32,15 @@ export type QueueItem = {
 const reportWhere = (scope: Scope): Prisma.ReportWhereInput =>
     'communityId' in scope ? { status: 'open', community_id: scope.communityId } : { status: 'open' };
 
+// Held for the site's admins: only the site queue lists it
+const heldFilter = (scope: Scope) => ('communityId' in scope ? { held_for_admins: false } : {});
+
 export async function queueCount(scope: Scope) {
     const communityFilter = 'communityId' in scope ? { community_id: scope.communityId } : {};
     const [reports, posts, comments] = await Promise.all([
         prisma.report.findMany({ where: reportWhere(scope), distinct: ['target_type', 'target_id'], select: { id: true } }),
-        prisma.post.count({ where: { status: 'pending', ...communityFilter } }),
-        prisma.comment.count({ where: { status: 'pending', post: communityFilter } }),
+        prisma.post.count({ where: { status: 'pending', ...heldFilter(scope), ...communityFilter } }),
+        prisma.comment.count({ where: { status: 'pending', ...heldFilter(scope), post: communityFilter } }),
     ]);
     return reports.length + posts + comments;
 }
@@ -52,13 +55,13 @@ export async function buildQueue(scope: Scope, context: ViewerContext): Promise<
             select: { id: true, created_at: true, target_type: true, target_id: true, reason_code: true, note: true, reporter: { select: { username: true } } },
         }),
         prisma.post.findMany({
-            where: { status: 'pending', ...communityFilter },
+            where: { status: 'pending', ...heldFilter(scope), ...communityFilter },
             orderBy: { created_at: 'desc' },
             take: QUEUE_LIMIT,
             select: { id: true, created_at: true, held_reason: true },
         }),
         prisma.comment.findMany({
-            where: { status: 'pending', post: communityFilter },
+            where: { status: 'pending', ...heldFilter(scope), post: communityFilter },
             orderBy: { created_at: 'desc' },
             take: QUEUE_LIMIT,
             select: { id: true, created_at: true, held_reason: true },

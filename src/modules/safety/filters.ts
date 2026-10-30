@@ -69,7 +69,7 @@ export const clearBlocklistCache = () => {
     cache = null;
 };
 
-type ScreenInput = {
+export type ScreenInput = {
     user: User;
     kind: 'post' | 'comment';
     title?: string;

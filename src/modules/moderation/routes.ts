@@ -276,16 +276,25 @@ router.post('/posts/:id/moderation', requireAuth, async (request: AuthRequest, r
 
 type PostForModeration = Awaited<ReturnType<typeof findVisiblePost>>;
 
+// Content held for the site's admins (sexual content, or worse) can only be removed by a community's moderators;
+// publishing it is the admin team's call, from the admin panel
+function assertCanClearHold(item: { held_for_admins: boolean; status: string }, action: string, actor: Actor) {
+    if (item.held_for_admins && item.status === 'pending' && action !== 'remove' && !('staffId' in actor)) {
+        throw forbidden("Only the site's admins can decide on this one. You can remove it.", 'held_for_admins');
+    }
+}
+
 // A moderator's or staff member's decision on a post, with the community's post count, the log and its reports
 export async function moderatePost(post: PostForModeration, input: z.infer<typeof postActionSchema>, actor: Actor, context: ViewerContext) {
     if (post.status === 'deleted') throw badRequest('The author deleted this post.', 'post_deleted');
+    assertCanClearHold(post, input.action, actor);
 
     const data = (() => {
         switch (input.action) {
             case 'remove':
                 return { status: 'removed' as const, pinned_at: null };
             case 'approve':
-                return { status: 'active' as const };
+                return { status: 'active' as const, held_for_admins: false };
             case 'lock':
                 return { status: 'locked' as const };
             case 'unlock':
@@ -342,6 +351,7 @@ type CommentForModeration = Awaited<ReturnType<typeof findVisibleComment>>;
 export async function moderateComment(comment: CommentForModeration, input: z.infer<typeof commentActionSchema>, actor: Actor, context: ViewerContext) {
     const communityId = comment.post.community_id;
     if (comment.status === 'deleted') throw badRequest('The author deleted this comment.', 'comment_deleted');
+    assertCanClearHold(comment, input.action, actor);
     if ((input.action === 'pin' || input.action === 'unpin') && comment.depth !== 0) {
         throw badRequest('Only top-level comments can be pinned.', 'not_top_level');
     }
@@ -353,7 +363,7 @@ export async function moderateComment(comment: CommentForModeration, input: z.in
             break;
         case 'approve':
         case 'unlock':
-            updated = await setCommentStatus(comment, 'active');
+            updated = await setCommentStatus(comment, 'active', { held_for_admins: false });
             break;
         case 'lock':
             updated = await setCommentStatus(comment, 'locked');

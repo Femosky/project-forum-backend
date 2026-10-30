@@ -9,7 +9,7 @@ import { fetchLinkPreview } from '../../lib/linkPreview';
 import { isTurnstileEnabled, requireTurnstile } from '../../lib/turnstile';
 import { AuthRequest, optionalAuth, requireAuth, viewerOf } from '../../middlewares/auth';
 import { assertCanParticipate, assertCanPost, findCommunity, viewerContext } from '../communities/access';
-import { screenContent } from '../safety/filters';
+import { reviewContent } from '../safety/review';
 import { assertAnonymousAllowed, assertLinksAllowed, assertWithinYoungAccountLimits } from '../safety/policy';
 import { assertCommentable, createComment, listPostComments } from '../comments/service';
 import { notifyForComment } from '../notifications/service';
@@ -43,6 +43,7 @@ router.post('/', requireAuth, async (request: AuthRequest, response) => {
         throw badRequest('That flair is not part of this community.', 'invalid_flair');
     }
 
+    const review = await reviewContent({ user, kind: 'post', title: input.title, body: input.body, url, communityId: community.id });
     const post = await createPost({
         communityId: community.id,
         authorId: user.id,
@@ -51,9 +52,11 @@ router.post('/', requireAuth, async (request: AuthRequest, response) => {
         body: input.body,
         url,
         is_anonymous: input.is_anonymous,
-        is_nsfw: input.is_nsfw || community.is_nsfw,
+        // The automatic check adds the mature label to graphic posts the author didn't mark
+        is_nsfw: input.is_nsfw || community.is_nsfw || review.mature,
         flair_id: input.flair_id,
-        held_reason: await screenContent({ user, kind: 'post', title: input.title, body: input.body, url, communityId: community.id }),
+        held_reason: review.held_reason,
+        held_for_admins: review.held_for_admins,
         shadow_hidden: user.shadow_banned_at !== null,
     });
 
@@ -141,13 +144,14 @@ router.patch('/:id', requireAuth, async (request: AuthRequest, response) => {
 
     // An edit goes through the same checks as a new post, so a clean post can't be edited into a scam
     const bodyChanged = input.body !== undefined && input.body !== post.body;
-    let heldReason: string | null = null;
+    let review: Awaited<ReturnType<typeof reviewContent>> = { held_reason: null, held_for_admins: false, mature: false };
     if (bodyChanged) {
         assertLinksAllowed(user, [input.body!]);
         if (post.status === 'active') {
-            heldReason = await screenContent({ user, kind: 'post', body: input.body!, communityId: post.community_id });
+            review = await reviewContent({ user, kind: 'post', title: post.title, body: input.body!, communityId: post.community_id });
         }
     }
+    const heldReason = review.held_reason;
 
     const [updated] = await prisma.$transaction([
         prisma.post.update({
@@ -155,8 +159,9 @@ router.patch('/:id', requireAuth, async (request: AuthRequest, response) => {
             data: {
                 ...(bodyChanged ? { body: input.body, edited_at: new Date() } : {}),
                 ...(input.is_nsfw !== undefined ? { is_nsfw: input.is_nsfw } : {}),
+                ...(review.mature ? { is_nsfw: true } : {}),
                 ...(input.flair_id !== undefined ? { flair_id: input.flair_id } : {}),
-                ...(heldReason ? { status: 'pending' as const, held_reason: heldReason, pinned_at: null } : {}),
+                ...(heldReason ? { status: 'pending' as const, held_reason: heldReason, held_for_admins: review.held_for_admins, pinned_at: null } : {}),
             },
             include: postInclude,
         }),
@@ -247,13 +252,15 @@ router.post('/:id/comments', requireAuth, async (request: AuthRequest, response)
     assertLinksAllowed(user, [input.body]);
     await assertWithinYoungAccountLimits(user, 'comment');
 
+    const review = await reviewContent({ user, kind: 'comment', body: input.body, postId: post.id });
     const comment = await createComment({
         postId: post.id,
         authorId: user.id,
         body: input.body,
         parentId: input.parent_id,
         isAnonymous: input.is_anonymous,
-        heldReason: await screenContent({ user, kind: 'comment', body: input.body, postId: post.id }),
+        heldReason: review.held_reason,
+        heldForAdmins: review.held_for_admins,
         shadowHidden: user.shadow_banned_at !== null,
     });
     track('comment_created', user.id, { reply: Boolean(input.parent_id), anonymous: input.is_anonymous, held: comment.status === 'pending' });
