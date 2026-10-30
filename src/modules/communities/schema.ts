@@ -6,6 +6,9 @@ const rules = z
     .array(z.object({ title: z.string().trim().min(1).max(100), description: z.string().trim().max(500).default('') }))
     .max(15);
 
+// One of the twelve drawn icons the web app serves itself
+const DEFAULT_ICON = /^\/community-icons\/(?:[1-9]|1[0-2])\.svg$/;
+
 export const createCommunitySchema = z.object({
     name: communityName,
     display_name: z.string().trim().max(50).optional(),
@@ -23,7 +26,7 @@ export const updateCommunitySchema = z
         name_styled: z.string().trim().max(LIMITS.COMMUNITY_NAME_MAX).nullable().optional(),
         description: z.string().trim().max(LIMITS.COMMUNITY_DESCRIPTION_MAX).nullable().optional(),
         // Icon and banner: uploaded through POST /v1/images, so they're our own stored files
-        image_url: z.string().trim().max(LIMITS.URL_MAX).refine(isStoredMedia, 'Upload the picture first').nullable().optional(),
+        image_url: z.string().trim().max(LIMITS.URL_MAX).refine((url) => isStoredMedia(url) || DEFAULT_ICON.test(url), 'Upload the picture first').nullable().optional(),
         banner_url: z.string().trim().max(LIMITS.URL_MAX).refine(isStoredMedia, 'Upload the picture first').nullable().optional(),
         visibility: z.enum(['public', 'private']).optional(),
         is_nsfw: z.boolean().optional(),
