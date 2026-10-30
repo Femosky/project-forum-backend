@@ -13,7 +13,7 @@ export const LIMITS = {
     COMMUNITY_DESCRIPTION_MAX: 500,
     USERNAME_MIN: 3,
     USERNAME_MAX: 20,
-    PASSWORD_MIN: 8,
+    PASSWORD_MIN: 10,
     PASSWORD_MAX: 128,
     DISPLAY_NAME_MAX: 30,
     URL_MAX: 2048,
@@ -50,7 +50,10 @@ export const communityRef = z
 
 export const email = z.string().trim().toLowerCase().max(254).pipe(z.email());
 
-export const password = z.string().min(LIMITS.PASSWORD_MIN).max(LIMITS.PASSWORD_MAX);
+export const password = z
+    .string()
+    .min(LIMITS.PASSWORD_MIN, `Use at least ${LIMITS.PASSWORD_MIN} characters`)
+    .max(LIMITS.PASSWORD_MAX, `Use at most ${LIMITS.PASSWORD_MAX} characters`);
 
 export const title = z.string().trim().min(LIMITS.TITLE_MIN).max(LIMITS.TITLE_MAX);
 export const postBody = z.string().trim().max(LIMITS.POST_BODY_MAX);

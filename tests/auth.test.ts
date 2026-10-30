@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import app from '../src/app';
 import prisma from '../src/prismaConnection';
+import { isBreached } from '../src/modules/auth/passwordPolicy';
 import { api, cookieValue, lastEmailToken, PASSWORD, signUp } from './helpers';
 
 // Regression tests for roadmap bugs 11-14, plus the v2 auth flow
@@ -205,5 +207,40 @@ describe('request ids', () => {
 
         const generated = await api().get('/v1/health').set('X-Request-Id', 'bad id with spaces');
         expect(generated.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
+    });
+});
+
+describe('password rules', () => {
+    it('refuses short passwords and ones built from the username or email', async () => {
+        const short = await api().post('/v1/auth/signup').send({ email: 'ada@example.test', username: 'ada', password: 'Short-1', is_adult: true });
+        expect(short.body.error.fields.password).toMatch(/at least 10/);
+        const personal = await api()
+            .post('/v1/auth/signup')
+            .send({ email: 'ada.obi@example.test', username: 'adaobi', password: 'my-Adaobi-2026', is_adult: true });
+        expect(personal.status).toBe(400);
+        expect(personal.body.error.code).toBe('weak_password');
+    });
+
+    it('checks breaches by hash prefix only and allows the password when the service is down', async () => {
+        const sha1 = createHash('sha1').update('password123').digest('hex').toUpperCase();
+        let asked = '';
+        const fake = (async (url: string) => {
+            asked = url;
+            return new Response(`${sha1.slice(5)}:12345\r\nABCDEF0123456789ABCDEF0123456789ABC:0`);
+        }) as unknown as typeof fetch;
+        expect(await isBreached('password123', fake)).toBe(true);
+        expect(asked.endsWith(`/range/${sha1.slice(0, 5)}`)).toBe(true);
+        expect(await isBreached('a-much-rarer-password', fake)).toBe(false);
+        const down = (async () => {
+            throw new Error('offline');
+        }) as unknown as typeof fetch;
+        expect(await isBreached('password123', down)).toBe(false);
+    });
+
+    it('answers username checks with the format rule or whether it is taken', async () => {
+        await signUp('alice');
+        expect((await api().get('/v1/auth/username-available?username=Alice')).body).toMatchObject({ available: false, reason: 'That username is taken' });
+        expect((await api().get('/v1/auth/username-available?username=1ab')).body.available).toBe(false);
+        expect((await api().get('/v1/auth/username-available?username=new_person')).body).toEqual({ available: true });
     });
 });
