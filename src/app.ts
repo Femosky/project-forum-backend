@@ -21,6 +21,7 @@ import searchRoutes from './modules/search/routes';
 import moderationRoutes from './modules/moderation/routes';
 import moderationTeamRoutes from './modules/moderation/team';
 import notificationRoutes from './modules/notifications/routes';
+import emailRoutes from './modules/notifications/unsubscribe';
 import seoRoutes from './modules/seo/routes';
 import adminRoutes from './modules/admin/routes';
 import { auditRoutes, staffAuthRoutes, staffRoutes } from './modules/staff/routes';
@@ -117,6 +118,7 @@ v1.use('/search', searchRoutes);
 v1.use('/trending', trendingRoutes);
 v1.use('/images', imageRoutes);
 v1.use('/notifications', notificationRoutes);
+v1.use('/email', emailRoutes);
 v1.use('/seo', seoRoutes);
 // The admin panel: staff sign-in first (it limits failed attempts itself: staff/routes.ts), then everything else needs a
 // staff session

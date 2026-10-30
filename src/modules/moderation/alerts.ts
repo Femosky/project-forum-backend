@@ -1,11 +1,10 @@
-import { createHmac } from 'node:crypto';
 import { NotificationType } from '@prisma/client';
 import prisma from '../../prismaConnection';
 import { env } from '../../config/env';
-import { defineScheduledJob } from '../../lib/jobs';
+import { defineScheduledJob, onJobsWake } from '../../lib/jobs';
 import { linkEmail } from '../../lib/email';
 import logger from '../../lib/logger';
-import { safeEqual } from '../../lib/tokens';
+import { unsubscribeHeaders, unsubscribeLink } from '../../lib/emailTokens';
 import { emailJob } from '../auth/jobs';
 
 // Telling moderators something is waiting. In the app: one unread notification per community and kind, with a running
@@ -41,21 +40,6 @@ export async function alertModerators(communityId: string, type: NotificationTyp
     await recordAlert(communityId, type).catch((error) => logger.error({ err: error, communityId, type }, 'Moderator alert failed'));
 }
 
-// The email's unsubscribe link works without signing in, so it carries a signature instead
-const signature = (payload: string) => createHmac('sha256', env.JWT_SECRET).update(`mod-email:${payload}`).digest('base64url');
-
-export function unsubscribeToken(userId: string, communityId: string) {
-    const payload = Buffer.from(`${userId}:${communityId}`).toString('base64url');
-    return `${payload}.${signature(payload)}`;
-}
-
-export function readUnsubscribeToken(token: string) {
-    const [payload, given] = token.split('.');
-    if (!payload || !given || !safeEqual(given, signature(payload))) return null;
-    const [userId, communityId] = Buffer.from(payload, 'base64url').toString().split(':');
-    return userId && communityId ? { userId, communityId } : null;
-}
-
 export async function sendModeratorEmails(now = new Date()) {
     const rows = await prisma.notification.findMany({
         where: { type: { in: ALERT_TYPES }, read_at: null, community_id: { not: null } },
@@ -88,16 +72,18 @@ export async function sendModeratorEmails(now = new Date()) {
         if (!group.some((row) => row.created_at.getTime() > lastSent)) continue;
 
         const summary = group.map((row) => `${row.count} ${DESCRIBE[row.type]}`).join(', ');
-        await emailJob.enqueue(
-            linkEmail(
+        const action = { kind: 'mod', userId: user_id, ref: communityId };
+        await emailJob.enqueue({
+            ...linkEmail(
                 user.email,
                 `c/${community!.name}: ${summary}`,
                 `Waiting for you in c/${community!.name}: ${summary}.`,
                 'Open mod tools',
                 `${env.WEB_URL}/c/${community!.name}/mod`,
-                `Stop these emails for this community: ${env.WEB_URL}/unsubscribe?token=${unsubscribeToken(user_id, communityId)}`
-            )
-        );
+                `Stop these emails for this community: ${unsubscribeLink(action)}`
+            ),
+            headers: unsubscribeHeaders(action),
+        });
         await prisma.modEmailSetting.upsert({
             where: { community_id_user_id: { community_id: communityId, user_id } },
             create: { community_id: communityId, user_id, last_sent_at: now },
@@ -107,3 +93,4 @@ export async function sendModeratorEmails(now = new Date()) {
 }
 
 export const moderatorEmailJob = defineScheduledJob('moderation.emails', '*/10 * * * *', () => sendModeratorEmails());
+onJobsWake('moderator-emails', () => sendModeratorEmails());

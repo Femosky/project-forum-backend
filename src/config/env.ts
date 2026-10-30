@@ -37,6 +37,11 @@ const envSchema = z.object({
     // Checks new passwords against Have I Been Pwned (only a hash prefix is sent; allowed if the service is down)
     PASSWORD_BREACH_CHECK: booleanFlag(true),
 
+    // Web push. Without the keys it stays off. Generate with: npx web-push generate-vapid-keys
+    VAPID_PUBLIC_KEY: z.string().optional(),
+    VAPID_PRIVATE_KEY: z.string().optional(),
+    VAPID_SUBJECT: z.string().default('mailto:hello@forum.oskeylabs.com'),
+
     // Email (Resend). Without a key, emails are logged instead of sent.
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().default('Project Forum <no-reply@forum.oskeylabs.com>'),

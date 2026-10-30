@@ -46,6 +46,12 @@ services:
         sync: false
       - key: EMAIL_FROM
         sync: false
+      - key: API_URL
+        value: https://api.forum.oskeylabs.com
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: TURNSTILE_SECRET_KEY

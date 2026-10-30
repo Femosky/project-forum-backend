@@ -180,6 +180,11 @@ model User {
   // Shadow-banned accounts see their own posts and comments; nobody else does (see shadow_hidden on content)
   shadow_banned_at         DateTime?
   notification_preferences Json?
+  last_reply_email_at      DateTime?
+  digest_last_sent_at      DateTime?
+  // Digests sent in a row with no visit afterwards
+  digest_unopened          Int       @default(0)
+  last_trending_push_at    DateTime?
 
   sessions            Session[]
   verification_tokens VerificationToken[]
@@ -194,6 +199,7 @@ model User {
   created_communities Community[]            @relation("created_communities")
   memberships         CommunityMember[]
   join_requests       CommunityJoinRequest[] @relation("join_requester")
+  push_subscriptions  PushSubscription[]
   mod_invites         ModInvite[]            @relation("mod_invitee")
   mod_invites_sent    ModInvite[]            @relation("mod_inviter")
   mod_email_settings  ModEmailSetting[]
@@ -792,6 +798,20 @@ model AdDailyStat {
  * Notifications
  */
 
+// A browser that said yes to notifications
+model PushSubscription {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  created_at DateTime @default(now())
+
+  user_id  String @db.Uuid
+  user     User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  endpoint String @unique
+  p256dh   String
+  auth     String
+
+  @@index([user_id])
+}
+
 enum ModPermission {
   all
   posts
@@ -877,7 +897,8 @@ model Notification {
   community    Community? @relation(fields: [community_id], references: [id], onDelete: Cascade)
   count        Int        @default(1)
 
-  read_at DateTime?
+  read_at    DateTime?
+  emailed_at DateTime?
 
   @@unique([user_id, comment_id])
   @@index([user_id, created_at(sort: Desc), id(sort: Desc)])

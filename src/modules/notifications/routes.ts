@@ -9,6 +9,10 @@ import { READABLE_POST_WHERE } from '../../lib/serializers';
 import { AuthRequest, requireAuth, viewerOf } from '../../middlewares/auth';
 import { pageQuery } from '../../shared/validation';
 
+import { env } from '../../config/env';
+import { preferencesOf, preferencesSchema } from './preferences';
+import { pushEnabled } from './push';
+
 const router = Router();
 
 const readSchema = z.object({ ids: z.array(z.uuid()).max(100).optional() });
@@ -62,6 +66,45 @@ router.get('/', requireAuth, async (request: AuthRequest, response) => {
     });
     const { items, next_cursor } = paginate(rows, query.limit, 'created_at');
     response.json({ notifications: items.map(toPublicNotification), next_cursor, unread_count: await unreadCount(user.id) });
+});
+
+router.get('/settings', requireAuth, async (request: AuthRequest, response) => {
+    const { user } = viewerOf(request);
+    const { digest_hidden, ...settings } = preferencesOf(user);
+    response.json({ settings, hidden_communities: digest_hidden });
+});
+
+router.put('/settings', requireAuth, async (request: AuthRequest, response) => {
+    const { user } = viewerOf(request);
+    const input = parse(preferencesSchema.partial(), request.body);
+    const notification_preferences = { ...preferencesOf(user), ...input };
+    // Choosing to keep getting the digest restarts it
+    await prisma.user.update({ where: { id: user.id }, data: { notification_preferences, ...(input.digest && input.digest !== 'off' ? { digest_unopened: 0 } : {}) } });
+    response.json({ settings: notification_preferences });
+});
+
+router.get('/push-key', (request, response) => {
+    response.json({ key: pushEnabled() ? env.VAPID_PUBLIC_KEY : null });
+});
+
+const pushSchema = z.object({ endpoint: z.url().max(1000), keys: z.object({ p256dh: z.string().max(200), auth: z.string().max(100) }) });
+
+router.post('/push', requireAuth, async (request: AuthRequest, response) => {
+    const { user } = viewerOf(request);
+    const { endpoint, keys } = parse(pushSchema, request.body);
+    await prisma.pushSubscription.upsert({
+        where: { endpoint },
+        create: { user_id: user.id, endpoint, p256dh: keys.p256dh, auth: keys.auth },
+        update: { user_id: user.id, p256dh: keys.p256dh, auth: keys.auth },
+    });
+    response.status(201).json({ success: true });
+});
+
+router.delete('/push', requireAuth, async (request: AuthRequest, response) => {
+    const { user } = viewerOf(request);
+    const { endpoint } = parse(z.object({ endpoint: z.url().max(1000) }), request.body);
+    await prisma.pushSubscription.deleteMany({ where: { endpoint, user_id: user.id } });
+    response.json({ success: true });
 });
 
 // Polled by the bell in the header, so it stays a single indexed count

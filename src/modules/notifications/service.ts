@@ -1,5 +1,7 @@
 import { NotificationType } from '@prisma/client';
 import prisma from '../../prismaConnection';
+import { env } from '../../config/env';
+import { pushForComment } from './push';
 import { logger } from '../../lib/logger';
 
 // u/name or @name, not inside a word or a URL path. Capped so one comment can't ping a crowd.
@@ -68,6 +70,20 @@ export async function notifyForComment(comment: NewComment) {
                 })),
             skipDuplicates: true,
         });
+
+        const post = await prisma.post.findUnique({
+            where: { id: comment.post_id },
+            select: { title: true, short_id: true, slug: true, community: { select: { name: true } } },
+        });
+        const anonymous = (await prisma.comment.findUnique({ where: { id: comment.id }, select: { is_anonymous: true, short_id: true, author: { select: { username: true } } } }))!;
+        const who = anonymous.is_anonymous ? 'Someone' : anonymous.author.username;
+        await pushForComment(
+            ids
+                .filter((id) => activeIds.has(id) && !blockedBy.has(id))
+                .map((id) => ({ userId: id, title: recipients.get(id) === 'mention' ? `${who} mentioned you` : `${who} replied to you` })),
+            comment.body.slice(0, 120),
+            `${env.WEB_URL}/c/${post!.community.name}/${post!.short_id}${post!.slug ? `/${post!.slug}` : ''}?comment=${anonymous.short_id}#c-${anonymous.short_id}`
+        );
     } catch (error) {
         logger.error({ err: error, commentId: comment.id }, 'Notification fan-out failed');
     }

@@ -1,7 +1,7 @@
 import { env } from '../config/env';
 import logger from './logger';
 
-export type Email = { to: string; subject: string; text: string; html?: string };
+export type Email = { to: string; subject: string; text: string; html?: string; headers?: Record<string, string> };
 
 // Emails "sent" without a Resend key, newest last. Lets tests and local dev read verification links.
 export const devOutbox: Email[] = [];
@@ -19,7 +19,7 @@ export async function sendEmail(email: Email) {
     const response = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from: env.EMAIL_FROM, to: [email.to], subject: email.subject, text: email.text, html: email.html }),
+        body: JSON.stringify({ from: env.EMAIL_FROM, to: [email.to], subject: email.subject, text: email.text, html: email.html, headers: email.headers }),
         signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) {
