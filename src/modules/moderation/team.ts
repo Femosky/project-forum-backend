@@ -11,7 +11,6 @@ import { username } from '../../shared/validation';
 import { emailJob } from '../auth/jobs';
 import { assertModerator, assertOwner, assertTeamManager, findCommunity, findMembership, isActiveMember } from '../communities/access';
 import { setOwner } from '../communities/ownership';
-import { readUnsubscribeToken } from './alerts';
 import { queueCount } from './queue';
 
 // A community's moderators (invite, permissions, remove, hand over ownership) and the page that lists everything a
@@ -26,7 +25,6 @@ const permissionSchema = z.object({ permission });
 const decisionSchema = z.object({ decision: z.enum(['accept', 'decline']) });
 const transferSchema = z.object({ username });
 const emailSchema = z.object({ frequency: z.enum(['instant', 'daily', 'off']) });
-const unsubscribeSchema = z.object({ token: z.string().min(10).max(300) });
 
 function log(actorId: string, communityId: string, action: string, targetId: string, details?: Record<string, string>) {
     return prisma.modAction.create({ data: { actor_id: actorId, community_id: communityId, action, target_type: 'user', target_id: targetId, details } });
@@ -105,21 +103,6 @@ router.post('/moderation/invites/:id', requireAuth, async (request: AuthRequest,
         log(user.id, invite.community_id, 'accept_mod_invite', user.id, { permission: invite.permission }),
     ]);
     response.json({ status: 'accepted' });
-});
-
-// From the link in an email, so no sign-in; the token says who and which community
-router.post('/moderation/email-unsubscribe', async (request, response) => {
-    const { token } = parse(unsubscribeSchema, request.body);
-    const reader = readUnsubscribeToken(token);
-    if (!reader) throw badRequest('This link is invalid.', 'invalid_token');
-    const community = await prisma.community.findUnique({ where: { id: reader.communityId }, select: { name: true } });
-    if (!community) throw badRequest('This link is invalid.', 'invalid_token');
-    await prisma.modEmailSetting.upsert({
-        where: { community_id_user_id: { community_id: reader.communityId, user_id: reader.userId } },
-        create: { community_id: reader.communityId, user_id: reader.userId, frequency: 'off' },
-        update: { frequency: 'off' },
-    });
-    response.json({ community: community.name });
 });
 
 router.put('/communities/:name/mod-email', requireAuth, async (request: AuthRequest, response) => {

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import prisma from '../src/prismaConnection';
 import { devOutbox } from '../src/lib/email';
-import { sendModeratorEmails, unsubscribeToken } from '../src/modules/moderation/alerts';
+import { emailToken } from '../src/lib/emailTokens';
+import { sendModeratorEmails } from '../src/modules/moderation/alerts';
 import { api, signUp } from './helpers';
 
 async function community(owner: Awaited<ReturnType<typeof signUp>>, name = 'lounge', visibility = 'public') {
@@ -107,9 +108,9 @@ describe('telling moderators', () => {
         expect(sent()).toBe(before + 2);
 
         // The unsubscribe link needs no sign-in and turns this community's emails off
-        const token = unsubscribeToken(alice.user.id, lounge.id);
-        expect((await api().post('/v1/moderation/email-unsubscribe').send({ token: `${token}x` })).status).toBe(400);
-        await api().post('/v1/moderation/email-unsubscribe').send({ token }).expect(200);
+        const token = emailToken({ kind: 'mod', userId: alice.user.id, ref: lounge.id });
+        expect((await api().post('/v1/email/unsubscribe').send({ token: `${token}x` })).status).toBe(400);
+        await api().post('/v1/email/unsubscribe').send({ token }).expect(200);
         await prisma.notification.updateMany({ where: { user_id: alice.user.id }, data: { created_at: new Date(Date.now() + 3 * 3600 * 1000) } });
         await sendModeratorEmails(new Date(Date.now() + 4 * 3600 * 1000));
         expect(sent()).toBe(before + 2);
