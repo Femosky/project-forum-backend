@@ -117,6 +117,7 @@ const userSelect = {
     role: true,
     status: true,
     karma: true,
+    is_trusted: true,
     created_at: true,
     last_login_at: true,
     email_verified_at: true,
@@ -179,6 +180,18 @@ router.post('/users/:username/unsuspend', requireStaff(...MODERATION), async (re
         select: userSelect,
     });
     await log(request, 'unsuspend_user', { type: 'user', id: user.id });
+    response.json({ user: updated });
+});
+
+const trustSchema = z.object({ trusted: z.boolean() });
+
+// Trusted accounts skip the new-account limits (links and pictures on the first day, hourly posting caps); every
+// content check still applies. For owners and admins only.
+router.post('/users/:username/trusted', requireStaff('owner', 'admin'), async (request, response) => {
+    const user = await findUser(String(request.params.username));
+    const { trusted } = parse(trustSchema, request.body);
+    const updated = await prisma.user.update({ where: { id: user.id }, data: { is_trusted: trusted }, select: userSelect });
+    await log(request, trusted ? 'trust_user' : 'untrust_user', { type: 'user', id: user.id });
     response.json({ user: updated });
 });
 

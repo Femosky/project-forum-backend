@@ -5,7 +5,7 @@ import { AuthRequest, requireAuth, viewerOf } from '../../middlewares/auth';
 import { communityRef } from '../../shared/validation';
 import { canModerate, findCommunity, viewerContext } from '../communities/access';
 import { MAX_IMAGE_BYTES, processUpload } from './service';
-import { canPostLinks } from '../safety/policy';
+import { assertPicturesAllowed } from '../safety/policy';
 
 // POST /v1/images?purpose=community_icon|community_banner&community=: the picture itself is the request body
 // (Content-Type image/jpeg, png, webp or gif). For that community's moderators. purpose=post_image: a picture for a
@@ -29,7 +29,7 @@ router.post('/', requireAuth, imageBody, async (request: AuthRequest, response) 
     if (query.purpose === 'post_image') {
         // Same rule as links: brand-new accounts wait a day (or until they have some reputation), which keeps scam
         // flyers out
-        if (!canPostLinks(user)) throw forbidden("New accounts can't post pictures yet. You can once your account is a day old.", 'new_account_pictures');
+        assertPicturesAllowed(user);
     } else {
         const community = await findCommunity(query.community);
         if (!canModerate(await viewerContext(request.viewer), community.id)) throw forbidden('Only moderators can change this.', 'not_moderator');

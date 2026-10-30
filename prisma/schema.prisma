@@ -167,6 +167,9 @@ model User {
   show_mature       Boolean   @default(false)
 
   karma          Int       @default(0)
+  // Marked trusted by the site's admins: skips the new-account limits (links and pictures on the first day, hourly
+  // posting caps). Every content check still applies. Shown in the admin panel only
+  is_trusted     Boolean   @default(false)
   last_login_at  DateTime?
   // Last request as a signed-in user, written at most every 15 minutes (lib/activity.ts)
   last_active_at DateTime?
