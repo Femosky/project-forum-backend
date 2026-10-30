@@ -10,6 +10,7 @@ import { COMMUNITY_CATEGORIES, LIMITS } from '../../shared/validation';
 import { closeReports } from '../moderation/queue';
 import { findCommunity } from '../communities/access';
 import { linkProblem } from './urls';
+import { needsLinkImage, refreshLinkImage } from './linkImage';
 import { isStoredMedia } from '../../lib/storage';
 import { campaignSpend, clearAdCache, readTargeting, targetingSchema } from './decision';
 
@@ -90,16 +91,30 @@ const createCampaignSchema = campaignFields
     .extend({ advertiser_id: z.uuid() });
 const updateCampaignSchema = campaignFields.partial();
 
+const focus = z.number().int().min(0).max(100);
 const creativeFields = z.object({
-    format: z.enum(['feed_post', 'thread_comment']),
+    format: z.enum(['feed_post', 'thread_comment', 'any']),
     headline: z.string().trim().min(3).max(120),
     body: optional(z.string().trim().max(500)),
     image_url: optional(imageUrl),
+    image_focus_x: focus,
+    image_focus_y: focus,
+    image_fit: z.enum(['cover', 'contain']),
+    use_link_image: z.boolean(),
     click_url: destinationUrl,
     cta_label: z.string().trim().min(2).max(24),
     is_active: z.boolean(),
 });
-const createCreativeSchema = creativeFields.partial({ body: true, image_url: true, cta_label: true, is_active: true });
+const createCreativeSchema = creativeFields.partial({
+    body: true,
+    image_url: true,
+    image_focus_x: true,
+    image_focus_y: true,
+    image_fit: true,
+    use_link_image: true,
+    cta_label: true,
+    is_active: true,
+});
 const updateCreativeSchema = creativeFields.partial();
 
 // Checks targeting names against real communities and categories, so a typo doesn't silently target nothing
@@ -265,7 +280,8 @@ router.patch('/campaigns/:id', async (request, response) => {
 router.post('/campaigns/:id/creatives', async (request, response) => {
     const campaign = await findCampaign(request.params.id);
     const input = parse(createCreativeSchema, request.body);
-    const creative = await prisma.adCreative.create({ data: { ...input, campaign_id: campaign.id } });
+    let creative = await prisma.adCreative.create({ data: { ...input, campaign_id: campaign.id } });
+    if (needsLinkImage(creative, true)) creative = await refreshLinkImage(creative.id, staffOf(request).id);
     clearAdCache();
     response.status(201).json({ creative });
 });
@@ -274,9 +290,25 @@ router.post('/campaigns/:id/creatives', async (request, response) => {
 router.patch('/creatives/:id', async (request, response) => {
     const id = uuidParam(request.params.id, 'Ad not found');
     const input = parse(updateCreativeSchema, request.body);
-    if (!(await prisma.adCreative.findUnique({ where: { id }, select: { id: true } }))) throw notFound('Ad not found');
-    const creative = await prisma.adCreative.update({ where: { id }, data: input });
+    const before = await prisma.adCreative.findUnique({ where: { id }, select: { click_url: true } });
+    if (!before) throw notFound('Ad not found');
+    const clickUrlChanged = input.click_url !== undefined && input.click_url !== before.click_url;
+    let creative = await prisma.adCreative.update({
+        where: { id },
+        // A new destination makes the old preview image wrong
+        data: clickUrlChanged ? { ...input, link_image_url: null, link_image_checked_at: null } : input,
+    });
+    if (needsLinkImage(creative, clickUrlChanged)) creative = await refreshLinkImage(id, staffOf(request).id);
     if (input.is_active === false) await closeReports('ad', id, 'resolved', { staffId: staffOf(request).id });
+    clearAdCache();
+    response.json({ creative });
+});
+
+// Looks for the destination's preview image again (the advertiser changed it, or the first try failed)
+router.post('/creatives/:id/link-image', async (request, response) => {
+    const id = uuidParam(request.params.id, 'Ad not found');
+    if (!(await prisma.adCreative.findUnique({ where: { id }, select: { id: true } }))) throw notFound('Ad not found');
+    const creative = await refreshLinkImage(id, staffOf(request).id);
     clearAdCache();
     response.json({ creative });
 });

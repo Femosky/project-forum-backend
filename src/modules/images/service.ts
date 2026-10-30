@@ -19,14 +19,13 @@ const ACCEPTED = new Set(['jpeg', 'png', 'webp', 'gif']);
 // Bigger than this in either direction is refused before decoding the whole thing
 const MAX_SOURCE_SIDE = 8000;
 
-// Output sizes per slot, largest first. Ratios match where they're shown, so the page reserves the right space.
-const VARIANTS: Record<ImagePurpose, { width: number; height: number }[]> = {
+// Output sizes per slot, largest first. Ratios match where they're shown, so the page reserves the right space. A
+// size without a height keeps the picture's own shape (fitted inside a square of that width).
+const VARIANTS: Record<ImagePurpose, { width: number; height?: number }[]> = {
     ad_logo: [{ width: 256, height: 256 }],
-    // The feed card's 1.91:1 picture
-    ad_image: [
-        { width: 1200, height: 628 },
-        { width: 600, height: 314 },
-    ],
+    // Ad pictures keep their shape: the card shows them in a 1.91:1 frame, cropped around the focal point the admin
+    // picks or shown whole (AdCreative.image_focus_x/y, image_fit), so nothing is cut off here
+    ad_image: [{ width: 1200 }, { width: 600 }],
     community_icon: [{ width: 256, height: 256 }],
     // 4:1 header banner
     community_banner: [
@@ -67,13 +66,17 @@ export async function processUpload(body: Buffer, purpose: ImagePurpose, uploade
     const variants = await Promise.all(
         VARIANTS[purpose].map(async ({ width, height }) => {
             // rotate() applies the EXIF orientation; WebP output carries no metadata
-            const output = await sharp(body, { animated: false })
+            const { data, info } = await sharp(body, { animated: false })
                 .rotate()
-                .resize(width, height, { fit: 'cover', position: 'attention', withoutEnlargement: false })
+                .resize(
+                    width,
+                    height ?? width,
+                    height ? { fit: 'cover', position: 'attention', withoutEnlargement: false } : { fit: 'inside', withoutEnlargement: true }
+                )
                 .webp({ quality: 82 })
-                .toBuffer();
-            const url = await putObject(`img/${purpose}/${id}-${width}.webp`, output, 'image/webp');
-            return { url, width, height };
+                .toBuffer({ resolveWithObject: true });
+            const url = await putObject(`img/${purpose}/${id}-${width}.webp`, data, 'image/webp');
+            return { url, width: info.width, height: info.height };
         })
     );
     logger.info({ purpose, uploaderId, bytes: body.length }, 'Image stored');

@@ -54,7 +54,8 @@ describe('image uploads', () => {
         expect((await alice.agent.post('/v1/admin/images?purpose=ad_logo').set('Content-Type', 'image/jpeg').send(body)).status).toBe(401);
         const logo = await admin.agent.post('/v1/admin/images?purpose=ad_image').set('Content-Type', 'image/jpeg').send(body);
         expect(logo.status).toBe(201);
-        expect(logo.body.image).toMatchObject({ width: 1200, height: 628 });
+        // Ad pictures keep their own shape (the card crops around a focal point instead)
+        expect(logo.body.image).toMatchObject({ width: 900, height: 600 });
     });
 });
 

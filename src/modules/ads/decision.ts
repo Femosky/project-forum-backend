@@ -2,6 +2,7 @@ import { AdFormat, CampaignKind, Community, Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { env } from '../../config/env';
 import prisma from '../../prismaConnection';
+import { adPicture } from './linkImage';
 import { onSitePath } from './urls';
 
 // The ad decision service: which ads fill the slots on a page. Priority order is direct campaigns that target
@@ -13,6 +14,8 @@ import { onSitePath } from './urls';
 export type AdPlacement = 'feed' | 'thread';
 
 export const FORMAT_FOR: Record<AdPlacement, AdFormat> = { feed: 'feed_post', thread: 'thread_comment' };
+// Ads made for both places run in either
+const runsIn = (format: AdFormat, placement: AdPlacement) => format === FORMAT_FOR[placement] || format === 'any';
 
 // Communities in these categories carry no ads unless an admin switches them on (mental health, grief)
 export const SENSITIVE_CATEGORIES = new Set(['health']);
@@ -37,6 +40,9 @@ type NativeCreative = {
     title: string;
     body: string | null;
     image_url: string | null;
+    // How the picture sits in its frame (see AdCreative): focal point in percent, and cover or contain
+    image_focus: { x: number; y: number };
+    image_fit: 'cover' | 'contain';
     cta_label: string;
     // Host shown on the card, or null when the ad leads to a page on this site (the card then shows the site's
     // name). The click itself goes through /v1/ads/click/:id either way.
@@ -114,7 +120,9 @@ async function loadLiveCreatives(): Promise<LiveCreative[]> {
                     advertiser_logo: campaign.advertiser.logo_url,
                     title: creative.headline,
                     body: creative.body,
-                    image_url: creative.image_url,
+                    image_url: adPicture(creative),
+                    image_focus: { x: creative.image_focus_x, y: creative.image_focus_y },
+                    image_fit: creative.image_fit,
                     cta_label: creative.cta_label,
                     display_url: hostOf(creative.click_url),
                 },
@@ -196,7 +204,7 @@ export async function decideAds({ placement, community, count, seen, random = Ma
     if (community && !communityAllowsAds(community)) return [];
 
     const candidates = (await liveCreatives())
-        .filter((creative) => creative.format === FORMAT_FOR[placement])
+        .filter((creative) => runsIn(creative.format, placement))
         .filter((creative) => matches(creative.targeting, community))
         .filter((creative) => creative.frequency_cap === null || (seen.get(creative.campaign_id) ?? 0) < creative.frequency_cap)
         // Shuffle first so campaigns with the same rank and priority take turns

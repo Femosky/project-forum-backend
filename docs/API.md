@@ -147,8 +147,9 @@ Roles: **owner** (everything, including staff accounts), **admin** (everything e
 | POST/PATCH | `/ads/advertisers`, `/ads/advertisers/:id` | `{ name, contact_email?, logo_url?, website?, notes? }` |
 | POST | `/ads/campaigns` | `{ advertiser_id, name, kind: direct\|house, status, starts_at?, ends_at?, targeting: { communities[], categories[] }, pricing_model: cpm\|flat, budget_minor?, price_minor?, currency, frequency_cap?, priority, house_share?, payment_url?, paid }`. Money is in minor units (kobo). Empty targeting runs everywhere. `house_share` (0-50, house campaigns): the percent of slots it wins even when paid campaigns want them, for promoting the site's own products |
 | GET/PATCH | `/ads/campaigns/:id` | GET adds creatives with totals and the last 30 days |
-| POST | `/ads/campaigns/:id/creatives` | `{ format: feed_post\|thread_comment, headline, body?, image_url? (https), click_url, cta_label? }` |
-| PATCH | `/ads/creatives/:id` | Same fields plus `is_active`. Pausing resolves open reports on the ad |
+| POST | `/ads/campaigns/:id/creatives` | `{ format: feed_post\|thread_comment\|any, headline, body?, image_url? (https), image_focus_x?, image_focus_y? (0-100, default 50), image_fit? (cover\|contain), use_link_image? (default true), click_url, cta_label? }`. `any` runs in feeds and between comments. With no `image_url` and `use_link_image`, the destination's preview image (og:image) is fetched, redrawn and stored as `link_image_url` |
+| PATCH | `/ads/creatives/:id` | Same fields plus `is_active`. Pausing resolves open reports on the ad. A new `click_url` looks for its preview image again |
+| POST | `/ads/creatives/:id/link-image` | Fetches the destination's preview image again; returns `{ creative }` (`link_image_url` null when there is none) |
 
 ## Ads `/v1/ads` (Phase 6)
 
@@ -161,7 +162,7 @@ Roles: **owner** (everything, including staff accounts), **admin** (everything e
 
 Self-promotion: a house campaign with `house_share` takes that percent of slots before paid campaigns (all shares together capped at 50%), still subject to frequency caps, targeting and brand safety; with 0 it only fills slots nobody paid for. The web app labels house ads "From us" instead of "Sponsored". Admin stats count paid (`ad_*`) and house (`house_*`) impressions and clicks separately.
 
-`AdUnit` is `{ kind: 'direct' \| 'house', id, campaign_id, frequency_cap, creative: { advertiser_name, advertiser_logo, title, body, image_url, cta_label, display_url } }` or `{ kind: 'adsense', id, client, slot_id, format: 'in-feed' \| 'in-article', layout_key }`. Settings: `ADS_ENABLED` (default on) is the master switch; `ADSENSE_ENABLED` plus `ADSENSE_CLIENT_ID`, `ADSENSE_FEED_SLOT`, `ADSENSE_FEED_LAYOUT_KEY` and `ADSENSE_THREAD_SLOT` turn AdSense on. Reports take `target_type: 'ad'` with the creative id; they go to the site queue.
+`AdUnit` is `{ kind: 'direct' \| 'house', id, campaign_id, frequency_cap, creative: { advertiser_name, advertiser_logo, title, body, image_url, image_focus: { x, y }, image_fit: 'cover' \| 'contain', cta_label, display_url } }` (`image_url` is the ad's own picture, else its stored preview image when switched on; pictures keep their own shape and cards frame them at 1.91:1) or `{ kind: 'adsense', id, client, slot_id, format: 'in-feed' \| 'in-article', layout_key }`. Settings: `ADS_ENABLED` (default on) is the master switch; `ADSENSE_ENABLED` plus `ADSENSE_CLIENT_ID`, `ADSENSE_FEED_SLOT`, `ADSENSE_FEED_LAYOUT_KEY` and `ADSENSE_THREAD_SLOT` turn AdSense on. Reports take `target_type: 'ad'` with the creative id; they go to the site queue.
 
 ## Users and search
 
