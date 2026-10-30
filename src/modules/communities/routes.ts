@@ -245,7 +245,7 @@ router.put('/:name/membership', requireAuth, async (request: AuthRequest, respon
             create: { community_id: community.id, user_id: user.id, message: input.message ?? null },
             update: { status: 'pending', message: input.message ?? null, responded_by: null, responded_at: null },
         });
-        alertModerators(community.id, 'mod_join_request');
+        await alertModerators(community.id, 'mod_join_request');
         return response.status(202).json({ status: 'requested' });
     }
 

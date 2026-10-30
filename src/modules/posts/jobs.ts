@@ -59,7 +59,7 @@ export const linkPreviewJob = defineJob<{ postId: string; url: string }>(
                         ? [prisma.community.update({ where: { id: post.community_id }, data: { post_count: { decrement: 1 } } })]
                         : []),
                 ]);
-                if (wasListed && verdict.action === 'hold') alertModerators(post.community_id, 'mod_queue');
+                if (wasListed && verdict.action === 'hold') await alertModerators(post.community_id, 'mod_queue');
                 return;
             }
             await prisma.post.update({

@@ -23,7 +23,7 @@ async function recordAlert(communityId: string, type: NotificationType) {
         select: { user_id: true, role: true, mod_permission: true },
     });
     // Posts-only moderators don't handle join requests
-    const recipients = moderators.filter((mod) => type !== 'mod_join_request' || mod.role === 'owner' || mod.mod_permission === 'all').map((mod) => mod.user_id);
+    const recipients = moderators.filter((mod) => type !== 'mod_join_request' || mod.role === 'owner' || mod.mod_permission !== 'posts').map((mod) => mod.user_id);
     if (!recipients.length) return;
     const where = { community_id: communityId, type, read_at: null, user_id: { in: recipients } };
     const open = await prisma.notification.findMany({ where, select: { user_id: true } });
@@ -37,8 +37,8 @@ async function recordAlert(communityId: string, type: NotificationType) {
 }
 
 // Never holds up or fails what triggered it
-export function alertModerators(communityId: string, type: NotificationType) {
-    recordAlert(communityId, type).catch((error) => logger.error({ err: error, communityId, type }, 'Moderator alert failed'));
+export async function alertModerators(communityId: string, type: NotificationType) {
+    await recordAlert(communityId, type).catch((error) => logger.error({ err: error, communityId, type }, 'Moderator alert failed'));
 }
 
 // The email's unsubscribe link works without signing in, so it carries a signature instead

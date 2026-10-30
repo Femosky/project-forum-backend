@@ -4,7 +4,10 @@ import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
 import { badRequest, conflict, notFound, parse, uuidParam } from '../../lib/http';
-import { LIMITS, pageQuery } from '../../shared/validation';
+import { SITE_ACCOUNT_USERNAME } from '../../shared/site';
+import { LIMITS, pageQuery, username as usernameField } from '../../shared/validation';
+import { findCommunity } from '../communities/access';
+import { handOverOwnership, setOwner } from '../communities/ownership';
 import { revokeAllSessions } from '../auth/service';
 import { buildQueue, queueCount } from '../moderation/queue';
 import { commentActionSchema, moderateComment, moderatePost, postActionSchema, resolveReport, resolveSchema } from '../moderation/routes';
@@ -167,6 +170,8 @@ router.post('/users/:username/suspend', requireStaff(...MODERATION), async (requ
         select: userSelect,
     });
     await revokeAllSessions(user.id);
+    // Permanent or a month or more: their communities shouldn't wait for them
+    if (!until || (input.days ?? 0) >= 30) await handOverOwnership(user.id);
     await log(request, 'suspend_user', { type: 'user', id: user.id }, { reason: input.reason, details: { until: until?.toISOString() ?? null } });
     response.json({ user: updated });
 });
@@ -255,10 +260,25 @@ router.get('/communities', requireStaff(...MODERATION), async (request, response
             ads_enabled: true,
             member_count: true,
             post_count: true,
+            needs_moderator: true,
             created_at: true,
         },
     });
     response.json({ communities });
+});
+
+// Gives any community a new owner. The old one stays as a moderator; the site's own account just steps aside.
+router.post('/communities/:name/owner', requireStaff('owner', 'admin'), async (request, response) => {
+    const { username } = parse(z.object({ username: usernameField }), request.body);
+    const community = await findCommunity(String(request.params.name));
+    const target = await prisma.user.findUnique({ where: { username } });
+    if (!target || target.status !== 'active') throw notFound('No active account has that username.', 'user_not_found');
+    const owner = await prisma.communityMember.findFirst({ where: { community_id: community.id, role: 'owner' }, select: { user: { select: { username: true } } } });
+    await setOwner(community.id, target.id, {
+        previousRole: owner?.user.username === SITE_ACCOUNT_USERNAME ? 'member' : 'moderator',
+    });
+    await log(request, 'reassign_owner', { type: 'community', id: community.id }, { communityId: community.id, details: { owner: target.username } });
+    response.json({ owner: target.username });
 });
 
 // A takedown hides the community and everything in it (its pages answer 410 to crawlers); restore undoes it

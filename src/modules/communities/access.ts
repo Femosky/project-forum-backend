@@ -96,8 +96,17 @@ export async function assertModerator(communityId: string, user: User) {
 // Everything but the queue and reports: bans, mutes, join requests, settings. Posts-only moderators can't do these.
 export async function assertFullModerator(communityId: string, user: User) {
     const member = await assertModerator(communityId, user);
-    if (member && member.role === 'moderator' && member.mod_permission !== 'all') {
+    if (member && member.role === 'moderator' && member.mod_permission === 'posts') {
         throw forbidden('Your moderator role covers posts only.', 'posts_only_moderator');
+    }
+    return member;
+}
+
+// Inviting, changing and removing moderators: the owner and Lead mods
+export async function assertTeamManager(communityId: string, user: User) {
+    const member = await assertModerator(communityId, user);
+    if (member && member.role === 'moderator' && member.mod_permission !== 'lead') {
+        throw forbidden('Only the owner and Lead mods can do that.', 'not_lead_moderator');
     }
     return member;
 }

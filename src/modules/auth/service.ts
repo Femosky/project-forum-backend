@@ -10,6 +10,7 @@ import { hashToken, randomToken, safeEqual } from '../../lib/tokens';
 import { linkEmail } from '../../lib/email';
 import { emailJob } from './jobs';
 import { trustFlags } from '../safety/policy';
+import { SITE_ACCOUNT_USERNAME } from '../../shared/site';
 import {
     formatRefreshToken,
     newRefreshSecret,
@@ -162,6 +163,7 @@ export async function findUserByIdentifier(identifier: string) {
 }
 
 export async function assertAvailable(email: string, username: string) {
+    if (username === SITE_ACCOUNT_USERNAME) throw conflict('That username is taken.', 'username_taken');
     const taken = await prisma.user.findFirst({
         where: { OR: [{ email }, { username }] },
         select: { email: true, username: true },

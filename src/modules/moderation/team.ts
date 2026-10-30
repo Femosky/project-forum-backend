@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { User } from '@prisma/client';
+import { CommunityMember, ModPermission, User } from '@prisma/client';
 import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { env } from '../../config/env';
@@ -9,16 +9,18 @@ import { avatarCode } from '../../lib/avatars';
 import { AuthRequest, requireAuth, viewerOf } from '../../middlewares/auth';
 import { username } from '../../shared/validation';
 import { emailJob } from '../auth/jobs';
-import { assertModerator, assertOwner, findCommunity, findMembership, isActiveMember } from '../communities/access';
+import { assertModerator, assertOwner, assertTeamManager, findCommunity, findMembership, isActiveMember } from '../communities/access';
+import { setOwner } from '../communities/ownership';
 import { readUnsubscribeToken } from './alerts';
 import { queueCount } from './queue';
 
 // A community's moderators (invite, permissions, remove, hand over ownership) and the page that lists everything a
-// person moderates. The owner runs the team; each step goes into the mod log.
+// person moderates. The owner and Lead mods run the team, only the owner makes Lead mods or hands over the community,
+// and each step goes into the mod log.
 
 const router = Router();
 
-const permission = z.enum(['all', 'posts']);
+const permission = z.enum(['lead', 'all', 'posts']);
 const inviteSchema = z.object({ username, permission: permission.default('all') });
 const permissionSchema = z.object({ permission });
 const decisionSchema = z.object({ decision: z.enum(['accept', 'decline']) });
@@ -28,6 +30,11 @@ const unsubscribeSchema = z.object({ token: z.string().min(10).max(300) });
 
 function log(actorId: string, communityId: string, action: string, targetId: string, details?: Record<string, string>) {
     return prisma.modAction.create({ data: { actor_id: actorId, community_id: communityId, action, target_type: 'user', target_id: targetId, details } });
+}
+
+// Lead is the owner's to give and take away (a null manager is a site admin)
+function assertMayGrant(manager: CommunityMember | null, level: ModPermission) {
+    if (level === 'lead' && manager?.role === 'moderator') throw forbidden('Only the owner can do that for a Lead mod.', 'not_owner');
 }
 
 async function findTarget(communityId: string, name: string) {
@@ -63,7 +70,7 @@ router.get('/moderation/overview', requireAuth, async (request: AuthRequest, res
                 role,
                 permission: permissionShown,
                 queue,
-                join_requests: permissionShown === 'all' ? join_requests : 0,
+                join_requests: permissionShown === 'posts' ? 0 : join_requests,
                 email: settings.find((row) => row.community_id === id)?.frequency ?? 'daily',
             };
         })
@@ -158,8 +165,9 @@ router.get('/communities/:name/team', requireAuth, async (request: AuthRequest, 
 router.post('/communities/:name/team/invites', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const community = await findCommunity(String(request.params.name));
-    await assertOwner(community.id, user);
+    const manager = await assertTeamManager(community.id, user);
     const input = parse(inviteSchema, request.body);
+    assertMayGrant(manager, input.permission);
     const { target, member } = await findTarget(community.id, input.username);
     if (!target || target.status !== 'active') throw notFound('No one has that username.', 'user_not_found');
     if (isActiveMember(member) && member.role !== 'member') throw conflict('They are already a moderator here.', 'already_moderator');
@@ -189,7 +197,7 @@ router.post('/communities/:name/team/invites', requireAuth, async (request: Auth
 router.delete('/communities/:name/team/invites/:id', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const community = await findCommunity(String(request.params.name));
-    await assertOwner(community.id, user);
+    await assertTeamManager(community.id, user);
     const invite = await prisma.modInvite.findFirst({ where: { id: uuidParam(request.params.id, 'Invitation not found'), community_id: community.id, status: 'pending' } });
     if (!invite) throw notFound('Invitation not found');
     await prisma.$transaction([
@@ -203,10 +211,12 @@ router.delete('/communities/:name/team/invites/:id', requireAuth, async (request
 router.patch('/communities/:name/team/:username', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const community = await findCommunity(String(request.params.name));
-    await assertOwner(community.id, user);
+    const manager = await assertTeamManager(community.id, user);
     const input = parse(permissionSchema, request.body);
     const { target, member } = await findTarget(community.id, String(request.params.username));
     if (!target || !isActiveMember(member) || member.role !== 'moderator') throw notFound('They are not a moderator here.', 'not_moderator');
+    assertMayGrant(manager, input.permission);
+    assertMayGrant(manager, member.mod_permission);
     await prisma.$transaction([
         prisma.communityMember.update({
             where: { community_id_user_id: { community_id: community.id, user_id: target.id } },
@@ -232,8 +242,9 @@ router.delete('/communities/:name/team/:username', requireAuth, async (request: 
     const { user } = viewerOf(request);
     const community = await findCommunity(String(request.params.name));
     const { target, member } = await findTarget(community.id, String(request.params.username));
-    if (target?.id !== user.id) await assertOwner(community.id, user);
+    const manager = target?.id === user.id ? null : await assertTeamManager(community.id, user);
     if (!target || !isActiveMember(member) || member.role !== 'moderator') throw notFound('They are not a moderator here.', 'not_moderator');
+    if (target.id !== user.id) assertMayGrant(manager, member.mod_permission);
     await stepDown(user, community.id, target);
     response.json({ success: true });
 });
@@ -245,14 +256,7 @@ router.post('/communities/:name/transfer', requireAuth, async (request: AuthRequ
     const input = parse(transferSchema, request.body);
     const { target, member } = await findTarget(community.id, input.username);
     if (!target || !isActiveMember(member) || member.role !== 'moderator') throw badRequest('Ownership can only go to a current moderator.', 'not_moderator');
-    await prisma.$transaction([
-        prisma.communityMember.updateMany({ where: { community_id: community.id, role: 'owner' }, data: { role: 'moderator', mod_permission: 'all' } }),
-        prisma.communityMember.update({
-            where: { community_id_user_id: { community_id: community.id, user_id: target.id } },
-            data: { role: 'owner', mod_permission: 'all' },
-        }),
-        log(user.id, community.id, 'transfer_ownership', target.id),
-    ]);
+    await setOwner(community.id, target.id, { action: 'transfer_ownership', actorId: user.id });
     response.json({ owner: target.username });
 });
 

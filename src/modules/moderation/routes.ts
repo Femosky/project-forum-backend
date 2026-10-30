@@ -91,7 +91,7 @@ router.post('/reports', requireAuth, async (request: AuthRequest, response) => {
         },
         update: { reason_code: input.reason_code, note: input.note ?? null },
     });
-    if (communityId) alertModerators(communityId, 'mod_report');
+    if (communityId) await alertModerators(communityId, 'mod_report');
     response.status(201).json({ success: true });
 });
 
