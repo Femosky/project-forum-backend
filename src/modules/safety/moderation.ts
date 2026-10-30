@@ -1,15 +1,18 @@
 import { env } from '../../config/env';
 import logger from '../../lib/logger';
 
-// Automatic content checks with OpenAI's moderation endpoint (omni-moderation-latest: free, text and pictures).
-// The site's rule: no porn or explicit sexual content anywhere, NSFW communities included. "NSFW" here only means
-// mature (graphic news, sexual health, strong language). So:
-//   - sexual content involving minors: blocked outright, held for the admins with a warning, never published;
+// Automatic content checks. The site's rule: no porn or explicit sexual content anywhere, NSFW communities included;
+// "NSFW" only means mature (graphic news, sexual health, strong language).
+//
+// The checks that always run are the site's own, with no outside service: text against explicit-term lists
+// (textCheck.ts) and pictures with an open-source classifier inside the API (imageCheck.ts). This file adds an
+// optional extra layer, OpenAI's free moderation endpoint (omni-moderation-latest), which only runs when
+// OPENAI_API_KEY is set. Off by default. When it runs:
+//   - sexual content involving minors: held for the admins with a warning, never published;
 //   - sexual content: held for the admins (community moderators can't approve it);
 //   - severe violence, self-harm intent or instructions, threats: held for the community's moderators;
 //   - graphic violence or self-harm talk short of that: published, with the mature (NSFW) label added.
-// It fails open: with no OPENAI_API_KEY, or when the service is slow or down, content publishes as before and a
-// log line says so. The other filters (modules/safety/filters.ts) still apply either way.
+// It fails open: when the service is slow or down, the site's own checks decide alone.
 
 const ENDPOINT = 'https://api.openai.com/v1/moderations';
 const TIMEOUT_MS = 4_000;
@@ -22,18 +25,14 @@ export type Verdict =
     | { action: 'hold'; reason: string }
     | { action: 'hold_for_admins'; reason: string };
 
-let warnedNoKey = false;
-
 // Category scores (0 to 1) for some text and pictures, or null when the check couldn't run
 export async function moderationScores(input: { text?: string; imageUrls?: string[] }): Promise<ModerationScores | null> {
     const text = input.text?.trim();
-    const images = (input.imageUrls ?? []).filter((url) => url.startsWith('https://'));
+    // Public https addresses (OpenAI fetches them) or inline pictures (data:image/...), e.g. an upload before it's stored
+    const images = (input.imageUrls ?? []).filter((url) => url.startsWith('https://') || url.startsWith('data:image/'));
     if (!text && images.length === 0) return null;
-    if (!env.OPENAI_API_KEY) {
-        if (!warnedNoKey) logger.warn('OPENAI_API_KEY is not set, so posts, comments and pictures are not checked automatically');
-        warnedNoKey = true;
-        return null;
-    }
+    // Optional: without a key only the site's own checks run
+    if (!env.OPENAI_API_KEY) return null;
     try {
         const response = await fetch(ENDPOINT, {
             method: 'POST',
@@ -80,6 +79,14 @@ export function judge(scores: ModerationScores | null): Verdict {
     return { action: 'publish' };
 }
 
-export async function checkContent(input: { text?: string; imageUrls?: string[] }): Promise<Verdict> {
+// The optional OpenAI layer's verdict ("publish" when it's off or unavailable)
+export async function openAiVerdict(input: { text?: string; imageUrls?: string[] }): Promise<Verdict> {
     return judge(await moderationScores(input));
+}
+
+const SEVERITY: Record<Verdict['action'], number> = { publish: 0, label_mature: 1, hold: 2, hold_for_admins: 3 };
+
+// The strictest of several verdicts
+export function strictest(...verdicts: Verdict[]): Verdict {
+    return verdicts.reduce((worst, next) => (SEVERITY[next.action] > SEVERITY[worst.action] ? next : worst), { action: 'publish' } as Verdict);
 }

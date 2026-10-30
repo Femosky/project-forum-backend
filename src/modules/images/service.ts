@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { badRequest } from '../../lib/http';
 import logger from '../../lib/logger';
+import { env } from '../../config/env';
 import { putObject } from '../../lib/storage';
+import { checkImage } from '../safety/imageCheck';
+import { openAiVerdict } from '../safety/moderation';
 
 // Image uploads: ad logos and pictures, community icons and banners. (No profile photos, by decision: people keep
 // drawn avatars, which protects anonymity and saves storage. Images in posts and comments come later, with automatic
@@ -36,11 +39,21 @@ const VARIANTS: Record<ImagePurpose, { width: number; height?: number }[]> = {
 
 export type StoredImage = { url: string; width: number; height: number; variants: { url: string; width: number; height: number }[] };
 
-// The place to check what's in a picture before it goes public (nudity, gore, scams). Today's uploads come only from
-// admins and community moderators, so nothing is scanned yet; the scanning service plugs in here, and a refusal
-// stops the upload before anything is stored.
+// Every upload is checked before anything is stored: the site's own picture classifier (modules/safety/
+// imageCheck.ts), plus OpenAI's check when it's switched on. Icons, banners and ad pictures have no review step, so
+// anything clearly or possibly sexual is refused (ads also refuse revealing pictures). If the classifier can't run,
+// the upload goes through and a log line says so.
 export async function scanImage(input: { image: Buffer; purpose: ImagePurpose; uploaderId: string }): Promise<{ allowed: boolean; reason?: string }> {
-    void input;
+    const local = await checkImage(input.image, input.purpose);
+    if (local.action === 'refuse' || local.action === 'hold_for_admins') {
+        logger.warn({ purpose: input.purpose, uploaderId: input.uploaderId }, 'Picture refused by the automatic check');
+        return { allowed: false, reason: local.action === 'refuse' ? local.reason : "This picture can't be used here." };
+    }
+    // The optional OpenAI layer, when it's switched on, gets a small inline copy
+    if (!env.OPENAI_API_KEY) return { allowed: true };
+    const sample = await sharp(input.image, { animated: false }).rotate().resize(512, 512, { fit: 'inside' }).jpeg({ quality: 70 }).toBuffer();
+    const extra = await openAiVerdict({ imageUrls: [`data:image/jpeg;base64,${sample.toString('base64')}`] });
+    if (extra.action === 'hold_for_admins' || extra.action === 'hold') return { allowed: false, reason: "This picture can't be used here." };
     return { allowed: true };
 }
 
