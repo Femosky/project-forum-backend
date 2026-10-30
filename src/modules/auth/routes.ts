@@ -12,6 +12,7 @@ import {
     changeEmailSchema,
     changePasswordSchema,
     forgotPasswordSchema,
+    googleLinkSchema,
     googleSchema,
     loginSchema,
     resetPasswordSchema,
@@ -208,33 +209,39 @@ router.post('/confirm-email', async (request, response) => {
     response.json({ success: true });
 });
 
+// Continue with Google. Three outcomes:
+//   - a Google account already connected: signed in;
+//   - an email that already has an account: nothing is linked here. The person signs in with their password first
+//     and then connects Google (POST /google/link), so whoever controls a Google account with the same address
+//     can't take over an existing account;
+//   - a new person: asked to pick a username and confirm they're 18+ (400 google_signup_details, with a suggestion),
+//     then the same token is sent again with both. The email counts as verified, and they get a random avatar.
+// Staff accounts are separate (admin panel, password and authenticator only), so Google never signs into one.
 router.post('/google', async (request, response) => {
     const input = parse(googleSchema, request.body);
     const identity = await verifyGoogleIdToken(input.id_token);
 
-    let user =
-        (await prisma.user.findUnique({ where: { google_id: identity.googleId } })) ??
-        (await prisma.user.findUnique({ where: { email: identity.email } }));
-
-    if (user && !user.google_id) {
-        // Google has verified the address, so linking to the existing account is safe
-        user = await prisma.user.update({
-            where: { id: user.id },
-            data: { google_id: identity.googleId, email_verified_at: user.email_verified_at ?? new Date() },
-        });
-    }
-
+    let user = await prisma.user.findUnique({ where: { google_id: identity.googleId } });
     let created = false;
     if (!user) {
-        if (!input.is_adult) {
-            throw new HttpError(400, 'adult_attestation_required', 'Confirm you are 18 or older to join.');
+        const existing = await prisma.user.findUnique({ where: { email: identity.email }, select: { id: true } });
+        if (existing) {
+            throw new HttpError(
+                409,
+                'google_link_required',
+                'You already have an account with this email. Log in with your password once to connect Google.',
+                undefined,
+                { email: identity.email }
+            );
         }
-        user = await createUser({
-            email: identity.email,
-            username: await suggestUsername(identity.email),
-            google_id: identity.googleId,
-            verified: true,
-        });
+        if (!input.username || !input.is_adult) {
+            throw new HttpError(400, 'google_signup_details', 'Pick a username and confirm you are 18 or older to finish joining.', undefined, {
+                email: identity.email,
+                suggested_username: await suggestUsername(identity.email),
+            });
+        }
+        await assertAvailable(identity.email, input.username);
+        user = await createUser({ email: identity.email, username: input.username, google_id: identity.googleId, verified: true });
         created = true;
     }
 
@@ -242,6 +249,24 @@ router.post('/google', async (request, response) => {
     if (created) track('signup', user.id, { method: 'google' });
     setAuthCookies(response, await createSession(user, request));
     response.status(created ? 201 : 200).json({ user: toPrivateUser(user), created });
+});
+
+// Connects a Google account to the signed-in account (after a password sign-in, or from settings)
+router.post('/google/link', requireAuth, async (request: AuthRequest, response) => {
+    const { user } = viewerOf(request);
+    const { id_token } = parse(googleLinkSchema, request.body);
+    const identity = await verifyGoogleIdToken(id_token);
+    const owner = await prisma.user.findUnique({ where: { google_id: identity.googleId }, select: { id: true } });
+    if (owner && owner.id !== user.id) throw conflict('That Google account is connected to another account.', 'google_in_use');
+    const updated = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+            google_id: identity.googleId,
+            // The same address, confirmed by Google, also confirms it here
+            ...(identity.email === user.email && !user.email_verified_at ? { email_verified_at: new Date() } : {}),
+        },
+    });
+    response.json({ user: toPrivateUser(updated) });
 });
 
 // A free username based on the email's local part, e.g. "ada.obi@..." becomes "ada_obi" or "ada_obi_4821"

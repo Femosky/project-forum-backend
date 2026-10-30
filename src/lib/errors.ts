@@ -4,10 +4,10 @@ import { ZodError } from 'zod';
 import { HttpError, validationError } from './http';
 import { reportError } from './errorReport';
 
-// Errors look like { error: { code, message, fields? } }
+// Errors look like { error: { code, message, fields?, details? } }
 function send(request: Request, response: Response, error: HttpError) {
     return response.status(error.status).json({
-        error: { code: error.code, message: error.message, ...(error.fields ? { fields: error.fields } : {}) },
+        error: { code: error.code, message: error.message, ...(error.fields ? { fields: error.fields } : {}), ...(error.details ? { details: error.details } : {}) },
     });
 }
 
