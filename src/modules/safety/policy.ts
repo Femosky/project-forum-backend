@@ -32,6 +32,38 @@ const isYoungAccount = (user: Pick<User, 'created_at' | 'karma' | 'is_trusted'>)
 
 export const canPostLinks = (user: Pick<User, 'created_at' | 'karma' | 'is_trusted'>) => !isNewAccount(user);
 
+// "about 9 hours", "about 40 minutes": how long until a limit lifts, for messages
+export function roughly(ms: number) {
+    const minutes = Math.max(1, Math.ceil(ms / 60000));
+    if (minutes < 60) return `about ${minutes} minute${minutes === 1 ? '' : 's'}`;
+    const hours = Math.round(minutes / 60);
+    return `about ${hours} hour${hours === 1 ? '' : 's'}`;
+}
+
+// When a new account can share links and pictures, and how much reputation would unlock them sooner
+export function linkLimit(user: Pick<User, 'created_at' | 'karma' | 'is_trusted'>) {
+    if (canPostLinks(user)) return null;
+    const unlocksAt = new Date(user.created_at.getTime() + TRUST.NEW_ACCOUNT_MS);
+    return { unlocks_at: unlocksAt.toISOString(), reputation_needed: TRUST.LINK_KARMA - user.karma };
+}
+
+function linkLimitError(user: User, code: 'new_account_links' | 'new_account_pictures') {
+    const limit = linkLimit(user)!;
+    return new HttpError(
+        403,
+        code,
+        `New accounts can post links and pictures after 1 day or ${TRUST.LINK_KARMA} reputation. You can in ${roughly(
+            new Date(limit.unlocks_at).getTime() - Date.now()
+        )}.`,
+        undefined,
+        limit
+    );
+}
+
+export function assertPicturesAllowed(user: User) {
+    if (!canPostLinks(user)) throw linkLimitError(user, 'new_account_pictures');
+}
+
 // Anonymity is per post, and only for accounts in good standing
 export const canPostAnonymously = (user: Pick<User, 'created_at' | 'karma' | 'email_verified_at' | 'shadow_banned_at'>) =>
     ageOf(user) >= TRUST.ANONYMOUS_MIN_AGE_MS &&
@@ -40,10 +72,15 @@ export const canPostAnonymously = (user: Pick<User, 'created_at' | 'karma' | 'em
     user.shadow_banned_at === null;
 
 // What the web app needs to shape the composer (sent with the signed-in user)
-export const trustFlags = (user: User) => ({
-    can_post_links: canPostLinks(user),
-    can_post_anonymously: canPostAnonymously(user),
-});
+export const trustFlags = (user: User) => {
+    const limit = linkLimit(user);
+    return {
+        can_post_links: !limit,
+        links_unlock_at: limit?.unlocks_at ?? null,
+        reputation_needed: limit?.reputation_needed ?? 0,
+        can_post_anonymously: canPostAnonymously(user),
+    };
+};
 
 export function assertAnonymousAllowed(user: User, isAnonymous: boolean) {
     if (isAnonymous && !canPostAnonymously(user)) {
@@ -62,27 +99,29 @@ export const containsLink = (text: string) => LINK.test(text);
 
 export function assertLinksAllowed(user: User, texts: string[], url?: string) {
     if (canPostLinks(user)) return;
-    if (url || texts.some(containsLink)) {
-        throw new HttpError(
-            403,
-            'new_account_links',
-            `New accounts can't share links yet. You can once your account is a day old or has ${TRUST.LINK_KARMA} karma.`
-        );
-    }
+    if (url || texts.some(containsLink)) throw linkLimitError(user, 'new_account_links');
 }
 
 export async function assertWithinYoungAccountLimits(user: User, kind: 'post' | 'comment') {
     if (!isYoungAccount(user)) return;
     const since = new Date(Date.now() - HOUR);
+    const where = { author_id: user.id, created_at: { gte: since } };
     const [count, limit] =
         kind === 'post'
-            ? [await prisma.post.count({ where: { author_id: user.id, created_at: { gte: since } } }), TRUST.YOUNG_POSTS_PER_HOUR]
-            : [await prisma.comment.count({ where: { author_id: user.id, created_at: { gte: since } } }), TRUST.YOUNG_COMMENTS_PER_HOUR];
-    if (count >= limit) {
-        throw new HttpError(
-            429,
-            'new_account_limit',
-            `New accounts can make ${limit} ${kind === 'post' ? 'posts' : 'comments'} an hour. Please try again a little later.`
-        );
-    }
+            ? [await prisma.post.count({ where }), TRUST.YOUNG_POSTS_PER_HOUR]
+            : [await prisma.comment.count({ where }), TRUST.YOUNG_COMMENTS_PER_HOUR];
+    if (count < limit) return;
+    // The limit lifts when enough of this hour's posts or comments are more than an hour old
+    const page = { where, orderBy: { created_at: 'asc' as const }, skip: count - limit, take: 1, select: { created_at: true } };
+    const [oldest] = kind === 'post' ? await prisma.post.findMany(page) : await prisma.comment.findMany(page);
+    const retryAt = new Date((oldest?.created_at.getTime() ?? Date.now()) + HOUR);
+    throw new HttpError(
+        429,
+        'new_account_limit',
+        `New accounts can make ${limit} ${kind === 'post' ? 'posts' : 'comments'} an hour until they are a week old or have ${
+            TRUST.LINK_KARMA
+        } reputation. You can again in ${roughly(retryAt.getTime() - Date.now())}.`,
+        undefined,
+        { retry_at: retryAt.toISOString(), limit, reputation_needed: TRUST.LINK_KARMA - user.karma }
+    );
 }

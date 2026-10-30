@@ -6,7 +6,9 @@ export class HttpError extends Error {
         public status: number,
         public code: string,
         message: string,
-        public fields?: Record<string, string>
+        public fields?: Record<string, string>,
+        // Machine-readable facts behind the error (e.g. when a limit lifts), so the web app can word it
+        public details?: Record<string, unknown>
     ) {
         super(message);
     }

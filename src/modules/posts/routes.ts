@@ -12,7 +12,7 @@ import { assertCanParticipate, assertCanPost, findCommunity, viewerContext } fro
 import { reviewContent } from '../safety/review';
 import { checkImage } from '../safety/imageCheck';
 import { readStoredObject } from '../../lib/storage';
-import { assertAnonymousAllowed, assertLinksAllowed, assertWithinYoungAccountLimits, canPostLinks } from '../safety/policy';
+import { assertAnonymousAllowed, assertLinksAllowed, assertPicturesAllowed, assertWithinYoungAccountLimits } from '../safety/policy';
 import { assertCommentable, createComment, listPostComments } from '../comments/service';
 import { notifyForComment } from '../notifications/service';
 import { postViewerState, votePost } from '../votes/service';
@@ -46,7 +46,7 @@ router.post('/', requireAuth, async (request: AuthRequest, response) => {
         throw badRequest('That flair is not part of this community.', 'invalid_flair');
     }
 
-    if (image && !canPostLinks(user)) throw forbidden("New accounts can't post pictures yet. You can once your account is a day old.", 'new_account_pictures');
+    if (image) assertPicturesAllowed(user);
     // The picture was checked when it was uploaded; here it decides the post's fate along with the words: borderline
     // holds the post for the admins, revealing adds the mature label (the small copy is enough to judge)
     const picture = image ? await readStoredObject([...image.variants].sort((a, b) => a.width - b.width)[0]?.url ?? image.url) : null;

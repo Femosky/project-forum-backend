@@ -181,11 +181,14 @@ describe('new-account friction', () => {
         await setup();
         const fresh = await signUp('fresh', { fresh: true });
         const me = await fresh.agent.get('/v1/auth/me');
-        expect(me.body.user).toMatchObject({ can_post_links: false, can_post_anonymously: false });
+        expect(me.body.user).toMatchObject({ can_post_links: false, reputation_needed: 10, can_post_anonymously: false });
+        expect(me.body.user.links_unlock_at).toBeTruthy();
 
         const link = await fresh.agent.post('/v1/posts').send({ community: 'jobs', type: 'link', title: 'My site', url: 'https://example.com' });
         expect(link.status).toBe(403);
         expect(link.body.error.code).toBe('new_account_links');
+        expect(link.body.error.details).toMatchObject({ reputation_needed: 10 });
+        expect(link.body.error.message).toMatch(/You can in about (23|24) hours/);
         const inline = await fresh.agent.post('/v1/posts').send({ community: 'jobs', title: 'Read this', body: 'see www.example.com' });
         expect(inline.body.error.code).toBe('new_account_links');
 
@@ -196,6 +199,7 @@ describe('new-account friction', () => {
         const fourth = await fresh.agent.post('/v1/posts').send({ community: 'jobs', title: 'One more question' });
         expect(fourth.status).toBe(429);
         expect(fourth.body.error.code).toBe('new_account_limit');
+        expect(fourth.body.error.details.retry_at).toBeTruthy();
     });
 
     it('lets links through once the account has karma', async () => {
