@@ -1,35 +1,45 @@
-import { Router } from 'express';
+import { Request, Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
 import { badRequest, conflict, notFound, parse, uuidParam } from '../../lib/http';
-import { AuthRequest, requireAuth, viewerOf } from '../../middlewares/auth';
 import { LIMITS, pageQuery } from '../../shared/validation';
 import { revokeAllSessions } from '../auth/service';
-import { viewerContext } from '../communities/access';
 import { buildQueue, queueCount } from '../moderation/queue';
-import { requireAdmin } from '../moderation/routes';
+import { commentActionSchema, moderateComment, moderatePost, postActionSchema, resolveReport, resolveSchema } from '../moderation/routes';
+import { audit, requireStaff, STAFF_CONTEXT, staffOf } from '../staff/service';
+import { idOrShortId } from '../../lib/ids';
+import { commentInclude, postInclude } from '../../lib/serializers';
 import { clearBlocklistCache } from '../safety/filters';
 import adsAdmin from '../ads/admin';
+import statsAdmin from '../metrics/admin';
+import { bodyBuffer, imageBody } from '../images/routes';
+import { processUpload } from '../images/service';
 import { clearAdCache } from '../ads/decision';
 
-// Site-admin panel (role=admin): the site-wide queue, user suspension and shadow-bans, community takedowns,
-// the blocklist and ad campaigns (ads/admin.ts). Every action is written to ModAction like moderator actions are.
+// The admin panel's API, for staff accounts only (modules/staff: their own sign-in, two-factor, roles): the
+// site-wide queue and moderation, user suspension and shadow-bans, community takedowns, the blocklist, ad campaigns
+// (ads/admin.ts) and stats. Forum accounts get nothing here. Every action goes to the staff audit log, and actions
+// on users, communities and content also to ModAction, like moderator actions.
+//
+// Roles: owner and admin everything; moderator the queue, users, communities, blocklist and logs; ads the ads and
+// stats. Staff accounts themselves (owner only) are in staff/routes.ts.
 
 const router = Router();
 
-router.use(requireAuth, (request, response, next) => {
-    requireAdmin(viewerOf(request).user);
-    next();
-});
+const MODERATION = ['owner', 'admin', 'moderator'] as const;
+const ADS = ['owner', 'admin', 'ads'] as const;
+
+router.use(requireStaff());
 
 const reason = z.string().trim().max(LIMITS.REASON_MAX).optional();
 
-const log = (actorId: string, action: string, target: { type: 'user' | 'community'; id: string }, extra: { reason?: string; details?: Prisma.InputJsonValue; communityId?: string } = {}) =>
-    prisma.modAction.create({
+// Into the moderation log (as staff) and the staff audit log
+async function log(request: Request, action: string, target: { type: 'user' | 'community'; id: string }, extra: { reason?: string; details?: Prisma.InputJsonValue; communityId?: string } = {}) {
+    await prisma.modAction.create({
         data: {
-            actor_id: actorId,
+            staff_id: staffOf(request).id,
             community_id: extra.communityId ?? null,
             action,
             target_type: target.type,
@@ -38,11 +48,50 @@ const log = (actorId: string, action: string, target: { type: 'user' | 'communit
             details: extra.details,
         },
     });
+    await audit(request, action, target, { ...(extra.reason ? { reason: extra.reason } : {}), ...((extra.details as object | undefined) ?? {}) });
+}
 
 // Every open report and every held item, across all communities
-router.get('/queue', async (request: AuthRequest, response) => {
-    const items = await buildQueue({ site: true }, await viewerContext(request.viewer));
+router.get('/queue', requireStaff(...MODERATION), async (request, response) => {
+    const items = await buildQueue({ site: true }, STAFF_CONTEXT);
     response.json({ items });
+});
+
+// Site-wide moderation from the panel: any post or comment in any community, marking posts as sponsored, and
+// closing any report (forum moderators do the same for their own communities from the forum)
+async function findPostForStaff(id: string) {
+    const post = await prisma.post.findUnique({ where: idOrShortId(id) as Prisma.PostWhereUniqueInput, include: { ...postInclude, community: true } });
+    if (!post) throw notFound('Post not found');
+    return post;
+}
+
+router.post('/posts/:id/moderation', requireStaff(...MODERATION), async (request, response) => {
+    const input = parse(postActionSchema, request.body);
+    const post = await findPostForStaff(String(request.params.id));
+    const result = await moderatePost(post, input, { staffId: staffOf(request).id }, STAFF_CONTEXT);
+    await audit(request, `${input.action}_post`, { type: 'post', id: post.id }, input.reason ? { reason: input.reason } : undefined);
+    response.json({ post: result });
+});
+
+router.post('/comments/:id/moderation', requireStaff(...MODERATION), async (request, response) => {
+    const input = parse(commentActionSchema, request.body);
+    const comment = await prisma.comment.findUnique({
+        where: idOrShortId(String(request.params.id)) as Prisma.CommentWhereUniqueInput,
+        include: { ...commentInclude, post: { select: { id: true, community_id: true, status: true, short_id: true, slug: true, community: true } } },
+    });
+    if (!comment) throw notFound('Comment not found');
+    const result = await moderateComment(comment as Parameters<typeof moderateComment>[0], input, { staffId: staffOf(request).id }, STAFF_CONTEXT);
+    await audit(request, `${input.action}_comment`, { type: 'comment', id: comment.id }, input.reason ? { reason: input.reason } : undefined);
+    response.json({ comment: result });
+});
+
+router.post('/reports/:id/resolve', requireStaff(...MODERATION), async (request, response) => {
+    const { status } = parse(resolveSchema, request.body);
+    const report = await prisma.report.findUnique({ where: { id: uuidParam(request.params.id, 'Report not found') } });
+    if (!report) throw notFound('Report not found');
+    const closed = await resolveReport(report, status, { staffId: staffOf(request).id });
+    await audit(request, status === 'resolved' ? 'resolve_reports' : 'dismiss_reports', { type: report.target_type, id: report.target_id }, { count: closed });
+    response.json({ success: true, closed });
 });
 
 router.get('/overview', async (request, response) => {
@@ -82,7 +131,7 @@ const usersQuery = z.object({
     filter: z.enum(['all', 'suspended', 'shadow_banned', 'new']).default('all'),
 });
 
-router.get('/users', async (request, response) => {
+router.get('/users', requireStaff(...MODERATION), async (request, response) => {
     const { q, filter } = parse(usersQuery, request.query);
     const value = q?.toLowerCase();
     const where: Prisma.UserWhereInput = {
@@ -105,11 +154,9 @@ async function findUser(username: string) {
 const suspendSchema = z.object({ days: z.number().int().min(1).max(3650).optional(), reason });
 
 // Signs the account out everywhere; the suspension lifts itself at the next sign-in after it ends
-router.post('/users/:username/suspend', async (request: AuthRequest, response) => {
-    const { user: actor } = viewerOf(request);
+router.post('/users/:username/suspend', requireStaff(...MODERATION), async (request, response) => {
     const input = parse(suspendSchema, request.body);
     const user = await findUser(String(request.params.username));
-    if (user.id === actor.id) throw badRequest("You can't suspend yourself.", 'self_suspend');
     if (user.role === 'admin') throw badRequest('Admins must be demoted before they can be suspended.', 'target_is_admin');
 
     const until = input.days ? new Date(Date.now() + input.days * 24 * 60 * 60 * 1000) : null;
@@ -119,12 +166,11 @@ router.post('/users/:username/suspend', async (request: AuthRequest, response) =
         select: userSelect,
     });
     await revokeAllSessions(user.id);
-    await log(actor.id, 'suspend_user', { type: 'user', id: user.id }, { reason: input.reason, details: { until: until?.toISOString() ?? null } });
+    await log(request, 'suspend_user', { type: 'user', id: user.id }, { reason: input.reason, details: { until: until?.toISOString() ?? null } });
     response.json({ user: updated });
 });
 
-router.post('/users/:username/unsuspend', async (request: AuthRequest, response) => {
-    const { user: actor } = viewerOf(request);
+router.post('/users/:username/unsuspend', requireStaff(...MODERATION), async (request, response) => {
     const user = await findUser(String(request.params.username));
     if (user.status !== 'suspended') throw badRequest('This account is not suspended.', 'not_suspended');
     const updated = await prisma.user.update({
@@ -132,15 +178,14 @@ router.post('/users/:username/unsuspend', async (request: AuthRequest, response)
         data: { status: 'active', suspended_until: null, suspension_reason: null },
         select: userSelect,
     });
-    await log(actor.id, 'unsuspend_user', { type: 'user', id: user.id });
+    await log(request, 'unsuspend_user', { type: 'user', id: user.id });
     response.json({ user: updated });
 });
 
 const shadowBanSchema = z.object({ shadow_banned: z.boolean(), reason });
 
 // Hides (or shows again) everything the account has written and will write, then fixes up the counters
-router.post('/users/:username/shadow-ban', async (request: AuthRequest, response) => {
-    const { user: actor } = viewerOf(request);
+router.post('/users/:username/shadow-ban', requireStaff(...MODERATION), async (request, response) => {
     const input = parse(shadowBanSchema, request.body);
     const user = await findUser(String(request.params.username));
     if (user.role === 'admin') throw badRequest("Admins can't be shadow-banned.", 'target_is_admin');
@@ -151,7 +196,7 @@ router.post('/users/:username/shadow-ban', async (request: AuthRequest, response
         await tx.comment.updateMany({ where: { author_id: user.id }, data: { shadow_hidden: input.shadow_banned } });
         await recountAfterVisibilityChange(tx, user.id);
     });
-    await log(actor.id, input.shadow_banned ? 'shadow_ban_user' : 'lift_shadow_ban', { type: 'user', id: user.id }, { reason: input.reason });
+    await log(request, input.shadow_banned ? 'shadow_ban_user' : 'lift_shadow_ban', { type: 'user', id: user.id }, { reason: input.reason });
     response.json({ user: await prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: userSelect }) });
 });
 
@@ -163,6 +208,9 @@ async function recountAfterVisibilityChange(tx: Prisma.TransactionClient, userId
             SELECT count(*) FROM "Comment" c
             WHERE c."post_id" = p."id" AND c."status" IN ('active', 'locked') AND NOT c."shadow_hidden")
         WHERE p."id" IN (SELECT "post_id" FROM "Comment" WHERE "author_id" = ${userId}::uuid)`;
+    await tx.$executeRaw`
+        UPDATE "Post" SET "hot_rank" = forum_hot_rank("score", "comment_count", "created_at")
+        WHERE "id" IN (SELECT "post_id" FROM "Comment" WHERE "author_id" = ${userId}::uuid)`;
     await tx.$executeRaw`
         UPDATE "Comment" pc SET "reply_count" = (
             SELECT count(*) FROM "Comment" c
@@ -177,7 +225,7 @@ async function recountAfterVisibilityChange(tx: Prisma.TransactionClient, userId
 
 // --- Communities ---
 
-router.get('/communities', async (request, response) => {
+router.get('/communities', requireStaff(...MODERATION), async (request, response) => {
     const { q } = parse(z.object({ q: z.string().trim().max(50).optional() }), request.query);
     const communities = await prisma.community.findMany({
         where: q ? { name: { startsWith: q.toLowerCase() } } : {},
@@ -201,42 +249,49 @@ router.get('/communities', async (request, response) => {
 });
 
 // A takedown hides the community and everything in it (its pages answer 410 to crawlers); restore undoes it
-router.post('/communities/:name/takedown', async (request: AuthRequest, response) => {
-    const { user: actor } = viewerOf(request);
+router.post('/communities/:name/takedown', requireStaff(...MODERATION), async (request, response) => {
     const { reason: why } = parse(z.object({ reason }), request.body);
     const community = await prisma.community.findUnique({ where: { name: String(request.params.name).toLowerCase() } });
     if (!community) throw notFound('Community not found');
     if (community.status === 'deleted') throw conflict('This community is already taken down.', 'already_taken_down');
     await prisma.community.update({ where: { id: community.id }, data: { status: 'deleted' } });
-    await log(actor.id, 'takedown_community', { type: 'community', id: community.id }, { reason: why, communityId: community.id, details: { previous: community.status } });
+    await log(request, 'takedown_community', { type: 'community', id: community.id }, { reason: why, communityId: community.id, details: { previous: community.status } });
     response.json({ success: true });
 });
 
-router.post('/communities/:name/restore', async (request: AuthRequest, response) => {
-    const { user: actor } = viewerOf(request);
+router.post('/communities/:name/restore', requireStaff(...MODERATION), async (request, response) => {
     const community = await prisma.community.findUnique({ where: { name: String(request.params.name).toLowerCase() } });
     if (!community) throw notFound('Community not found');
     if (community.status !== 'deleted') throw badRequest('This community is not taken down.', 'not_taken_down');
     await prisma.community.update({ where: { id: community.id }, data: { status: 'active' } });
-    await log(actor.id, 'restore_community', { type: 'community', id: community.id }, { communityId: community.id });
+    await log(request, 'restore_community', { type: 'community', id: community.id }, { communityId: community.id });
     response.json({ success: true });
 });
 
 // Ads on or off for one community; null goes back to the default (off in sensitive categories)
-router.patch('/communities/:name/ads', async (request: AuthRequest, response) => {
-    const { user: actor } = viewerOf(request);
+router.patch('/communities/:name/ads', requireStaff(...ADS), async (request, response) => {
     const { ads_enabled } = parse(z.object({ ads_enabled: z.boolean().nullable() }), request.body);
     const community = await prisma.community.findUnique({ where: { name: String(request.params.name).toLowerCase() } });
     if (!community) throw notFound('Community not found');
     await prisma.community.update({ where: { id: community.id }, data: { ads_enabled } });
     clearAdCache();
-    await log(actor.id, 'set_community_ads', { type: 'community', id: community.id }, { communityId: community.id, details: { ads_enabled } });
+    await log(request, 'set_community_ads', { type: 'community', id: community.id }, { communityId: community.id, details: { ads_enabled } });
     response.json({ success: true, ads_enabled });
 });
 
 // --- Ads ---
 
-router.use('/ads', adsAdmin);
+router.use('/ads', requireStaff(...ADS), adsAdmin);
+router.use('/stats', requireStaff(...ADS), statsAdmin);
+
+// Ad pictures (logos and feed images); see modules/images
+const adImageQuery = z.object({ purpose: z.enum(['ad_logo', 'ad_image']) });
+router.post('/images', requireStaff(...ADS), imageBody, async (request, response) => {
+    const { purpose } = parse(adImageQuery, request.query);
+    const image = await processUpload(bodyBuffer(request.body), purpose, staffOf(request).id);
+    await audit(request, 'upload_image', undefined, { purpose, url: image.url });
+    response.status(201).json({ image });
+});
 
 // --- Blocklist ---
 
@@ -253,23 +308,23 @@ const termSchema = z
     )
     .refine((term) => term.kind !== 'domain' || DOMAIN.test(term.value), { message: 'Enter a domain like example.com', path: ['value'] });
 
-router.get('/blocklist', async (request, response) => {
+router.get('/blocklist', requireStaff(...MODERATION), async (request, response) => {
     const terms = await prisma.blockedTerm.findMany({
         orderBy: [{ kind: 'asc' }, { value: 'asc' }],
-        select: { id: true, kind: true, value: true, note: true, created_at: true, creator: { select: { username: true } } },
+        select: { id: true, kind: true, value: true, note: true, created_at: true, creator: { select: { username: true } }, staff_creator: { select: { name: true } } },
     });
     response.json({ terms });
 });
 
-router.post('/blocklist', async (request: AuthRequest, response) => {
-    const { user: actor } = viewerOf(request);
+router.post('/blocklist', requireStaff(...MODERATION), async (request, response) => {
     const input = parse(termSchema, request.body);
     try {
         const term = await prisma.blockedTerm.create({
-            data: { ...input, note: input.note ?? null, created_by: actor.id },
+            data: { ...input, note: input.note ?? null, created_by_staff: staffOf(request).id },
             select: { id: true, kind: true, value: true, note: true, created_at: true },
         });
         clearBlocklistCache();
+        await audit(request, 'add_blocked_term', { type: 'blocked_term', id: term.id }, { kind: term.kind, value: term.value });
         response.status(201).json({ term });
     } catch (error) {
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -279,17 +334,18 @@ router.post('/blocklist', async (request: AuthRequest, response) => {
     }
 });
 
-router.delete('/blocklist/:id', async (request, response) => {
+router.delete('/blocklist/:id', requireStaff(...MODERATION), async (request, response) => {
     const result = await prisma.blockedTerm.deleteMany({ where: { id: uuidParam(request.params.id, 'Entry not found') } });
     if (result.count === 0) throw notFound('Entry not found');
     clearBlocklistCache();
+    await audit(request, 'remove_blocked_term', { type: 'blocked_term', id: String(request.params.id) });
     response.json({ success: true });
 });
 
 // --- Log ---
 
 // Every moderator and admin action on the site, newest first
-router.get('/mod-log', async (request, response) => {
+router.get('/mod-log', requireStaff(...MODERATION), async (request, response) => {
     const query = parse(pageQuery, request.query);
     const rows = await prisma.modAction.findMany({
         where: afterCursor('created_at', 'desc', decodeCursor(query.cursor)),
@@ -304,6 +360,7 @@ router.get('/mod-log', async (request, response) => {
             reason: true,
             details: true,
             actor: { select: { username: true } },
+            staff: { select: { name: true } },
             community: { select: { name: true } },
         },
     });

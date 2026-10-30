@@ -1,6 +1,6 @@
 # Deploying the API
 
-Private testing runs on free tiers: the API on **Render** (free web service, Ohio), Postgres on **Neon** (free, `us-east-2`, Ohio), DNS wherever `oskeylabs.com` lives. The web app is on Vercel; see `docs/DEPLOY.md` in the web repo.
+Private testing runs on the API on **Render** and Postgres on **Neon**, DNS wherever `oskeylabs.com` lives. The web app is on Vercel; see `docs/DEPLOY.md` in the web repo. Both started in Ohio (`us-east-2`); `render.yaml` now describes a Starter service in **Frankfurt**, next to a Neon project in AWS Europe Central 1, the closest region to Nigeria that either offers (neither has Africa, Render has no London). The move is click by click in `docs/LAUNCH.md` at the project root, "Moving to Frankfurt".
 
 | | Testing address |
 |---|---|
@@ -56,7 +56,12 @@ Optional; each feature turns itself off without its key, and the boot log warns 
 | `POSTHOG_HOST` | Defaults to `https://eu.i.posthog.com` | |
 | `SENTRY_DSN` | Error alerts: unexpected errors (500s, crashes) with the route and request id, never bodies or cookies. Repeats within a minute are sent once. | sentry.io → project (Node.js) → Settings → Client Keys (DSN) |
 | `INDEXNOW_KEY` | Pings Bing when a post is created. Leave unset while the site is private. | any 8-128 letters/digits, same value in the web app |
-| `JOBS_ENABLED` | `false` on the free tier: jobs run inline, so nothing keeps Neon awake | |
+| `JOBS_ENABLED` | `true` (render.yaml) runs pg-boss with its schedules while the site is in use. `false` runs emails and link previews inline, with trending and daily stats recomputed by whoever reads them stale (see Jobs below) | |
+| `JOBS_IDLE_SUSPEND_MINUTES` | Default 5: with no requests for this long (health checks don't count) the job queue stops, so the API sends Neon nothing and it can suspend; the next request starts it again and catches up. 0 = always on, once traffic is steady | |
+| `DATABASE_POOL_SIZE` | Default 5 connections for the app (the job queue adds up to 3) | |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL` | Cloudflare R2 for uploaded images (ad logos and pictures, community icons and banners). Without all five, uploads go to the server's disk, which Render wipes on each deploy | Steps in the project-root `docs/LAUNCH.md`, Part 13 |
+| `METRICS_FLUSH_SECONDS` | How often buffered view counts, visits and last-active times are written. Default 45 | |
+| `GEOIP_COUNTRY_DB` | Optional path to a GeoLite2-Country `.mmdb` for visitor countries. Without it, `src/dependencies/GeoLite2-Country.mmdb` is used if present; otherwise countries are only known from a CDN header | free MaxMind account → Download databases → GeoLite2 Country (mmdb) |
 | `ADSENSE_ENABLED` + `ADSENSE_*` ids | Only after AdSense approves the site | AdSense → Ads → By ad unit |
 
 ## Analytics
@@ -73,6 +78,53 @@ Events go from the API to PostHog's batch endpoint every 10 seconds (`src/lib/an
 | `search` | first page of a search | `type`, `query` (lowercased), `results`, `no_results` |
 
 Page views and shares come from the web app. Return visits (D1/D7/D30) are a PostHog Retention insight: first event `signup`, returning event `user_active`.
+
+## Admin panel accounts
+
+The admin panel (`/admin`) uses staff accounts, separate from forum accounts, with a password and an authenticator app (two-factor) for everyone. After the deploy that adds them, create the first owner once, from Render → forum-api → **Shell**:
+
+```
+npm run admin:create-owner -- --email you@example.com --name "Your name"
+```
+
+It prints a temporary password. Sign in at `https://forum.oskeylabs.com/admin/login`, scan the QR code with an authenticator app, save the recovery codes, then choose a new password. Invite everyone else from Admin → Admins. The old forum-account admin role no longer opens the panel.
+
+## Jobs
+
+pg-boss (on the same Postgres) runs emails, link previews and two schedules, on Lagos time:
+
+| Job | When | What |
+|---|---|---|
+| `trending.compute` | every 10 minutes | Trending posts, rising communities and topics (`src/modules/trending`), plus the "Did you mean" word list hourly |
+| `stats.daily` | 00:20 | Yesterday's `DailyStat` and `CommunityDailyStat` rows, and old visitor salts deleted |
+
+**Idle suspend (Neon's free plan has 100 compute hours a month).** Neon suspends the database after 5 minutes without queries and bills nothing while suspended. The API sends none while idle: `/v1/health` (what uptime monitors ping) doesn't touch the database, the view/visit buffers write only when something was counted, idle pool connections are closed after 10 seconds without keep-alives, and the job queue (which polls every 10 seconds and does housekeeping every 10 minutes while running) stops after `JOBS_IDLE_SUSPEND_MINUTES` without requests. The next request starts it again, refreshes a stale trending snapshot and writes any missed daily stats; a job queued while it's stopped starts it first, so nothing is lost. Measured locally: no database transactions at all from about 6 minutes after the last request, with a health ping every minute.
+
+With `JOBS_ENABLED=false` nothing is scheduled. `GET /v1/trending` then recomputes a snapshot older than 10 minutes (the first read waits; later ones get the current snapshot while it refreshes) and Admin → Stats writes any missing days when opened, so both keep working without keeping Neon awake.
+
+## Site metrics
+
+For Admin → Stats and advertiser decks, without Redis or a tracking script:
+
+- **Views, visits, last active**: counted in memory and written every `METRICS_FLUSH_SECONDS` with one statement per table (`src/modules/metrics/buffer.ts`), and on shutdown. Every write adds or inserts-if-missing, so several instances stay correct. A crash loses at most one interval.
+- **Unique visitors**: the browser sends `POST /v1/metrics/visit` after each page (so CDN-cached pages count). A visitor is `sha256(day's salt, IP, user agent)`; the salt is random per Lagos day and deleted after two days, so ids can't be linked across days or recomputed. IPs are never stored. Bots (by user agent) are skipped.
+- **DAU/WAU/MAU**: accounts with a signed-in request that day (`DailyActiveUser`), and `User.last_active_at` moves at most every 15 minutes.
+
+## Ads pointing at localhost
+
+Ad links that lead to this site (`/communities`, or a link to `WEB_URL`) show the site's name and redirect to `WEB_URL` plus the path, and so do leftovers pointing at a local test server, so a test campaign saved with `http://localhost:3000/...` no longer shows "localhost". In production the admin panel only accepts public `https://` links or site paths starting with `/`. To list affected rows (read-only; run it in Neon's SQL editor):
+
+```sql
+SELECT c."name" AS campaign, c."kind", c."status", a."id" AS creative_id, a."headline",
+       a."click_url", a."image_url", adv."name" AS advertiser, adv."website", adv."logo_url", c."payment_url"
+FROM "AdCreative" a
+JOIN "Campaign" c ON c."id" = a."campaign_id"
+JOIN "Advertiser" adv ON adv."id" = c."advertiser_id"
+WHERE concat_ws(' ', a."click_url", a."image_url", adv."website", adv."logo_url", c."payment_url")
+      ~* '(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|\.local(/|:|$)|//10\.|//192\.168\.|//172\.(1[6-9]|2[0-9]|3[01])\.)';
+```
+
+Fix a row in Admin → Ads (edit the creative's link, e.g. to `/communities`) rather than in SQL.
 
 ## Backups
 
@@ -92,6 +144,6 @@ To restore:
 
 ## Free-tier notes
 
-- Render's free instance sleeps after 15 minutes without traffic and takes about a minute to wake. An uptime monitor on `/v1/health` every 5 minutes keeps it awake (750 free hours a month covers one service) without touching the database, so Neon still scales to zero.
+- On the free instance (the original Ohio setup): Render sleeps after 15 minutes without traffic and takes about a minute to wake. An uptime monitor on `/v1/health` every 5 minutes keeps it awake (750 free hours a month covers one service) without touching the database, so Neon still scales to zero.
 - Neon's free plan has a monthly compute allowance. With jobs inline and the pooler in front, the database only runs while people use the site.
 - Moving to a paid host for public launch is a settings change: same build and start commands, same variables.

@@ -2,10 +2,13 @@ import { AdFormat, CampaignKind, Community, Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { env } from '../../config/env';
 import prisma from '../../prismaConnection';
+import { onSitePath } from './urls';
 
 // The ad decision service: which ads fill the slots on a page. Priority order is direct campaigns that target
 // this community or its category, then direct campaigns that run everywhere, then house ads (same order), then
-// AdSense for whatever is left. Pages only ever see AdUnit[]; they don't know where an ad came from.
+// AdSense for whatever is left. House campaigns with a share (house_share, up to 50%) also win that share of
+// slots outright, so the site's own products are seen even when paid campaigns fill everything. Pages only ever
+// see AdUnit[]; they don't know where an ad came from.
 
 export type AdPlacement = 'feed' | 'thread';
 
@@ -18,7 +21,7 @@ export const SENSITIVE_CATEGORIES = new Set(['health']);
 export const MAX_ADS_PER_REQUEST = 6;
 
 export const targetingSchema = z.object({
-    communities: z.array(z.string().trim().toLowerCase().min(1).max(21)).max(100).default([]),
+    communities: z.array(z.string().trim().min(1).max(40)).max(100).default([]),
     categories: z.array(z.string().trim().min(1).max(30)).max(20).default([]),
 });
 export type Targeting = z.infer<typeof targetingSchema>;
@@ -35,8 +38,9 @@ type NativeCreative = {
     body: string | null;
     image_url: string | null;
     cta_label: string;
-    // Host shown on the card; the click itself goes through /v1/ads/click/:id
-    display_url: string;
+    // Host shown on the card, or null when the ad leads to a page on this site (the card then shows the site's
+    // name). The click itself goes through /v1/ads/click/:id either way.
+    display_url: string | null;
 };
 
 export type AdUnit =
@@ -49,16 +53,21 @@ type LiveCreative = {
     kind: CampaignKind;
     format: AdFormat;
     priority: number;
+    house_share: number;
     frequency_cap: number | null;
     targeting: Targeting;
     creative: NativeCreative;
 };
 
-function hostOf(url: string) {
+// All house shares together never take more than this percent of slots
+export const MAX_HOUSE_SHARE = 50;
+
+function hostOf(url: string): string | null {
+    if (onSitePath(url) !== null) return null;
     try {
         return new URL(url).hostname.replace(/^www\./, '');
     } catch {
-        return url;
+        return null;
     }
 }
 
@@ -97,6 +106,7 @@ async function loadLiveCreatives(): Promise<LiveCreative[]> {
                 kind: campaign.kind,
                 format: creative.format,
                 priority: campaign.priority,
+                house_share: campaign.kind === 'house' ? Math.min(Math.max(campaign.house_share, 0), MAX_HOUSE_SHARE) : 0,
                 frequency_cap: campaign.frequency_cap,
                 targeting: readTargeting(campaign.targeting),
                 creative: {
@@ -148,7 +158,8 @@ function matches(targeting: Targeting, community: AdCommunity | null) {
     const runsEverywhere = targeting.communities.length === 0 && targeting.categories.length === 0;
     if (runsEverywhere) return true;
     if (!community) return false;
-    return targeting.communities.includes(community.name) || (community.category !== null && targeting.categories.includes(community.category));
+    const name = community.name.toLowerCase();
+    return targeting.communities.some((target) => target.toLowerCase() === name) || (community.category !== null && targeting.categories.includes(community.category));
 }
 
 // Lower ranks first: targeted direct, run-of-site direct, targeted house, run-of-site house
@@ -176,9 +187,11 @@ export type DecisionInput = {
     count: number;
     // Campaign id -> times this viewer saw it today (from the web app's frequency cookie)
     seen: Map<string, number>;
+    // Tests pass their own dice
+    random?: () => number;
 };
 
-export async function decideAds({ placement, community, count, seen }: DecisionInput): Promise<AdUnit[]> {
+export async function decideAds({ placement, community, count, seen, random = Math.random }: DecisionInput): Promise<AdUnit[]> {
     if (!env.ADS_ENABLED || count <= 0) return [];
     if (community && !communityAllowsAds(community)) return [];
 
@@ -187,11 +200,32 @@ export async function decideAds({ placement, community, count, seen }: DecisionI
         .filter((creative) => matches(creative.targeting, community))
         .filter((creative) => creative.frequency_cap === null || (seen.get(creative.campaign_id) ?? 0) < creative.frequency_cap)
         // Shuffle first so campaigns with the same rank and priority take turns
-        .map((creative) => ({ creative, tiebreak: Math.random() }))
+        .map((creative) => ({ creative, tiebreak: random() }))
         .sort((a, b) => rankOf(a.creative) - rankOf(b.creative) || b.creative.priority - a.creative.priority || a.tiebreak - b.tiebreak)
         .map(({ creative }) => creative);
 
-    const native: AdUnit[] = candidates.slice(0, count).map((creative) => ({
+    // House campaigns with a share roll for each slot first; the rest goes in rank order. One creative shows
+    // once per page.
+    const shared = candidates.filter((creative) => creative.house_share > 0);
+    const totalShare = shared.reduce((sum, creative) => sum + creative.house_share, 0);
+    const scale = totalShare > MAX_HOUSE_SHARE ? MAX_HOUSE_SHARE / totalShare : 1;
+    const used = new Set<string>();
+    const picked: LiveCreative[] = [];
+    for (let slot = 0; slot < count; slot++) {
+        const roll = random() * 100;
+        let edge = 0;
+        let pick = shared.find((creative) => {
+            if (used.has(creative.id)) return false;
+            edge += creative.house_share * scale;
+            return roll < edge;
+        });
+        pick ??= candidates.find((creative) => !used.has(creative.id));
+        if (!pick) break;
+        used.add(pick.id);
+        picked.push(pick);
+    }
+
+    const native: AdUnit[] = picked.map((creative) => ({
         kind: creative.kind,
         id: creative.id,
         campaign_id: creative.campaign_id,

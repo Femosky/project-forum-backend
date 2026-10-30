@@ -14,6 +14,8 @@ const envSchema = z.object({
     DATABASE_URL: z.string().min(1),
     // Optional direct (non-pooled) connection for the job queue; falls back to DATABASE_URL
     DIRECT_DATABASE_URL: z.string().optional(),
+    // Connections the app keeps open (read in prismaConnection.ts); the job queue adds up to 3
+    DATABASE_POOL_SIZE: z.coerce.number().int().min(1).max(50).default(5),
     JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
     // Comma-separated list of allowed web origins, e.g. https://forum.oskeylabs.com
     WEB_ORIGIN: z.string().default('http://localhost:3000'),
@@ -28,6 +30,9 @@ const envSchema = z.object({
 
     // Background jobs run on Postgres (pg-boss). When disabled, jobs run inline in the request.
     JOBS_ENABLED: booleanFlag(true),
+    // Minutes without requests (health checks don't count) before the job queue stops, so a serverless database can
+    // suspend; the next request starts it again. 0 keeps it running all the time (lib/jobs.ts).
+    JOBS_IDLE_SUSPEND_MINUTES: z.coerce.number().min(0).max(1440).default(5),
     LINK_PREVIEWS_ENABLED: booleanFlag(true),
 
     // Email (Resend). Without a key, emails are logged instead of sent.
@@ -67,6 +72,24 @@ const envSchema = z.object({
 
     // Error alerts (Sentry project DSN). Without it errors are only logged.
     SENTRY_DSN: z.string().url().optional(),
+
+    // Image uploads (modules/images): Cloudflare R2. Without all five, images are stored on local disk (MEDIA_DIR,
+    // default ./uploads) and served by the API at /media, which is only meant for development.
+    R2_ACCOUNT_ID: z.string().optional(),
+    R2_ACCESS_KEY_ID: z.string().optional(),
+    R2_SECRET_ACCESS_KEY: z.string().optional(),
+    R2_BUCKET: z.string().optional(),
+    // Public base URL of the bucket, e.g. https://media.forum.oskeylabs.com or https://pub-xxxx.r2.dev
+    R2_PUBLIC_URL: z.string().url().optional(),
+    MEDIA_DIR: z.string().optional(),
+    // This API's own public address, for local /media URLs; defaults to http://localhost:PORT
+    API_URL: z.string().url().optional(),
+
+    // Site metrics (modules/metrics). Optional path to a GeoLite2-Country .mmdb for visitor countries; by default
+    // src/dependencies/GeoLite2-Country.mmdb is used when it's there.
+    GEOIP_COUNTRY_DB: z.string().optional(),
+    // How often buffered view counts, visits and last-active times are written, in seconds
+    METRICS_FLUSH_SECONDS: z.coerce.number().int().min(5).max(600).default(45),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -89,6 +112,7 @@ if (parsed.data.NODE_ENV === 'production') {
         !parsed.data.RESEND_API_KEY && 'RESEND_API_KEY is not set, so emails are logged instead of sent',
         !parsed.data.POSTHOG_API_KEY && 'POSTHOG_API_KEY is not set, so no analytics are recorded',
         !parsed.data.SENTRY_DSN && 'SENTRY_DSN is not set, so errors are only logged',
+        !parsed.data.R2_BUCKET && 'R2_* is not set, so uploaded images go to the local disk, which is wiped on every deploy',
     ].filter(Boolean);
     for (const warning of warnings) console.warn(`Config warning: ${warning}`);
 }
@@ -97,6 +121,7 @@ export const env = {
     ...parsed.data,
     WEB_ORIGINS,
     WEB_URL: (parsed.data.WEB_URL ?? WEB_ORIGINS[0]).replace(/\/$/, ''),
+    API_URL: (parsed.data.API_URL ?? `http://localhost:${parsed.data.PORT}`).replace(/\/$/, ''),
     IS_PRODUCTION: parsed.data.NODE_ENV === 'production',
     IS_TEST: parsed.data.NODE_ENV === 'test',
 };

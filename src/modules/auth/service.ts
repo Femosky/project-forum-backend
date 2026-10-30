@@ -1,3 +1,4 @@
+import { avatarCode, randomAvatar } from '../../lib/avatars';
 import { Request } from 'express';
 import * as bcrypt from 'bcrypt';
 import { Prisma, TokenPurpose, User } from '@prisma/client';
@@ -39,6 +40,9 @@ export function toPrivateUser(user: User) {
         email: user.email,
         display_name: user.display_name,
         avatar_id: user.avatar_id,
+        // Drawn avatar: its code (/avatar/{code}.svg on the web app) and the parts chosen, for the avatar editor
+        avatar: avatarCode(user.avatar_config, user.username),
+        avatar_config: user.avatar_config,
         role: user.role,
         status: user.status,
         karma: user.karma,
@@ -175,6 +179,8 @@ export async function createUser(data: { email: string; username: string; passwo
                 google_id: data.google_id ?? null,
                 email_verified_at: data.verified ? new Date() : null,
                 adult_attested_at: new Date(),
+                // Everyone starts with their own random drawn avatar
+                avatar_config: randomAvatar(),
             },
         });
     } catch (error) {

@@ -17,8 +17,8 @@ function delta(previous: number, next: number) {
 // karma in one transaction. Locking the post row first serialises concurrent votes on the same post.
 export async function votePost(postId: string, userId: string, value: number) {
     return prisma.$transaction(async (tx) => {
-        const [post] = await tx.$queryRaw<(Counts & { created_at: Date; author_id: string })[]>`
-            SELECT "upvote_count", "downvote_count", "created_at", "author_id" FROM "Post" WHERE "id" = ${postId}::uuid FOR UPDATE`;
+        const [post] = await tx.$queryRaw<(Counts & { created_at: Date; author_id: string; comment_count: number })[]>`
+            SELECT "upvote_count", "downvote_count", "created_at", "author_id", "comment_count" FROM "Post" WHERE "id" = ${postId}::uuid FOR UPDATE`;
         const existing = await tx.postVote.findUnique({ where: { user_id_post_id: { user_id: userId, post_id: postId } } });
         const previous = existing?.value ?? 0;
         if (previous === value) return { ...post, score: post.upvote_count - post.downvote_count, vote: value };
@@ -33,7 +33,7 @@ export async function votePost(postId: string, userId: string, value: number) {
         const score = upvote_count - downvote_count;
         await tx.post.update({
             where: { id: postId },
-            data: { upvote_count, downvote_count, score, hot_rank: hotRank(score, post.created_at) },
+            data: { upvote_count, downvote_count, score, hot_rank: hotRank(score, post.created_at, post.comment_count) },
         });
         if (post.author_id !== userId) {
             await tx.user.update({ where: { id: post.author_id }, data: { karma: { increment: change.up - change.down } } });

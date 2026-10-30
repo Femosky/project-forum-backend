@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import prisma from '../src/prismaConnection';
-import { createComment, createCommunity, createPost, makeModerator, signUp } from './helpers';
+import { api, createComment, createCommunity, createPost, makeModerator, signUp, signInStaff } from './helpers';
 
 // Regression tests for roadmap bugs 1, 3, 4, 5, 6, 7 and 16
 
@@ -48,9 +48,9 @@ describe('comment edit and delete (bug 1)', () => {
 });
 
 describe('sponsorship is not user-settable (bug 3)', () => {
-    it('ignores is_sponsored on posts and comments, and only admins can sponsor', async () => {
+    it('ignores is_sponsored on posts and comments, and only staff can sponsor', async () => {
         const alice = await signUp('alice');
-        const admin = await signUp('root', { admin: true });
+        const admin = await signInStaff('root');
         const community = await createCommunity(alice.agent, 'lounge');
         await makeModerator(alice.user.id, community.id);
         const post = await createPost(alice.agent, 'lounge', { is_sponsored: true });
@@ -61,7 +61,10 @@ describe('sponsorship is not user-settable (bug 3)', () => {
 
         // Even the community owner can't sponsor
         expect((await alice.agent.post(`/v1/posts/${post.id}/moderation`).send({ action: 'sponsor' })).status).toBe(403);
-        expect((await admin.agent.post(`/v1/posts/${post.id}/moderation`).send({ action: 'sponsor' })).status).toBe(200);
+        // Not even a forum account with the old admin role; staff do it from the admin panel
+        const oldAdmin = await signUp('oldadmin', { admin: true });
+        expect((await oldAdmin.agent.post(`/v1/posts/${post.id}/moderation`).send({ action: 'sponsor' })).status).toBe(403);
+        expect((await admin.agent.post(`/v1/admin/posts/${post.id}/moderation`).send({ action: 'sponsor' })).status).toBe(200);
         expect(await prisma.post.count({ where: { is_sponsored: true } })).toBe(1);
     });
 });
@@ -108,14 +111,46 @@ describe('communities (bugs 5 and 6)', () => {
     it('creates a community with a valid name and rejects invalid or reserved ones', async () => {
         const alice = await signUp('alice');
 
-        const valid = await alice.agent.post('/v1/communities').send({ name: 'Good_Name' });
+        // Stored lowercase as the URL key, with the typed capitals kept as the styled handle
+        const valid = await alice.agent.post('/v1/communities').send({ name: 'PremierLeague' });
         expect(valid.status).toBe(201);
-        expect(valid.body.community).toMatchObject({ name: 'good_name', member_count: 1 });
+        expect(valid.body.community).toMatchObject({ name: 'premierleague', name_styled: 'PremierLeague', member_count: 1 });
 
         expect((await alice.agent.post('/v1/communities').send({ name: '1bad name' })).status).toBe(400);
+        // Letters and digits only now: no underscores or hyphens
+        expect((await alice.agent.post('/v1/communities').send({ name: 'good_name' })).status).toBe(400);
         expect((await alice.agent.post('/v1/communities').send({ name: 'x'.repeat(22) })).status).toBe(400);
-        expect((await alice.agent.post('/v1/communities').send({ name: 'admin' })).status).toBe(400);
-        expect((await alice.agent.post('/v1/communities').send({ name: 'good_name' })).status).toBe(409);
+        expect((await alice.agent.post('/v1/communities').send({ name: 'Admin' })).status).toBe(400);
+        // Unique whatever the case
+        expect((await alice.agent.post('/v1/communities').send({ name: 'premierLEAGUE' })).status).toBe(409);
+    });
+
+    it('finds communities in any case and by old names, and only lets the capitals of the handle change', async () => {
+        const alice = await signUp('alice');
+        const bob = await signUp('bob');
+        await createCommunity(alice.agent, 'lagosrent');
+        const community = await prisma.community.findUniqueOrThrow({ where: { name: 'lagosrent' } });
+        await prisma.communityAlias.create({ data: { name: 'lagos_rent', community_id: community.id } });
+
+        for (const name of ['LAGOSRENT', 'LagosRent', 'lagos_rent']) {
+            const found = await api().get(`/v1/communities/${name}`);
+            expect(found.status, name).toBe(200);
+            expect(found.body.community.name).toBe('lagosrent');
+        }
+        // An old name can't be taken by a new community
+        expect((await bob.agent.post('/v1/communities').send({ name: 'lagos_rent' })).status).toBe(400);
+
+        expect((await alice.agent.patch('/v1/communities/lagosrent').send({ name_styled: 'LagosRent' })).body.community.name_styled).toBe('LagosRent');
+        const wrong = await alice.agent.patch('/v1/communities/lagosrent').send({ name_styled: 'LagosRents' });
+        expect(wrong.status).toBe(400);
+        expect(wrong.body.error.code).toBe('name_style_mismatch');
+        // Only moderators style the name
+        expect((await bob.agent.patch('/v1/communities/lagosrent').send({ name_styled: 'LAGOSRENT' })).status).toBe(403);
+
+        // Posts carry the styled handle; crawlers asking for another casing or an old name get the canonical path
+        const post = await createPost(alice.agent, 'LagosRent');
+        expect((await api().get(`/v1/posts/${post.id}`)).body.post.community).toMatchObject({ name: 'lagosrent', name_styled: 'LagosRent' });
+        expect((await api().get('/v1/seo/status?type=community&id=lagos_rent')).body).toEqual({ state: 'live', path: '/c/lagosrent' });
     });
 
     it('lets a user join more than one community', async () => {

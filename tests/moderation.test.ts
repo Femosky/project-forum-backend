@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import prisma from '../src/prismaConnection';
 import { containsPhoneNumber, asksForPrivateContact, linkHosts } from '../src/modules/safety/filters';
-import { api, createComment, createCommunity, createPost, makeModerator, PASSWORD, signUp } from './helpers';
+import { api, createComment, createCommunity, createPost, makeModerator, PASSWORD, signUp, signInStaff } from './helpers';
 
 // Phase 5: reports and the mod queue, automatic filters, new-account friction, mutes, shadow-bans, suspensions,
 // takedowns and the blocklist
@@ -114,7 +114,7 @@ describe('filters', () => {
 
     it('holds link shorteners, blocklisted domains and phrases for everyone', async () => {
         await setup();
-        const admin = await signUp('root', { admin: true });
+        const admin = await signInStaff('root');
         const user = await signUp('regular');
 
         const shortened = await createPost(user.agent, 'jobs', { title: 'Great offer', body: 'Details at bit.ly/3xYz' });
@@ -247,15 +247,17 @@ describe('mutes', () => {
 });
 
 describe('admin panel', () => {
-    it('is for site admins only', async () => {
+    it('is for staff accounts only: a forum account, even with the old admin role, gets nothing', async () => {
         const user = await signUp('regular');
-        expect((await user.agent.get('/v1/admin/queue')).status).toBe(403);
+        const oldAdmin = await signUp('oldadmin', { admin: true });
+        expect((await user.agent.get('/v1/admin/queue')).status).toBe(401);
+        expect((await oldAdmin.agent.get('/v1/admin/queue')).status).toBe(401);
         expect((await api().get('/v1/admin/queue')).status).toBe(401);
     });
 
     it('shadow-bans: the author still sees their content, nobody else does, and counts follow', async () => {
         const { mod } = await setup();
-        const admin = await signUp('root', { admin: true });
+        const admin = await signInStaff('root');
         const spammer = await signUp('spammy');
         const post = await createPost(mod.agent, 'jobs');
         const before = await createComment(spammer.agent, post.id, { body: 'first' });
@@ -281,7 +283,7 @@ describe('admin panel', () => {
     });
 
     it('suspends an account (signing it out), lifts an expired suspension at sign-in, and logs both', async () => {
-        const admin = await signUp('root', { admin: true });
+        const admin = await signInStaff('root');
         const user = await signUp('naughty');
 
         const suspended = await admin.agent.post('/v1/admin/users/naughty/suspend').send({ days: 2, reason: 'Spam' });
@@ -296,13 +298,13 @@ describe('admin panel', () => {
         expect((await prisma.user.findUniqueOrThrow({ where: { username: 'naughty' } })).status).toBe('active');
 
         const log = await admin.agent.get('/v1/admin/mod-log');
-        expect(log.body.actions[0]).toMatchObject({ action: 'suspend_user', reason: 'Spam', actor: { username: 'root' } });
+        expect(log.body.actions[0]).toMatchObject({ action: 'suspend_user', reason: 'Spam', actor: null, staff: { name: 'root' } });
         expect((await admin.agent.get('/v1/admin/users?q=naug')).body.users[0].username).toBe('naughty');
     });
 
     it('takes a community down and restores it', async () => {
         await setup();
-        const admin = await signUp('root', { admin: true });
+        const admin = await signInStaff('root');
         expect((await admin.agent.post('/v1/admin/communities/jobs/takedown').send({ reason: 'Illegal content' })).status).toBe(200);
         expect((await api().get('/v1/communities/jobs')).status).toBe(404);
         expect((await api().get('/v1/seo/status?type=community&id=jobs')).body.state).toBe('gone');
@@ -313,7 +315,7 @@ describe('admin panel', () => {
     it('sees held content and reports from every community in one queue', async () => {
         const { mod } = await setup();
         await createCommunity(mod.agent, 'money');
-        const admin = await signUp('root', { admin: true });
+        const admin = await signInStaff('root');
         const fresh = await signUp('fresh', { fresh: true });
         const reporter = await signUp('reporter');
         await fresh.agent.post('/v1/posts').send({ community: 'jobs', title: 'Job', body: SCAM });
@@ -330,13 +332,13 @@ describe('admin panel', () => {
 describe('communities directory', () => {
     it('filters by category, searches and counts categories', async () => {
         const owner = await signUp('owner');
-        await createCommunity(owner.agent, 'lagos_homes', { category: 'housing', description: 'Flats and agents' });
+        await createCommunity(owner.agent, 'lagoshomes', { category: 'housing', description: 'Flats and agents' });
         await createCommunity(owner.agent, 'devs', { category: 'tech', description: 'Building software' });
         await createCommunity(owner.agent, 'misc');
         expect((await owner.agent.post('/v1/communities').send({ name: 'bad_cat', category: 'nope' })).status).toBe(400);
 
         const housing = await api().get('/v1/communities?category=housing');
-        expect(housing.body.communities.map((row: { name: string }) => row.name)).toEqual(['lagos_homes']);
+        expect(housing.body.communities.map((row: { name: string }) => row.name)).toEqual(['lagoshomes']);
         expect(housing.body.communities[0].category).toBe('housing');
         expect((await api().get('/v1/communities?q=software')).body.communities.map((row: { name: string }) => row.name)).toEqual(['devs']);
 

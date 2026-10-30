@@ -1,22 +1,23 @@
 import { ContentStatus, Prisma } from '@prisma/client';
 import { canModerate, ViewerContext } from '../modules/communities/access';
 import { isIndexable } from './indexing';
+import { avatarCode } from './avatars';
 
 // The only way posts and comments leave the API. Anonymous authors are hidden from everyone except the author
 // and moderators of that community; deleted and removed comments become placeholders.
 
-export const authorSelect = { username: true, display_name: true, avatar_id: true, status: true } as const;
+export const authorSelect = { username: true, display_name: true, avatar_id: true, avatar_config: true, status: true } as const;
 
 export const postInclude = {
     // created_at feeds the indexing rule (posts by brand-new accounts wait for engagement); it is not sent out
     author: { select: { ...authorSelect, created_at: true } },
-    community: { select: { id: true, name: true, display_name: true, image_url: true, visibility: true, status: true } },
+    community: { select: { id: true, name: true, name_styled: true, display_name: true, image_url: true, visibility: true, status: true } },
     flair: { select: { id: true, name: true, color: true } },
 } satisfies Prisma.PostInclude;
 
 export type PostRow = Prisma.PostGetPayload<{ include: typeof postInclude }>;
 
-type AuthorRow = { username: string; display_name: string | null; avatar_id: string; status: string } | null;
+type AuthorRow = { username: string; display_name: string | null; avatar_id: string; avatar_config?: Prisma.JsonValue; status: string } | null;
 
 // Statuses public lists may show. Pending content waits for a moderator; removed and deleted posts drop out.
 export const LISTED_POST_STATUSES: ContentStatus[] = ['active', 'locked'];
@@ -53,7 +54,7 @@ export const isHiddenFrom = (item: { shadow_hidden: boolean; author_id: string }
 
 function publicAuthor(author: AuthorRow) {
     if (!author || author.status === 'deleted') return null;
-    return { username: author.username, display_name: author.display_name, avatar_id: author.avatar_id };
+    return { username: author.username, display_name: author.display_name, avatar_id: author.avatar_id, avatar: avatarCode(author.avatar_config, author.username) };
 }
 
 export type VoteMap = Map<string, number>;
@@ -92,7 +93,13 @@ export function toPublicPost(post: PostRow, context: ViewerContext, votes?: Vote
         comment_count: post.comment_count,
         // Whether search engines should index this post's page (see lib/indexing.ts)
         is_indexable: isIndexable(post),
-        community: { id: post.community.id, name: post.community.name, display_name: post.community.display_name, image_url: post.community.image_url },
+        community: {
+            id: post.community.id,
+            name: post.community.name,
+            name_styled: post.community.name_styled ?? post.community.name,
+            display_name: post.community.display_name,
+            image_url: post.community.image_url,
+        },
         author: revealAuthor ? publicAuthor(post.author) : null,
         viewer: context
             ? {

@@ -5,6 +5,7 @@ import prisma from '../../prismaConnection';
 import { idOrShortId } from '../../lib/ids';
 import { badRequest, notFound, parse, uuidParam } from '../../lib/http';
 import { decideAds, MAX_ADS_PER_REQUEST, parseSeen } from './decision';
+import { resolveDestination } from './urls';
 
 // Public ad endpoints: the decision service, viewable-impression events, click-through and the advertiser's
 // read-only stats page. Admin management is in admin.ts.
@@ -81,7 +82,8 @@ router.get('/click/:id', async (request, response) => {
     await recordStats([{ id, impressions: 0, clicks: 1 }]);
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader('X-Robots-Tag', 'noindex, nofollow');
-    response.redirect(302, creative.click_url);
+    // Links to this site (and leftovers pointing at a local test server) land on the same page of WEB_URL
+    response.redirect(302, resolveDestination(creative.click_url));
 });
 
 // Adds to today's AdDailyStat rows (days run on Lagos time). Unknown creative ids are skipped.

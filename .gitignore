@@ -6,3 +6,6 @@ node_modules
 
 /src/generated/prisma
 build
+
+# Uploaded images in local development (lib/storage.ts)
+uploads/

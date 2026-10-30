@@ -1,3 +1,4 @@
+import { avatarCode } from '../../lib/avatars';
 import { Router } from 'express';
 import { Community, CommunityMember, Prisma } from '@prisma/client';
 import prisma from '../../prismaConnection';
@@ -37,10 +38,13 @@ const router = Router();
 export function toPublicCommunity(community: Community) {
     return {
         id: community.id,
+        // The URL key (lowercase) and the handle as shown ("PremierLeague")
         name: community.name,
+        name_styled: community.name_styled ?? community.name,
         display_name: community.display_name,
         description: community.description,
         image_url: community.image_url,
+        banner_url: community.banner_url,
         rules: community.rules,
         category: community.category,
         visibility: community.visibility,
@@ -102,13 +106,18 @@ router.get('/categories', async (request, response) => {
 router.post('/', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const input = parse(createCommunitySchema, request.body);
-    if (RESERVED_NAMES.has(input.name)) throw badRequest('That name is reserved.', 'name_reserved');
+    if (RESERVED_NAMES.has(input.name.toLowerCase())) throw badRequest('That name is reserved.', 'name_reserved');
+    // An old name still points at the community that had it
+    if (await prisma.communityAlias.findUnique({ where: { name: input.name } })) {
+        throw conflict('A community with that name already exists.', 'name_taken');
+    }
 
     try {
         const community = await prisma.$transaction(async (tx) => {
             const created = await tx.community.create({
                 data: {
-                    name: input.name,
+                    name: input.name.toLowerCase(),
+                    name_styled: input.name,
                     display_name: input.display_name ?? null,
                     description: input.description ?? null,
                     visibility: input.visibility,
@@ -142,7 +151,7 @@ router.get('/:name', optionalAuth, async (request: AuthRequest, response) => {
         prisma.communityMember.findMany({
             where: { community_id: community.id, role: { in: ['owner', 'moderator'] }, is_banned: false },
             orderBy: { joined_at: 'asc' },
-            select: { role: true, user: { select: { username: true, display_name: true, avatar_id: true } } },
+            select: { role: true, user: { select: { username: true, display_name: true, avatar_id: true, avatar_config: true } } },
         }),
         userId ? activeMute(community.id, userId) : null,
     ]);
@@ -150,7 +159,7 @@ router.get('/:name', optionalAuth, async (request: AuthRequest, response) => {
     const queue = moderates ? await queueCount({ communityId: community.id }) : null;
     response.json({
         community: toPublicCommunity(community),
-        moderators: moderators.map((row) => ({ ...row.user, role: row.role })),
+        moderators: moderators.map(({ user: { avatar_config, ...user }, role }) => ({ ...user, avatar: avatarCode(avatar_config, user.username), role })),
         viewer: request.viewer ? viewerMembership(member, Boolean(pending), mute?.muted_until ?? null, queue) : null,
     });
 });
@@ -160,6 +169,9 @@ router.patch('/:name', requireAuth, async (request: AuthRequest, response) => {
     const community = await findCommunity(String(request.params.name));
     await assertModerator(community.id, user);
     const input = parse(updateCommunitySchema, request.body);
+    if (input.name_styled && input.name_styled.toLowerCase() !== community.name) {
+        throw badRequest('Only capital letters can change: the letters must stay the same as the name.', 'name_style_mismatch');
+    }
 
     const updated = await prisma.community.update({
         where: { id: community.id },

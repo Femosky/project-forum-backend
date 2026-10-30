@@ -107,7 +107,10 @@ async function pageState(type: 'post' | 'community' | 'user', id: string): Promi
         return { state: 'live', path: postPath(post) };
     }
     if (type === 'community') {
-        const community = await prisma.community.findUnique({ where: { name: id.toLowerCase() }, select: { name: true, status: true } });
+        // Any case, or an old name: the live path is the canonical one, so crawlers get a 301 to it
+        const community =
+            (await prisma.community.findUnique({ where: { name: id }, select: { name: true, status: true } })) ??
+            (await prisma.communityAlias.findUnique({ where: { name: id }, select: { community: { select: { name: true, status: true } } } }))?.community;
         if (!community) return { state: 'missing' };
         if (community.status === 'deleted') return { state: 'gone' };
         return { state: 'live', path: `/c/${community.name}` };

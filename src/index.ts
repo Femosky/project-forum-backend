@@ -5,16 +5,20 @@ import { startJobs, stopJobs } from './lib/jobs';
 import prisma from './prismaConnection';
 import { flushAnalytics } from './lib/analytics';
 import { reportError } from './lib/errorReport';
+import { startMetricsFlusher, stopMetricsFlusher } from './modules/metrics/buffer';
 
 const server = app.listen(env.PORT, () => {
     logger.info(`Server is running on port: ${env.PORT}`);
 });
 
+startMetricsFlusher();
 startJobs().catch((error) => logger.error({ err: error }, 'Job queue failed to start; jobs will run inline'));
 
 async function shutdown(signal: string) {
     logger.info({ signal }, 'Shutting down');
     server.close();
+    // Buffered view counts, visits and last-active times are written before the process goes
+    await stopMetricsFlusher().catch(() => undefined);
     await stopJobs().catch(() => undefined);
     await flushAnalytics();
     await prisma.$disconnect();

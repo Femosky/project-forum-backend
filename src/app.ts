@@ -10,6 +10,7 @@ import { MemoryStore } from 'express-rate-limit';
 import { limiter } from './lib/rateLimit';
 import { errorHandler, notFoundHandler } from './lib/errors';
 import { optionalAuth } from './middlewares/auth';
+import { noteActivity } from './lib/jobs';
 import authRoutes from './modules/auth/routes';
 import communityRoutes from './modules/communities/routes';
 import postRoutes from './modules/posts/routes';
@@ -21,7 +22,12 @@ import moderationRoutes from './modules/moderation/routes';
 import notificationRoutes from './modules/notifications/routes';
 import seoRoutes from './modules/seo/routes';
 import adminRoutes from './modules/admin/routes';
+import { auditRoutes, staffAuthRoutes, staffRoutes } from './modules/staff/routes';
 import adsRoutes from './modules/ads/routes';
+import metricsRoutes from './modules/metrics/routes';
+import trendingRoutes from './modules/trending/routes';
+import imageRoutes from './modules/images/routes';
+import { LOCAL_MEDIA_DIR, storageDriver } from './lib/storage';
 
 const app = express();
 
@@ -46,6 +52,13 @@ app.use(
         },
     })
 );
+
+// Anything but a health check counts as the site being used: an idle job queue starts again (lib/jobs.ts). Uptime
+// monitors ping /v1/health, which touches neither the database nor this.
+app.use((request, response, next) => {
+    if (request.path !== '/v1/health') noteActivity();
+    next();
+});
 
 app.use(helmet());
 app.use(cors({ origin: env.WEB_ORIGINS, credentials: true, exposedHeaders: ['X-Request-Id'] }));
@@ -89,6 +102,8 @@ for (const path of ['/auth/signup', '/auth/login', '/auth/forgot-password', '/au
     v1.use(path, authLimiter);
 }
 v1.post('/auth/signup', signupLimiter);
+// Page-view beacons arrive once per page, so they skip the write limit (the read limit still applies)
+v1.use('/metrics', metricsRoutes);
 // Identify the caller before the write limiter so limits are per account where possible
 v1.use(optionalAuth, writeLimiter);
 v1.use('/auth', authRoutes);
@@ -98,8 +113,15 @@ v1.use('/posts', postRoutes);
 v1.use('/comments', commentRoutes);
 v1.use('/users', userRoutes);
 v1.use('/search', searchRoutes);
+v1.use('/trending', trendingRoutes);
+v1.use('/images', imageRoutes);
 v1.use('/notifications', notificationRoutes);
 v1.use('/seo', seoRoutes);
+// The admin panel: staff sign-in first (it limits failed attempts itself: staff/routes.ts), then everything else needs a
+// staff session
+v1.use('/admin/auth', staffAuthRoutes);
+v1.use('/admin/staff', staffRoutes);
+v1.use('/admin/audit', auditRoutes);
 v1.use('/admin', adminRoutes);
 v1.use('/ads', adsRoutes);
 v1.use(moderationRoutes);
@@ -107,6 +129,19 @@ v1.get('/health', (request, response) => {
     response.json({ status: 'ok' });
 });
 app.use('/v1', v1);
+
+// Uploaded images on local disk (development; production serves them from R2). File names are never reused.
+if (storageDriver() === 'local') {
+    app.use(
+        '/media',
+        express.static(LOCAL_MEDIA_DIR, {
+            immutable: true,
+            maxAge: '365d',
+            fallthrough: false,
+            setHeaders: (response) => response.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'),
+        })
+    );
+}
 
 app.get('/', (request, response) => {
     response.send('Welcome to the "Project Forum" API. See /v1.');

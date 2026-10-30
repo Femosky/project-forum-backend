@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import prisma from '../src/prismaConnection';
 import { env } from '../src/config/env';
-import { Agent, api, createCommunity, createPost, signUp } from './helpers';
+import { decideAds } from '../src/modules/ads/decision';
+import { Agent, api, createCommunity, createPost, signUp, signInStaff } from './helpers';
 
 // Phase 6: the ad decision service, brand safety, frequency caps, budgets, impressions and clicks, the
 // advertiser stats page, admin campaign management and ad reports
@@ -15,10 +16,12 @@ afterEach(() => {
 });
 
 async function setup() {
-    const admin = await signUp('adminy', { admin: true });
-    await createCommunity(admin.agent, 'lagos_jobs', { category: 'careers' });
-    await createCommunity(admin.agent, 'cooking', { category: 'food' });
-    return admin;
+    // Staff run the ads; a forum account owns the communities (staff accounts can't post)
+    const admin = await signInStaff('adminy');
+    const owner = await signUp('owner');
+    await createCommunity(owner.agent, 'lagosjobs', { category: 'careers' });
+    await createCommunity(owner.agent, 'cooking', { category: 'food' });
+    return { ...admin, owner };
 }
 
 async function campaign(agent: Agent, fields: Record<string, unknown> = {}, creative: Record<string, unknown> = {}) {
@@ -50,12 +53,12 @@ describe('decision service', () => {
         const admin = await setup();
         Object.assign(env, ADSENSE);
 
-        const before = await feedAds('community=lagos_jobs&count=2');
+        const before = await feedAds('community=lagosjobs&count=2');
         expect(before.body.ads.map((ad: { kind: string }) => ad.kind)).toEqual(['adsense', 'adsense']);
         expect(before.body.ads[0]).toMatchObject({ client: ADSENSE.ADSENSE_CLIENT_ID, slot_id: '111', format: 'in-feed' });
 
-        const { creative } = await campaign(admin.agent, { targeting: { communities: ['lagos_jobs'] } });
-        const after = await feedAds('community=lagos_jobs&count=2');
+        const { creative } = await campaign(admin.agent, { targeting: { communities: ['lagosjobs'] } });
+        const after = await feedAds('community=lagosjobs&count=2');
         expect(after.body.ads.map((ad: { kind: string }) => ad.kind)).toEqual(['direct', 'adsense']);
         expect(after.body.ads[0]).toMatchObject({
             id: creative.id,
@@ -72,7 +75,7 @@ describe('decision service', () => {
         await campaign(admin.agent, { kind: 'house', name: 'Start a community' }, { headline: 'Start your own community' });
         await campaign(admin.agent, { targeting: { categories: ['careers'] } });
 
-        const careers = await feedAds('community=lagos_jobs&count=3');
+        const careers = await feedAds('community=lagosjobs&count=3');
         expect(careers.body.ads.map((ad: { kind: string }) => ad.kind)).toEqual(['direct', 'house']);
         const food = await feedAds('community=cooking&count=3');
         expect(food.body.ads.map((ad: { kind: string }) => ad.kind)).toEqual(['house']);
@@ -100,16 +103,16 @@ describe('decision service', () => {
 
     it('keeps ads off NSFW and sensitive communities unless an admin switches them on', async () => {
         const admin = await setup();
-        await createCommunity(admin.agent, 'after_dark', { is_nsfw: true });
-        await createCommunity(admin.agent, 'grief_support', { category: 'health' });
+        await createCommunity(admin.owner.agent, 'afterdark', { is_nsfw: true });
+        await createCommunity(admin.owner.agent, 'griefsupport', { category: 'health' });
         await campaign(admin.agent);
 
-        expect((await feedAds('community=after_dark&count=1')).body.ads).toHaveLength(0);
-        expect((await feedAds('community=grief_support&count=1')).body.ads).toHaveLength(0);
+        expect((await feedAds('community=afterdark&count=1')).body.ads).toHaveLength(0);
+        expect((await feedAds('community=griefsupport&count=1')).body.ads).toHaveLength(0);
         expect((await feedAds('community=cooking&count=1')).body.ads).toHaveLength(1);
 
-        await admin.agent.patch('/v1/admin/communities/grief_support/ads').send({ ads_enabled: true }).expect(200);
-        expect((await feedAds('community=grief_support&count=1')).body.ads).toHaveLength(1);
+        await admin.agent.patch('/v1/admin/communities/griefsupport/ads').send({ ads_enabled: true }).expect(200);
+        expect((await feedAds('community=griefsupport&count=1')).body.ads).toHaveLength(1);
         await admin.agent.patch('/v1/admin/communities/cooking/ads').send({ ads_enabled: false }).expect(200);
         expect((await feedAds('community=cooking&count=1')).body.ads).toHaveLength(0);
     });
@@ -118,7 +121,7 @@ describe('decision service', () => {
         const admin = await setup();
         Object.assign(env, ADSENSE);
         await campaign(admin.agent, {}, { format: 'thread_comment' });
-        const post = await createPost(admin.agent, 'cooking', { title: 'Best jollof rice method', body: 'Share yours' });
+        const post = await createPost(admin.owner.agent, 'cooking', { title: 'Best jollof rice method', body: 'Share yours' });
 
         const ok = await api().get(`/v1/ads?placement=thread&post=${post.short_id}&count=2`);
         expect(ok.body.ads.map((ad: { kind: string }) => ad.kind)).toEqual(['direct', 'adsense']);
@@ -181,10 +184,15 @@ describe('impressions, clicks and stats', () => {
 });
 
 describe('admin campaign management', () => {
-    it('is for site admins only', async () => {
+    it('is for staff with an ads role only', async () => {
         await setup();
         const user = await signUp('regular');
-        expect((await user.agent.get('/v1/admin/ads')).status).toBe(403);
+        expect((await user.agent.get('/v1/admin/ads')).status).toBe(401);
+        const moderator = await signInStaff('mod', 'moderator');
+        expect((await moderator.agent.get('/v1/admin/ads')).status).toBe(403);
+        const adsManager = await signInStaff('adsy', 'ads');
+        expect((await adsManager.agent.get('/v1/admin/ads')).status).toBe(200);
+        expect((await adsManager.agent.get('/v1/admin/queue')).status).toBe(403);
         expect((await api().get('/v1/admin/ads')).status).toBe(401);
     });
 
@@ -225,5 +233,72 @@ describe('reporting ads', () => {
 
         await admin.agent.patch(`/v1/admin/ads/creatives/${creative.id}`).send({ is_active: false }).expect(200);
         expect((await admin.agent.get('/v1/admin/queue')).body.items).toHaveLength(0);
+    });
+});
+
+describe('house ads with a share of slots', () => {
+    it('lets the site promote its own product even when paid campaigns fill every slot', async () => {
+        const admin = await setup();
+        const paid = await campaign(admin.agent, { priority: 10 }, { headline: 'Paid ad number one' });
+        const paidTwo = await campaign(admin.agent, { priority: 10 }, { headline: 'Paid ad number two' });
+        const house = await campaign(admin.agent, { kind: 'house', house_share: 30, frequency_cap: 2 }, { headline: 'Try Cardernir, our app' });
+        expect(house.campaign.house_share).toBe(30);
+        expect((await admin.agent.patch(`/v1/admin/ads/campaigns/${house.campaign.id}`).send({ house_share: 80 })).status).toBe(400);
+
+        const cooking = await prisma.community.findUniqueOrThrow({ where: { name: 'cooking' } });
+        const decide = (rolls: number[], seen = new Map<string, number>()) => {
+            let index = 0;
+            return decideAds({ placement: 'feed', community: cooking, count: 2, seen, random: () => rolls[index++ % rolls.length] });
+        };
+        // Rolls are taken for the shuffle (three candidates) and then one per slot: 0.9 = paid, 0.1 = under 30%
+        const ids = async (rolls: number[], seen?: Map<string, number>) => (await decide(rolls, seen)).map((ad) => ad.id);
+        expect(await ids([0.5, 0.5, 0.5, 0.9, 0.9])).toEqual(expect.arrayContaining([paid.creative.id, paidTwo.creative.id]));
+        expect((await ids([0.5, 0.5, 0.5, 0.1, 0.9]))[0]).toBe(house.creative.id);
+        // Shown once per page, and frequency caps still apply
+        expect((await ids([0.5, 0.5, 0.5, 0.1, 0.1])).filter((id) => id === house.creative.id)).toHaveLength(1);
+        expect(await ids([0.5, 0.5, 0.5, 0.1, 0.1], new Map([[house.campaign.id, 2]]))).not.toContain(house.creative.id);
+
+        // Brand safety too: no ads at all on NSFW communities
+        const spicy = { ...cooking, is_nsfw: true };
+        expect(await decideAds({ placement: 'feed', community: spicy, count: 2, seen: new Map(), random: () => 0 })).toEqual([]);
+
+        // House impressions are kept apart from paid ones in the daily stats
+        await api().post('/v1/ads/events').send({ impressions: [house.creative.id, paid.creative.id] });
+        const stats = await admin.agent.get('/v1/admin/stats?days=1');
+        expect(stats.body.today).toMatchObject({ ad_impressions: 1, house_impressions: 1 });
+    });
+});
+
+describe('ad destinations', () => {
+    it('shows links to this site as the site itself and sends clicks to WEB_URL, never to localhost', async () => {
+        const admin = await setup();
+        const local = await campaign(admin.agent, { kind: 'house' }, { headline: 'Start a community today', click_url: 'http://localhost:3000/communities?new=1' });
+        const relative = await campaign(admin.agent, { kind: 'house' }, { headline: 'Start a community now', click_url: '/communities' });
+        const ads = (await feedAds('community=cooking&count=3')).body.ads as { id: string; creative: { display_url: string | null } }[];
+        const byId = new Map(ads.map((ad) => [ad.id, ad]));
+        expect(byId.get(local.creative.id)!.creative.display_url).toBeNull();
+        expect(byId.get(relative.creative.id)!.creative.display_url).toBeNull();
+
+        const click = await api().get(`/v1/ads/click/${local.creative.id}`);
+        expect(click.headers.location).toBe(`${env.WEB_URL}/communities?new=1`);
+        expect((await api().get(`/v1/ads/click/${relative.creative.id}`)).headers.location).toBe(`${env.WEB_URL}/communities`);
+    });
+
+    it('accepts only public https links in production', async () => {
+        const admin = await setup();
+        const advertiser = await admin.agent.post('/v1/admin/ads/advertisers').send({ name: 'Local Test' });
+        const created = await admin.agent
+            .post('/v1/admin/ads/campaigns')
+            .send({ advertiser_id: advertiser.body.advertiser.id, name: 'Check', status: 'active' });
+        const add = (click_url: string) =>
+            admin.agent.post(`/v1/admin/ads/campaigns/${created.body.campaign.id}/creatives`).send({ format: 'feed_post', headline: 'Checking links', click_url });
+
+        Object.assign(env, { IS_PRODUCTION: true });
+        for (const bad of ['http://localhost:3000/x', 'https://127.0.0.1/x', 'https://192.168.1.4/x', 'https://printer.local/x', 'http://acme.example/x', '//evil.example/x', 'javascript:alert(1)']) {
+            expect((await add(bad)).status, bad).toBe(400);
+        }
+        expect((await add('https://acme.example/offer')).status).toBe(201);
+        expect((await add('/communities')).status).toBe(201);
+        expect((await admin.agent.post('/v1/admin/ads/advertisers').send({ name: 'Bad', website: 'http://localhost:3000' })).status).toBe(400);
     });
 });

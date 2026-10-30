@@ -1,11 +1,13 @@
-# Render Blueprint for the API (docs/DEPLOY.md). Free web service in Ohio, next to the Neon database (us-east-2).
+# Render Blueprint for the API (docs/DEPLOY.md). Starter web service in Frankfurt, next to the Neon database in
+# AWS Europe Central 1 (Frankfurt): the closest region to Nigeria either host offers. The move from the old Ohio
+# setup is step by step in docs/LAUNCH.md (project root), "Moving to Frankfurt".
 # Deploys are triggered by GitHub Actions after CI passes and migrations have run, so autoDeploy is off.
 services:
   - type: web
     name: forum-api
     runtime: node
-    plan: free
-    region: ohio
+    plan: starter
+    region: frankfurt
     branch: main
     autoDeploy: false
     buildCommand: npm ci --include=dev && npm run build
@@ -29,9 +31,12 @@ services:
         sync: false
       - key: COOKIE_DOMAIN
         sync: false
-      # The free instance sleeps when idle; inline jobs keep Neon free to scale to zero as well
+      # The job queue runs while the site is in use and stops after 5 minutes without requests (health checks don't
+      # count), so Neon can suspend and stay inside the free plan's 100 compute hours (docs/DEPLOY.md, "Jobs")
       - key: JOBS_ENABLED
-        value: "false"
+        value: "true"
+      - key: JOBS_IDLE_SUSPEND_MINUTES
+        value: "5"
       - key: RATE_LIMIT_STORE
         value: postgres
       - key: RESEND_API_KEY
@@ -48,3 +53,14 @@ services:
         sync: false
       - key: ADSENSE_ENABLED
         value: "false"
+      # Image uploads (Cloudflare R2); docs/LAUNCH.md at the project root, Part 13
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_PUBLIC_URL
+        sync: false

@@ -38,6 +38,7 @@ type RawComment = Omit<CommentRow, 'author'> & {
     author_username: string | null;
     author_display_name: string | null;
     author_avatar_id: string | null;
+    author_avatar_config: Prisma.JsonValue;
     author_status: string | null;
 };
 
@@ -57,7 +58,7 @@ async function loadDescendants(parents: ParentRef[], levels: number, perParent: 
                    c."created_at", c."edited_at", c."pinned_at",
                    c."upvote_count", c."downvote_count", c."score", c."reply_count", c."best_rank", c."view_count",
                    u."username" AS "author_username", u."display_name" AS "author_display_name",
-                   u."avatar_id" AS "author_avatar_id", u."status"::text AS "author_status",
+                   u."avatar_id" AS "author_avatar_id", u."avatar_config" AS "author_avatar_config", u."status"::text AS "author_status",
                    row_number() OVER (PARTITION BY c."parent_id" ORDER BY ${orderSql(sort, 'c')}) AS "rank"
             FROM "Comment" c
             LEFT JOIN "User" u ON u."id" = c."author_id"
@@ -70,12 +71,18 @@ async function loadDescendants(parents: ParentRef[], levels: number, perParent: 
         WHERE t."rank" <= ${perParent}
         ORDER BY t."depth", ${orderSql(sort, 't')}`;
 
-    return rows.map(({ author_username, author_display_name, author_avatar_id, author_status, ...row }) => {
+    return rows.map(({ author_username, author_display_name, author_avatar_id, author_avatar_config, author_status, ...row }) => {
         delete (row as { rank?: unknown }).rank;
         return {
             ...row,
             author: author_username
-                ? { username: author_username, display_name: author_display_name, avatar_id: author_avatar_id!, status: author_status! }
+                ? {
+                      username: author_username,
+                      display_name: author_display_name,
+                      avatar_id: author_avatar_id!,
+                      avatar_config: author_avatar_config,
+                      status: author_status!,
+                  }
                 : null,
         } as CommentRow;
     });
@@ -254,6 +261,7 @@ export async function createComment(input: CreateCommentInput) {
             // Held and shadow-hidden comments aren't counted until (unless) they become visible
             if (!input.heldReason && !input.shadowHidden) {
                 await tx.post.update({ where: { id: input.postId }, data: { comment_count: { increment: 1 } } });
+                await refreshHotRank(tx, input.postId);
                 if (parent) {
                     await tx.comment.update({ where: { id: parent.id }, data: { reply_count: { increment: 1 } } });
                 }
@@ -278,12 +286,19 @@ export async function setCommentStatus(
         const updated = await tx.comment.update({ where: { id: comment.id }, data: { status, ...extra }, include: commentInclude });
         if (change !== 0) {
             await tx.post.update({ where: { id: comment.post_id }, data: { comment_count: { increment: change } } });
+            await refreshHotRank(tx, comment.post_id);
         }
         if (treeChange !== 0 && comment.parent_id) {
             await tx.comment.update({ where: { id: comment.parent_id }, data: { reply_count: { increment: treeChange } } });
         }
         return updated;
     });
+}
+
+// Replies count towards the hot rank (lib/ranking.ts), so it moves with the comment count. Same formula, in SQL.
+export async function refreshHotRank(tx: Prisma.TransactionClient, postId: string) {
+    await tx.$executeRaw`
+        UPDATE "Post" SET "hot_rank" = forum_hot_rank("score", "comment_count", "created_at") WHERE "id" = ${postId}::uuid`;
 }
 
 export function assertCommentable(post: { status: string }) {

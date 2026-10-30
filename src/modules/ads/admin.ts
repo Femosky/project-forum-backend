@@ -5,9 +5,12 @@ import { z } from 'zod';
 import { env } from '../../config/env';
 import prisma from '../../prismaConnection';
 import { badRequest, notFound, parse, uuidParam } from '../../lib/http';
-import { AuthRequest, viewerOf } from '../../middlewares/auth';
+import { audit, staffOf } from '../staff/service';
 import { COMMUNITY_CATEGORIES, LIMITS } from '../../shared/validation';
 import { closeReports } from '../moderation/queue';
+import { findCommunity } from '../communities/access';
+import { linkProblem } from './urls';
+import { isStoredMedia } from '../../lib/storage';
 import { campaignSpend, clearAdCache, readTargeting, targetingSchema } from './decision';
 
 // Ad campaign management for site admins, mounted at /v1/admin/ads (the admin router has already checked the
@@ -16,13 +19,42 @@ import { campaignSpend, clearAdCache, readTargeting, targetingSchema } from './d
 
 const router = Router();
 
+// Every change made here goes to the staff audit log, once it has succeeded
+router.use((request, response, next) => {
+    if (request.method !== 'GET') {
+        response.on('finish', () => {
+            if (response.statusCode < 400) {
+                void audit(request, `ads_${request.method.toLowerCase()}`, { type: 'ads', id: request.path }, { fields: Object.keys(request.body ?? {}) }).catch(() => undefined);
+            }
+        });
+    }
+    next();
+});
+
 const webUrl = z
     .string()
     .trim()
     .max(LIMITS.URL_MAX)
-    .url()
-    .refine((value) => /^https?:\/\//i.test(value), 'Use an http or https link');
-const imageUrl = webUrl.refine((value) => value.startsWith('https://'), 'Images must use https');
+    .superRefine((value, context) => {
+        const problem = linkProblem(value, { allowSitePath: false });
+        if (problem) context.addIssue({ code: 'custom', message: problem });
+    });
+// Where an ad leads: an advertiser's https link, or a page on this site ("/communities"), which is resolved
+// against WEB_URL when served (ads/urls.ts)
+const destinationUrl = z
+    .string()
+    .trim()
+    .max(LIMITS.URL_MAX)
+    .superRefine((value, context) => {
+        const problem = linkProblem(value, { allowSitePath: true });
+        if (problem) context.addIssue({ code: 'custom', message: problem });
+    });
+// Pictures: uploaded through POST /v1/admin/images (our own storage), or an https link
+const imageUrl = z
+    .string()
+    .trim()
+    .max(LIMITS.URL_MAX)
+    .refine((value) => isStoredMedia(value) || value.startsWith('https://'), 'Upload a picture, or use an https link');
 const optional = <T extends z.ZodType>(schema: T) => schema.nullable().optional();
 
 const advertiserSchema = z.object({
@@ -46,6 +78,8 @@ const campaignFields = z.object({
     currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, 'Use a 3-letter currency code like NGN'),
     frequency_cap: optional(z.number().int().min(1).max(100)),
     priority: z.number().int().min(-100).max(100),
+    // House campaigns: percent of slots they take even when paid campaigns exist (decision.ts)
+    house_share: z.number().int().min(0).max(50),
     payment_url: optional(webUrl),
     paid: z.boolean(),
 });
@@ -61,7 +95,7 @@ const creativeFields = z.object({
     headline: z.string().trim().min(3).max(120),
     body: optional(z.string().trim().max(500)),
     image_url: optional(imageUrl),
-    click_url: webUrl,
+    click_url: destinationUrl,
     cta_label: z.string().trim().min(2).max(24),
     is_active: z.boolean(),
 });
@@ -72,11 +106,11 @@ const updateCreativeSchema = creativeFields.partial();
 async function validTargeting(targeting: z.infer<typeof targetingSchema>) {
     const categories = targeting.categories.filter((category) => !(category in COMMUNITY_CATEGORIES));
     if (categories.length > 0) throw badRequest(`Unknown category: ${categories.join(', ')}`, 'unknown_category');
-    const names = [...new Set(targeting.communities)];
-    const found = await prisma.community.findMany({ where: { name: { in: names } }, select: { name: true } });
-    const missing = names.filter((name) => !found.some((row) => row.name === name));
+    // Stored under each community's current name, whatever case or old name was typed
+    const found = await Promise.all(targeting.communities.map((name) => findCommunity(name).catch(() => null)));
+    const missing = targeting.communities.filter((_, index) => !found[index]);
     if (missing.length > 0) throw badRequest(`No community called ${missing.join(', ')}`, 'unknown_community');
-    return { communities: names, categories: [...new Set(targeting.categories)] };
+    return { communities: [...new Set(found.map((community) => community!.name))], categories: [...new Set(targeting.categories)] };
 }
 
 function checkDates(starts: Date | null | undefined, ends: Date | null | undefined) {
@@ -237,13 +271,12 @@ router.post('/campaigns/:id/creatives', async (request, response) => {
 });
 
 // Pausing a creative also settles open reports about it
-router.patch('/creatives/:id', async (request: AuthRequest, response) => {
-    const { user } = viewerOf(request);
+router.patch('/creatives/:id', async (request, response) => {
     const id = uuidParam(request.params.id, 'Ad not found');
     const input = parse(updateCreativeSchema, request.body);
     if (!(await prisma.adCreative.findUnique({ where: { id }, select: { id: true } }))) throw notFound('Ad not found');
     const creative = await prisma.adCreative.update({ where: { id }, data: input });
-    if (input.is_active === false) await closeReports('ad', id, 'resolved', user.id);
+    if (input.is_active === false) await closeReports('ad', id, 'resolved', { staffId: staffOf(request).id });
     clearAdCache();
     response.json({ creative });
 });

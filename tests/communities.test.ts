@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import prisma from '../src/prismaConnection';
-import { api, createComment, createCommunity, createPost, makeModerator, signUp } from './helpers';
+import { api, createComment, createCommunity, createPost, makeModerator, signUp, signInStaff } from './helpers';
 
 describe('private communities', () => {
     it('hides posts from non-members and turns joins into requests', async () => {
@@ -103,11 +103,15 @@ describe('reports', () => {
         expect(resolved.body.closed).toBe(2);
         expect((await alice.agent.get('/v1/communities/lounge/reports')).body.reports).toEqual([]);
 
-        // A report about a user goes to site admins
+        // A report about a user goes to site staff, who close it from the admin panel
         await carol.agent.post('/v1/reports').send({ target_type: 'user', target_id: bob.user.id, reason_code: 'spam' });
-        expect((await alice.agent.get('/v1/admin/reports')).status).toBe(403);
-        const admin = await signUp('root', { admin: true });
-        expect((await admin.agent.get('/v1/admin/reports')).body.reports).toHaveLength(1);
+        expect((await alice.agent.get('/v1/admin/queue')).status).toBe(401);
+        const admin = await signInStaff('root', 'moderator');
+        const siteQueue = await admin.agent.get('/v1/admin/queue');
+        const userReport = siteQueue.body.items.find((item: { target_type: string }) => item.target_type === 'user');
+        expect(userReport).toBeTruthy();
+        expect((await alice.agent.post(`/v1/reports/${userReport.report_ids[0]}/resolve`).send({ status: 'dismissed' })).status).toBe(403);
+        expect((await admin.agent.post(`/v1/admin/reports/${userReport.report_ids[0]}/resolve`).send({ status: 'dismissed' })).body.closed).toBe(1);
     });
 });
 

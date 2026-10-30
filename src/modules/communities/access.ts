@@ -22,8 +22,12 @@ export async function viewerContext(viewer: Viewer | undefined): Promise<ViewerC
 export const canModerate = (context: ViewerContext, communityId: string) =>
     Boolean(context && (context.isAdmin || context.moderates.has(communityId)));
 
+// A community by name, in any case (names are citext), or by an old name it was renamed from. Callers that show a
+// page compare the returned name with what was asked for and redirect to the canonical one.
 export async function findCommunity(name: string) {
-    const community = await prisma.community.findUnique({ where: { name: name.toLowerCase() } });
+    const community =
+        (await prisma.community.findUnique({ where: { name } })) ??
+        (await prisma.communityAlias.findUnique({ where: { name }, include: { community: true } }))?.community;
     if (!community || community.status === 'deleted') throw notFound('Community not found');
     return community;
 }

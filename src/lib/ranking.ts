@@ -2,11 +2,17 @@
 
 const EPOCH_OFFSET = 1134028003; // seconds; keeps hot ranks small
 
-// Hot rank grows by 1 every 12.5 hours and by 1 for every 10x more net votes. No decay job is needed:
-// newer posts simply start higher.
-export function hotRank(score: number, createdAt: Date): number {
-    const order = Math.log10(Math.max(Math.abs(score), 1));
-    const sign = score > 0 ? 1 : score < 0 ? -1 : 0;
+// How much one visible comment counts in the hot rank, against one net vote
+export const HOT_COMMENT_WEIGHT = 0.5;
+
+// Hot rank grows by 1 every 12.5 hours and by 1 for every 10x more engagement. Engagement is net votes plus half
+// the visible comment count, so a thread people are replying to rises even when nobody votes. No decay job is
+// needed: newer posts simply start higher. The migration's forum_hot_rank() SQL function is the same formula,
+// for recomputing in the database when comments come and go (a test keeps the two in step).
+export function hotRank(score: number, createdAt: Date, commentCount = 0): number {
+    const engagement = score + HOT_COMMENT_WEIGHT * commentCount;
+    const order = Math.log10(Math.max(Math.abs(engagement), 1));
+    const sign = engagement > 0 ? 1 : engagement < 0 ? -1 : 0;
     const seconds = createdAt.getTime() / 1000 - EPOCH_OFFSET;
     return Number((sign * order + seconds / 45000).toFixed(7));
 }

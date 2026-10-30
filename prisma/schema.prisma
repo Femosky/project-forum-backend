@@ -13,7 +13,7 @@ generator client {
 datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
-  extensions = [pg_trgm]
+  extensions = [pg_trgm, citext]
 }
 
 /**
@@ -144,8 +144,10 @@ model User {
   google_id         String?   @unique
   email_verified_at DateTime?
 
-  display_name String?
-  avatar_id    String  @default("default_1")
+  display_name  String?
+  avatar_id     String  @default("default_1")
+  // Drawn avatar parts (lib/avatars.ts); null = derived from the account id
+  avatar_config Json?
 
   role   UserRole   @default(user)
   status UserStatus @default(active)
@@ -153,8 +155,10 @@ model User {
   // Users confirm they are 18+ at signup; we keep the time of the attestation, not a birth date
   adult_attested_at DateTime?
 
-  karma         Int       @default(0)
-  last_login_at DateTime?
+  karma          Int       @default(0)
+  last_login_at  DateTime?
+  // Last request as a signed-in user, written at most every 15 minutes (lib/activity.ts)
+  last_active_at DateTime?
 
   // Site-admin actions. A suspension with no end date is permanent; an expired one is lifted at the next sign-in.
   suspended_until          DateTime?
@@ -188,11 +192,13 @@ model User {
   notifications      Notification[] @relation("notification_recipient")
   notifications_sent Notification[] @relation("notification_actor")
 
-  mutes         CommunityMute[] @relation("muted_user")
-  mutes_given   CommunityMute[] @relation("muted_by")
+  mutes         CommunityMute[]   @relation("muted_user")
+  mutes_given   CommunityMute[]   @relation("muted_by")
   blocked_terms BlockedTerm[]
+  active_days   DailyActiveUser[]
 
   @@index([status])
+  @@index([last_active_at])
   @@index([username(ops: raw("gin_trgm_ops"))], map: "User_username_trgm_idx", type: Gin)
 }
 
@@ -263,11 +269,16 @@ model Community {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  // Lowercase, 3-21 chars; the URL key
-  name         String              @unique
+  // The URL key: 3-21 lowercase letters and digits, never changes (/c/premierleague). citext, so lookups in any case
+  // find it; old names (CommunityAlias) redirect to it.
+  name         String              @unique @db.Citext
+  // The same letters with the capitals the community chose ("PremierLeague"), shown as the handle; null = name
+  name_styled  String?
   display_name String?
   description  String?
   image_url    String?
+  // 4:1 header picture
+  banner_url   String?
   rules        Json?
   // One of COMMUNITY_CATEGORIES (src/shared/validation.ts), for the directory
   category     String?
@@ -294,10 +305,17 @@ model Community {
   mod_actions   ModAction[]
   reports       Report[]
 
+  aliases         CommunityAlias[]
+  trending        TrendingCommunity[]
+  trending_topics TrendingTopic[]
+  daily_visitors  CommunityDailyVisitor[]
+  daily_traffic   CommunityDailyTraffic[]
+  daily_stats     CommunityDailyStat[]
+  // Plus a trigram GIN index on name for autocomplete (raw SQL in the migration)
+
   @@index([status, member_count(sort: Desc)])
   @@index([category, member_count(sort: Desc)])
   @@index([search_vector], type: Gin)
-  @@index([name(ops: raw("gin_trgm_ops"))], map: "Community_name_trgm_idx", type: Gin)
 }
 
 // Membership, moderator role and bans in one table
@@ -430,6 +448,7 @@ model Post {
   votes         PostVote[]
   saves         SavedPost[]
   notifications Notification[]
+  trending      TrendingPost[]
 
   // Feed indexes. Status is left out on purpose: almost every post is listed, so scanning in rank order and
   // filtering status (and community visibility) stops after one page, while a status column in the index
@@ -484,6 +503,9 @@ model Comment {
   // Wilson score lower bound, for "best" sort
   best_rank      Float @default(0)
 
+  // Generated tsvector over the body (raw SQL in the migration)
+  search_vector Unsupported("tsvector")?
+
   votes         CommentVote[]
   saves         SavedComment[]
   notifications Notification[]
@@ -493,6 +515,7 @@ model Comment {
   @@index([parent_id, best_rank(sort: Desc), id(sort: Desc)])
   @@index([root_id, path])
   @@index([author_id, created_at(sort: Desc)])
+  @@index([search_vector], type: Gin)
   // The mod queue's held comments
   @@index([status, post_id])
 }
@@ -564,12 +587,14 @@ model Report {
   community_id String?          @db.Uuid
   community    Community?       @relation(fields: [community_id], references: [id], onDelete: Cascade)
 
-  reason_code ReportReason
-  note        String?
-  status      ReportStatus @default(open)
-  resolved_by String?      @db.Uuid
-  resolver    User?        @relation("resolver", fields: [resolved_by], references: [id])
-  resolved_at DateTime?
+  reason_code       ReportReason
+  note              String?
+  status            ReportStatus  @default(open)
+  resolved_by       String?       @db.Uuid
+  resolver          User?         @relation("resolver", fields: [resolved_by], references: [id])
+  resolved_by_staff String?       @db.Uuid
+  staff_resolver    StaffAccount? @relation(fields: [resolved_by_staff], references: [id], onDelete: SetNull)
+  resolved_at       DateTime?
 
   @@unique([reporter_id, target_type, target_id])
   @@index([community_id, status, created_at])
@@ -582,10 +607,13 @@ model ModAction {
   id         String   @id @default(uuid(7)) @db.Uuid
   created_at DateTime @default(now())
 
-  actor_id     String     @db.Uuid
-  actor        User       @relation(fields: [actor_id], references: [id])
-  community_id String?    @db.Uuid
-  community    Community? @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  // A forum moderator, or a staff member acting from the admin panel
+  actor_id     String?       @db.Uuid
+  actor        User?         @relation(fields: [actor_id], references: [id], onDelete: Restrict)
+  staff_id     String?       @db.Uuid
+  staff        StaffAccount? @relation(fields: [staff_id], references: [id], onDelete: SetNull)
+  community_id String?       @db.Uuid
+  community    Community?    @relation(fields: [community_id], references: [id], onDelete: Cascade)
 
   // e.g. remove_post, approve_comment, lock_post, ban_user, set_role
   action      String
@@ -614,8 +642,10 @@ model BlockedTerm {
   value String
   note  String?
 
-  created_by String @db.Uuid
-  creator    User   @relation(fields: [created_by], references: [id])
+  created_by       String?       @db.Uuid
+  creator          User?         @relation(fields: [created_by], references: [id], onDelete: Restrict)
+  created_by_staff String?       @db.Uuid
+  staff_creator    StaffAccount? @relation(fields: [created_by_staff], references: [id], onDelete: SetNull)
 
   @@unique([kind, value])
 }
@@ -674,6 +704,9 @@ model Campaign {
   frequency_cap Int?
   // Higher wins among campaigns that target the same pages
   priority      Int            @default(0)
+  // House campaigns only: percent of slots (0-50) this campaign takes even when paid campaigns want them, so the
+  // site's own products get seen. 0 means it only fills slots nobody paid for.
+  house_share   Int            @default(0)
   // Invoice tracking for direct deals (Paystack payment link)
   payment_url   String?
   paid_at       DateTime?
@@ -747,4 +780,252 @@ model Notification {
   @@unique([user_id, comment_id])
   @@index([user_id, created_at(sort: Desc), id(sort: Desc)])
   @@index([user_id, read_at])
+}
+
+// A community's earlier name; /c/{old name} redirects to the current one
+model CommunityAlias {
+  name         String    @id @db.Citext
+  community_id String    @db.Uuid
+  community    Community @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  created_at   DateTime  @default(now())
+
+  @@index([community_id])
+}
+
+/**
+ * Discovery: trending snapshots (modules/trending) and the word list behind "Did you mean ...?"
+ */
+
+// Each table is replaced as a whole every 10 minutes; rank 1 is the top
+model TrendingPost {
+  rank        Int      @id
+  post_id     String   @db.Uuid
+  post        Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  score       Float
+  // Distinct accounts that voted or replied in the window
+  voters      Int
+  repliers    Int
+  computed_at DateTime
+
+  @@index([post_id])
+}
+
+model TrendingCommunity {
+  rank         Int       @id
+  community_id String    @db.Uuid
+  community    Community @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  score        Float
+  // Last 7 days
+  new_members  Int
+  posts        Int
+  comments     Int
+  computed_at  DateTime
+
+  @@index([community_id])
+}
+
+model TrendingTopic {
+  rank         Int        @id
+  // 'term' (a word or two-word phrase from titles) or 'flair'
+  kind         String
+  term         String
+  // The flair's community
+  community_id String?    @db.Uuid
+  community    Community? @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  posts        Int
+  authors      Int
+  score        Float
+  computed_at  DateTime
+
+  @@index([community_id])
+}
+
+model SearchWord {
+  word String @id
+  docs Int
+
+  @@index([word(ops: raw("gin_trgm_ops"))], map: "SearchWord_word_trgm_idx", type: Gin)
+}
+
+/**
+ * Site metrics (modules/metrics). Days are Lagos dates. Visitors are hashes, never IPs.
+ */
+
+model DailySalt {
+  date DateTime @id @db.Date
+  salt String
+}
+
+model DailyVisitor {
+  date      DateTime @db.Date
+  // sha256 of the day's salt, IP and user agent
+  visitor   String
+  // ISO country code when known
+  country   String?
+  signed_in Boolean  @default(false)
+
+  @@id([date, visitor])
+}
+
+model CommunityDailyVisitor {
+  date         DateTime  @db.Date
+  community_id String    @db.Uuid
+  community    Community @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  visitor      String
+
+  @@id([date, community_id, visitor])
+}
+
+model DailyActiveUser {
+  date    DateTime @db.Date
+  user_id String   @db.Uuid
+  user    User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@id([date, user_id])
+}
+
+model DailyTraffic {
+  date       DateTime @id @db.Date
+  page_views Int      @default(0)
+}
+
+model CommunityDailyTraffic {
+  date         DateTime  @db.Date
+  community_id String    @db.Uuid
+  community    Community @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  page_views   Int       @default(0)
+
+  @@id([date, community_id])
+}
+
+// Written nightly for the day before; Admin -> Stats reads these
+model DailyStat {
+  date              DateTime @id @db.Date
+  total_users       Int
+  new_signups       Int
+  // Accounts active that day, in the 7 and 30 days up to it
+  dau               Int
+  wau               Int
+  mau               Int
+  // Guests included; bots excluded
+  unique_visitors   Int
+  page_views        Int
+  posts             Int
+  comments          Int
+  votes             Int
+  // Paid (direct) campaigns only; house ads are counted apart
+  ad_impressions    Int
+  ad_clicks         Int
+  house_impressions Int      @default(0)
+  house_clicks      Int      @default(0)
+  // { "NG": 120, "GB": 8, ... } unique visitors by country, when known
+  countries         Json?
+  computed_at       DateTime @default(now())
+}
+
+model CommunityDailyStat {
+  date            DateTime  @db.Date
+  community_id    String    @db.Uuid
+  community       Community @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  members         Int
+  new_members     Int
+  posts           Int
+  comments        Int
+  votes           Int
+  unique_visitors Int
+  page_views      Int
+
+  @@id([date, community_id])
+  @@index([community_id, date])
+}
+
+/**
+ * Staff: admin panel accounts (modules/staff), separate from forum accounts
+ */
+
+// owner: everything, including staff accounts. admin: everything but staff accounts. ads: ads and stats.
+// moderator: the site queue, users, communities, blocklist and logs.
+enum StaffRole {
+  owner
+  admin
+  ads
+  moderator
+}
+
+model StaffAccount {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  email              String    @unique @db.Citext
+  name               String
+  role               StaffRole @default(moderator)
+  // Null until an invite is accepted
+  password_hash      String?
+  // Set by the bootstrap script: must be changed after the first sign-in
+  password_temporary Boolean   @default(false)
+  // Authenticator secret, encrypted (staff/totp.ts); enabled once a first code was entered
+  totp_secret        String?
+  totp_enabled_at    DateTime?
+  // sha256 hashes of unused recovery codes
+  recovery_codes     Json?
+  disabled_at        DateTime?
+  last_login_at      DateTime?
+
+  created_by String?        @db.Uuid
+  creator    StaffAccount?  @relation("staff_created", fields: [created_by], references: [id], onDelete: SetNull)
+  created    StaffAccount[] @relation("staff_created")
+
+  sessions      StaffSession[]
+  tokens        StaffToken[]
+  audit         StaffAudit[]
+  mod_actions   ModAction[]
+  reports       Report[]
+  blocked_terms BlockedTerm[]
+}
+
+model StaffSession {
+  id              String       @id @default(uuid(7)) @db.Uuid
+  created_at      DateTime     @default(now())
+  staff_id        String       @db.Uuid
+  staff           StaffAccount @relation(fields: [staff_id], references: [id], onDelete: Cascade)
+  token_hash      String       @unique
+  expires_at      DateTime
+  last_used_at    DateTime     @default(now())
+  // Null until the second step (authenticator code) is done; until then the session can only finish signing in
+  mfa_verified_at DateTime?
+  revoked_at      DateTime?
+  ip_address      String?
+  user_agent      String?
+
+  @@index([staff_id])
+}
+
+model StaffToken {
+  id         String       @id @default(uuid(7)) @db.Uuid
+  created_at DateTime     @default(now())
+  staff_id   String       @db.Uuid
+  staff      StaffAccount @relation(fields: [staff_id], references: [id], onDelete: Cascade)
+  // 'invite'
+  purpose    String
+  token_hash String       @unique
+  expires_at DateTime
+  used_at    DateTime?
+
+  @@index([staff_id])
+}
+
+model StaffAudit {
+  id          String        @id @default(uuid(7)) @db.Uuid
+  created_at  DateTime      @default(now())
+  staff_id    String?       @db.Uuid
+  staff       StaffAccount? @relation(fields: [staff_id], references: [id], onDelete: SetNull)
+  action      String
+  target_type String?
+  target_id   String?
+  details     Json?
+  ip_address  String?
+
+  @@index([created_at(sort: Desc)])
+  @@index([staff_id, created_at(sort: Desc)])
 }
