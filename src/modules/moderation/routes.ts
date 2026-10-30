@@ -9,8 +9,9 @@ import { AuthRequest, requireAuth, viewerOf } from '../../middlewares/auth';
 import { LIMITS, pageQuery, username } from '../../shared/validation';
 import { setCommentStatus } from '../comments/service';
 import { findVisibleComment } from '../comments/routes';
-import { assertModerator, findCommunity, findMembership, ViewerContext, viewerContext } from '../communities/access';
+import { assertFullModerator, assertModerator, findCommunity, findMembership, ViewerContext, viewerContext } from '../communities/access';
 import { findVisiblePost } from '../posts/service';
+import { alertModerators } from './alerts';
 import { Actor, actorFields, buildQueue, closeReports } from './queue';
 
 // Reports, the mod queue, moderator actions on posts and comments, mutes, and the mod log.
@@ -90,6 +91,7 @@ router.post('/reports', requireAuth, async (request: AuthRequest, response) => {
         },
         update: { reason_code: input.reason_code, note: input.note ?? null },
     });
+    if (communityId) alertModerators(communityId, 'mod_report');
     response.status(201).json({ success: true });
 });
 
@@ -187,7 +189,7 @@ router.get('/communities/:name/restrictions', requireAuth, async (request: AuthR
 router.post('/communities/:name/mutes', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const community = await findCommunity(String(request.params.name));
-    const actor = await assertModerator(community.id, user);
+    const actor = await assertFullModerator(community.id, user);
     const input = parse(muteSchema, request.body);
 
     const target = await prisma.user.findUnique({ where: { username: input.username } });
@@ -224,7 +226,7 @@ router.post('/communities/:name/mutes', requireAuth, async (request: AuthRequest
 router.delete('/communities/:name/mutes/:username', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const community = await findCommunity(String(request.params.name));
-    await assertModerator(community.id, user);
+    await assertFullModerator(community.id, user);
     const target = await prisma.user.findUnique({ where: { username: String(request.params.username).toLowerCase() } });
     const result = target
         ? await prisma.communityMute.deleteMany({ where: { community_id: community.id, user_id: target.id } })

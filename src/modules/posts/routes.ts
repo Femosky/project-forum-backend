@@ -12,6 +12,7 @@ import { assertCanParticipate, assertCanPost, findCommunity, viewerContext } fro
 import { reviewContent } from '../safety/review';
 import { checkImage } from '../safety/imageCheck';
 import { readStoredObject } from '../../lib/storage';
+import { alertModerators } from '../moderation/alerts';
 import { assertAnonymousAllowed, assertLinksAllowed, assertPicturesAllowed, assertWithinYoungAccountLimits } from '../safety/policy';
 import { assertCommentable, createComment, listPostComments } from '../comments/service';
 import { notifyForComment } from '../notifications/service';
@@ -72,6 +73,7 @@ router.post('/', requireAuth, async (request: AuthRequest, response) => {
         shadow_hidden: user.shadow_banned_at !== null,
     });
 
+    if (review.held_reason && !review.held_for_admins) alertModerators(community.id, 'mod_queue');
     const context = await viewerContext(request.viewer);
     const created = toPublicPost(post, context);
     if (created.is_indexable) await indexNowJob.enqueue({ paths: [postPath(post)] });
@@ -181,6 +183,7 @@ router.patch('/:id', requireAuth, async (request: AuthRequest, response) => {
             ? [prisma.community.update({ where: { id: post.community_id }, data: { post_count: { decrement: 1 } } })]
             : []),
     ]);
+    if (heldReason && !review.held_for_admins) alertModerators(post.community_id, 'mod_queue');
     response.json({ post: toPublicPost(updated, context) });
 });
 
@@ -278,6 +281,7 @@ router.post('/:id/comments', requireAuth, async (request: AuthRequest, response)
     track('comment_created', user.id, { reply: Boolean(input.parent_id), anonymous: input.is_anonymous, held: comment.status === 'pending' });
     // Nobody hears about a comment that isn't visible yet
     if (comment.status === 'active' && !comment.shadow_hidden) await notifyForComment(comment);
+    if (comment.status === 'pending' && !comment.held_for_admins) alertModerators(post.community_id, 'mod_queue');
     response.status(201).json({ comment: { ...toPublicComment(comment, post.community_id, context), replies: [], more_replies: 0 } });
 });
 

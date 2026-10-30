@@ -1,5 +1,6 @@
 import { avatarCode } from '../../lib/avatars';
 import { Router } from 'express';
+import { alertModerators } from '../moderation/alerts';
 import { Community, CommunityMember, Prisma } from '@prisma/client';
 import prisma from '../../prismaConnection';
 import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
@@ -12,7 +13,7 @@ import { queueCount } from '../moderation/queue';
 import {
     activeMute,
     assertCanView,
-    assertModerator,
+    assertFullModerator,
     assertOwner,
     findCommunity,
     findMembership,
@@ -64,8 +65,9 @@ function viewerMembership(member: CommunityMember | null, hasPendingRequest: boo
         is_banned: isBanned(member),
         has_pending_request: hasPendingRequest,
         muted_until: mutedUntil,
-        // Moderators only: items waiting in the mod queue
+        // Moderators only: items waiting in the mod queue, and whether they're limited to posts
         queue_count: queue,
+        mod_permission: isActiveMember(member) && member.role === 'moderator' ? member.mod_permission : null,
     };
 }
 
@@ -171,7 +173,7 @@ router.get('/:name', optionalAuth, async (request: AuthRequest, response) => {
 router.patch('/:name', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const community = await findCommunity(String(request.params.name));
-    await assertModerator(community.id, user);
+    await assertFullModerator(community.id, user);
     const input = parse(updateCommunitySchema, request.body);
     if (input.name_styled && input.name_styled.toLowerCase() !== community.name) {
         throw badRequest('Only capital letters can change: the letters must stay the same as the name.', 'name_style_mismatch');
@@ -243,6 +245,7 @@ router.put('/:name/membership', requireAuth, async (request: AuthRequest, respon
             create: { community_id: community.id, user_id: user.id, message: input.message ?? null },
             update: { status: 'pending', message: input.message ?? null, responded_by: null, responded_at: null },
         });
+        alertModerators(community.id, 'mod_join_request');
         return response.status(202).json({ status: 'requested' });
     }
 
@@ -275,7 +278,7 @@ router.delete('/:name/membership', requireAuth, async (request: AuthRequest, res
 router.get('/:name/join-requests', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const community = await findCommunity(String(request.params.name));
-    await assertModerator(community.id, user);
+    await assertFullModerator(community.id, user);
     const requests = await prisma.communityJoinRequest.findMany({
         where: { community_id: community.id, status: 'pending' },
         orderBy: { created_at: 'asc' },
@@ -288,7 +291,7 @@ router.get('/:name/join-requests', requireAuth, async (request: AuthRequest, res
 router.post('/:name/join-requests/:id', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const community = await findCommunity(String(request.params.name));
-    await assertModerator(community.id, user);
+    await assertFullModerator(community.id, user);
     const { decision } = parse(joinDecisionSchema, request.body);
 
     const joinRequest = await prisma.communityJoinRequest.findFirst({
@@ -296,10 +299,21 @@ router.post('/:name/join-requests/:id', requireAuth, async (request: AuthRequest
     });
     if (!joinRequest) throw notFound('Request not found');
 
-    await prisma.communityJoinRequest.update({
-        where: { id: joinRequest.id },
-        data: { status: decision === 'accept' ? 'accepted' : 'rejected', responded_by: user.id, responded_at: new Date() },
-    });
+    await prisma.$transaction([
+        prisma.communityJoinRequest.update({
+            where: { id: joinRequest.id },
+            data: { status: decision === 'accept' ? 'accepted' : 'rejected', responded_by: user.id, responded_at: new Date() },
+        }),
+        prisma.modAction.create({
+            data: {
+                actor_id: user.id,
+                community_id: community.id,
+                action: decision === 'accept' ? 'accept_join_request' : 'reject_join_request',
+                target_type: 'user',
+                target_id: joinRequest.user_id,
+            },
+        }),
+    ]);
     if (decision === 'accept' && !(await findMembership(community.id, joinRequest.user_id))) {
         await joinCommunity(community.id, joinRequest.user_id);
     }
@@ -340,7 +354,7 @@ router.put('/:name/members/:username/role', requireAuth, async (request: AuthReq
 router.post('/:name/bans', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const community = await findCommunity(String(request.params.name));
-    const actor = await assertModerator(community.id, user);
+    const actor = await assertFullModerator(community.id, user);
     const input = parse(banSchema, request.body);
 
     const target = await prisma.user.findUnique({ where: { username: input.username } });
@@ -383,7 +397,7 @@ router.post('/:name/bans', requireAuth, async (request: AuthRequest, response) =
 router.delete('/:name/bans/:username', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const community = await findCommunity(String(request.params.name));
-    await assertModerator(community.id, user);
+    await assertFullModerator(community.id, user);
     const target = await prisma.user.findUnique({ where: { username: String(request.params.username).toLowerCase() } });
     const member = target ? await findMembership(community.id, target.id) : null;
     if (!target || !member?.is_banned) throw notFound('That user is not banned here.', 'not_banned');
@@ -410,7 +424,7 @@ router.get('/:name/flairs', async (request, response) => {
 router.post('/:name/flairs', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const community = await findCommunity(String(request.params.name));
-    await assertModerator(community.id, user);
+    await assertFullModerator(community.id, user);
     const input = parse(flairSchema, request.body);
     if ((await prisma.flair.count({ where: { community_id: community.id } })) >= 50) {
         throw badRequest('A community can have at most 50 flairs.', 'too_many_flairs');
@@ -432,7 +446,7 @@ router.post('/:name/flairs', requireAuth, async (request: AuthRequest, response)
 router.delete('/:name/flairs/:id', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const community = await findCommunity(String(request.params.name));
-    await assertModerator(community.id, user);
+    await assertFullModerator(community.id, user);
     const result = await prisma.flair.deleteMany({
         where: { id: uuidParam(request.params.id, 'Flair not found'), community_id: community.id },
     });

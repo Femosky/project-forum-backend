@@ -19,6 +19,7 @@ import userRoutes from './modules/users/routes';
 import feedRoutes from './modules/feed/routes';
 import searchRoutes from './modules/search/routes';
 import moderationRoutes from './modules/moderation/routes';
+import moderationTeamRoutes from './modules/moderation/team';
 import notificationRoutes from './modules/notifications/routes';
 import seoRoutes from './modules/seo/routes';
 import adminRoutes from './modules/admin/routes';
@@ -125,6 +126,7 @@ v1.use('/admin/audit', auditRoutes);
 v1.use('/admin', adminRoutes);
 v1.use('/ads', adsRoutes);
 v1.use(moderationRoutes);
+v1.use(moderationTeamRoutes);
 v1.get('/health', (request, response) => {
     response.json({ status: 'ok' });
 });
