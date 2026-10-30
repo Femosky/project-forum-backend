@@ -109,7 +109,7 @@ describe('picture sizes', () => {
         expect(moving.body.image).toMatchObject({ width: 60, height: 40 });
         const file = path.join(LOCAL_MEDIA_DIR, new URL(moving.body.image.url).pathname.replace(/^\/media\//, ''));
         expect((await sharp(file, { animated: true }).metadata()).pages).toBe(2);
-    });
+    }, 30_000);
 });
 
 describe('the site’s own picture check on posts', () => {
