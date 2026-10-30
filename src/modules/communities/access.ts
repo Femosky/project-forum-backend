@@ -93,6 +93,15 @@ export async function assertModerator(communityId: string, user: User) {
     return member;
 }
 
+// Everything but the queue and reports: bans, mutes, join requests, settings. Posts-only moderators can't do these.
+export async function assertFullModerator(communityId: string, user: User) {
+    const member = await assertModerator(communityId, user);
+    if (member && member.role === 'moderator' && member.mod_permission !== 'all') {
+        throw forbidden('Your moderator role covers posts only.', 'posts_only_moderator');
+    }
+    return member;
+}
+
 export async function assertOwner(communityId: string, user: User) {
     if (user.role === 'admin') return;
     const member = await findMembership(communityId, user.id);

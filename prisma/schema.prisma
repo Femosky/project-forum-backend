@@ -194,6 +194,9 @@ model User {
   created_communities Community[]            @relation("created_communities")
   memberships         CommunityMember[]
   join_requests       CommunityJoinRequest[] @relation("join_requester")
+  mod_invites         ModInvite[]            @relation("mod_invitee")
+  mod_invites_sent    ModInvite[]            @relation("mod_inviter")
+  mod_email_settings  ModEmailSetting[]
   join_responses      CommunityJoinRequest[] @relation("join_responder")
 
   blocked_users Block[] @relation("blocker")
@@ -313,6 +316,9 @@ model Community {
 
   members       CommunityMember[]
   join_requests CommunityJoinRequest[]
+  mod_invites   ModInvite[]
+  mod_email_settings ModEmailSetting[]
+  notifications Notification[]
   mutes         CommunityMute[]
   posts         Post[]
   flairs        Flair[]
@@ -340,6 +346,8 @@ model CommunityMember {
   user         User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   role      MemberRole @default(member)
+  // What a moderator may do: all, or posts only (the queue and reports)
+  mod_permission ModPermission @default(all)
   joined_at DateTime   @default(now())
 
   // A banned user keeps their row so the ban sticks if they try to rejoin; null until means permanent
@@ -781,13 +789,69 @@ model AdDailyStat {
  * Notifications
  */
 
+enum ModPermission {
+  all
+  posts
+}
+
+enum ModInviteStatus {
+  pending
+  accepted
+  declined
+  cancelled
+}
+
+// Asked to help moderate. The person accepts it themself, so nobody becomes a moderator without knowing.
+model ModInvite {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  created_at DateTime @default(now())
+
+  community_id String    @db.Uuid
+  community    Community @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  user_id      String    @db.Uuid
+  user         User      @relation("mod_invitee", fields: [user_id], references: [id], onDelete: Cascade)
+  invited_by   String    @db.Uuid
+  inviter      User      @relation("mod_inviter", fields: [invited_by], references: [id], onDelete: Cascade)
+
+  permission ModPermission   @default(all)
+  status     ModInviteStatus @default(pending)
+
+  @@unique([community_id, user_id])
+  @@index([user_id, status])
+}
+
+enum ModEmailFrequency {
+  instant
+  daily
+  off
+}
+
+// How a moderator hears about one community by email. No row means the default, a daily digest.
+model ModEmailSetting {
+  community_id String    @db.Uuid
+  community    Community @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  user_id      String    @db.Uuid
+  user         User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  frequency    ModEmailFrequency @default(daily)
+  last_sent_at DateTime?
+
+  @@id([community_id, user_id])
+}
+
 enum NotificationType {
   post_reply
   comment_reply
   mention
+  // For a community's moderators; one unread row per community and type, with a running count
+  mod_queue
+  mod_report
+  mod_join_request
+  mod_invite
 }
 
-// In-app notifications. Each points at the comment that caused it; one per recipient per comment.
+// In-app notifications. Replies and mentions point at the comment that caused them, one per recipient per comment;
+// moderator notices point at the community instead.
 model Notification {
   id         String   @id @default(uuid(7)) @db.Uuid
   created_at DateTime @default(now())
@@ -799,16 +863,21 @@ model Notification {
   actor    User?   @relation("notification_actor", fields: [actor_id], references: [id], onDelete: SetNull)
 
   type       NotificationType
-  post_id    String           @db.Uuid
-  post       Post             @relation(fields: [post_id], references: [id], onDelete: Cascade)
-  comment_id String           @db.Uuid
-  comment    Comment          @relation(fields: [comment_id], references: [id], onDelete: Cascade)
+  post_id    String?          @db.Uuid
+  post       Post?            @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  comment_id String?          @db.Uuid
+  comment    Comment?         @relation(fields: [comment_id], references: [id], onDelete: Cascade)
+
+  community_id String?    @db.Uuid
+  community    Community? @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  count        Int        @default(1)
 
   read_at DateTime?
 
   @@unique([user_id, comment_id])
   @@index([user_id, created_at(sort: Desc), id(sort: Desc)])
   @@index([user_id, read_at])
+  @@index([community_id, type, read_at])
 }
 
 // A community's earlier name; /c/{old name} redirects to the current one

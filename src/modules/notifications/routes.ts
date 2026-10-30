@@ -17,25 +17,30 @@ const EXCERPT_LENGTH = 200;
 
 // Only notifications whose comment and post are still there to read
 const visible = {
-    comment: { status: { in: ['active', 'locked'] } },
-    post: READABLE_POST_WHERE,
+    OR: [{ community_id: { not: null } }, { comment: { status: { in: ['active', 'locked'] } }, post: READABLE_POST_WHERE }],
 } satisfies Prisma.NotificationWhereInput;
 
 const include = {
     actor: { select: { username: true, display_name: true, avatar_id: true, avatar_config: true, status: true } },
     comment: { select: { short_id: true, body: true, is_anonymous: true } },
     post: { select: { short_id: true, slug: true, title: true, community: { select: { name: true } } } },
+    community: { select: { name: true } },
 } satisfies Prisma.NotificationInclude;
 
 type NotificationRow = Prisma.NotificationGetPayload<{ include: typeof include }>;
 
 function toPublicNotification(row: NotificationRow) {
+    if (!row.comment || !row.post) {
+        return { id: row.id, type: row.type, created_at: row.created_at, read_at: row.read_at, community: row.community?.name ?? null, count: row.count, actor: null, post: null, comment: null };
+    }
     const showActor = row.actor && !row.comment.is_anonymous && row.actor.status !== 'deleted';
     return {
         id: row.id,
         type: row.type,
         created_at: row.created_at,
         read_at: row.read_at,
+        community: null,
+        count: 1,
         actor: showActor
             ? { username: row.actor!.username, display_name: row.actor!.display_name, avatar_id: row.actor!.avatar_id, avatar: avatarCode(row.actor!.avatar_config, row.actor!.username) }
             : null,
