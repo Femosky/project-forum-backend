@@ -23,13 +23,14 @@ export const TRUST = {
 
 const ageOf = (user: Pick<User, 'created_at'>) => Date.now() - user.created_at.getTime();
 
-export const isNewAccount = (user: Pick<User, 'created_at' | 'karma'>) =>
-    ageOf(user) < TRUST.NEW_ACCOUNT_MS && user.karma < TRUST.LINK_KARMA;
+// Trusted accounts (marked by the site's admins) skip the new-account limits; every content check still applies
+export const isNewAccount = (user: Pick<User, 'created_at' | 'karma' | 'is_trusted'>) =>
+    !user.is_trusted && ageOf(user) < TRUST.NEW_ACCOUNT_MS && user.karma < TRUST.LINK_KARMA;
 
-const isYoungAccount = (user: Pick<User, 'created_at' | 'karma'>) =>
-    ageOf(user) < TRUST.YOUNG_ACCOUNT_MS && user.karma < TRUST.LINK_KARMA;
+const isYoungAccount = (user: Pick<User, 'created_at' | 'karma' | 'is_trusted'>) =>
+    !user.is_trusted && ageOf(user) < TRUST.YOUNG_ACCOUNT_MS && user.karma < TRUST.LINK_KARMA;
 
-export const canPostLinks = (user: Pick<User, 'created_at' | 'karma'>) => !isNewAccount(user);
+export const canPostLinks = (user: Pick<User, 'created_at' | 'karma' | 'is_trusted'>) => !isNewAccount(user);
 
 // Anonymity is per post, and only for accounts in good standing
 export const canPostAnonymously = (user: Pick<User, 'created_at' | 'karma' | 'email_verified_at' | 'shadow_banned_at'>) =>
