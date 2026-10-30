@@ -93,7 +93,7 @@ async function main() {
 
     if (!reset) {
         const existing = await prisma.community.count({
-            where: { OR: LAUNCH_COMMUNITIES.map((community) => ({ name: { equals: community.name, mode: 'insensitive' as const } })) },
+            where: { name: { in: LAUNCH_COMMUNITIES.map((community) => community.name.toLowerCase()) } },
         });
         if (existing > 0) throw new Error('Launch communities already exist. Use --reset to start over.');
     }
@@ -208,7 +208,7 @@ async function main() {
                 downvote_count: down,
                 score,
                 comment_count: commentCount,
-                hot_rank: hotRank(score, new Date(postedAt)),
+                hot_rank: hotRank(score, new Date(postedAt), commentCount),
             });
             postVotes.push(...votes(authorId, thread.up, down, postedAt).map((vote) => ({ ...vote, post_id: postId, updated_at: vote.created_at })));
             addKarma(authorId, score);
@@ -220,6 +220,7 @@ async function main() {
         communities.push({
             id: communityId,
             name: data.name.toLowerCase(),
+            name_styled: data.name,
             display_name: data.display_name,
             description: data.description,
             category: data.category,
