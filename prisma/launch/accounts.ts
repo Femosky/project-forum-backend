@@ -1,0 +1,43 @@
+// Seed accounts that author the launch content. They have no password and a @seed.invalid address, so nobody
+// can sign in as them and no email is ever sent to them.
+
+export type SeedAccount = { username: string; display_name?: string; days_old: number };
+
+export const SEED_ACCOUNTS: SeedAccount[] = [
+    { username: 'adaeze_o', display_name: 'Adaeze', days_old: 41 },
+    { username: 'kunle_builds', display_name: 'Kunle', days_old: 38 },
+    { username: 'chiomaa', days_old: 36 },
+    { username: 'ibk_writes', display_name: 'Ibukun', days_old: 35 },
+    { username: 'tunde_lag', days_old: 34 },
+    { username: 'ngozi_ek', display_name: 'Ngozi E.', days_old: 33 },
+    { username: 'emeka_n', days_old: 33 },
+    { username: 'halima_b', display_name: 'Halima', days_old: 31 },
+    { username: 'seun_adeyemi', display_name: 'Seun Adeyemi', days_old: 30 },
+    { username: 'uche_dev', days_old: 29 },
+    { username: 'temi_reads', display_name: 'Temi', days_old: 28 },
+    { username: 'bayo_kicks', days_old: 28 },
+    { username: 'amaka_eats', display_name: 'Amaka', days_old: 27 },
+    { username: 'yusuf_k', days_old: 26 },
+    { username: 'funmi_a', display_name: 'Funmi', days_old: 25 },
+    { username: 'dami_codes', days_old: 25 },
+    { username: 'obinna_fc', days_old: 24 },
+    { username: 'zainab_m', display_name: 'Zainab', days_old: 23 },
+    { username: 'kemi_o', days_old: 22 },
+    { username: 'chuka_r', display_name: 'Chuka', days_old: 22 },
+    { username: 'folake_b', days_old: 21 },
+    { username: 'sadiq_a', display_name: 'Sadiq', days_old: 20 },
+    { username: 'ifeoma_n', days_old: 20 },
+    { username: 'gbenga_ola', display_name: 'Gbenga', days_old: 19 },
+    { username: 'ese_ok', days_old: 18 },
+    { username: 'nnamdi_m', display_name: 'Nnamdi', days_old: 18 },
+    { username: 'bisola_t', days_old: 17 },
+    { username: 'musa_dan', display_name: 'Musa', days_old: 17 },
+    { username: 'ruth_ab', days_old: 16 },
+    { username: 'jide_o', display_name: 'Jide', days_old: 16 },
+    { username: 'efe_jays', days_old: 15 },
+    { username: 'lola_k', display_name: 'Lola', days_old: 15 },
+    { username: 'ahmed_ib', days_old: 14 },
+    { username: 'timi_w', days_old: 14 },
+    { username: 'precious_u', display_name: 'Precious', days_old: 13 },
+    { username: 'dayo_fin', days_old: 13 },
+];
