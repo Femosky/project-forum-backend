@@ -91,3 +91,23 @@ describe('picture posts', () => {
         expect(await prisma.post.findUniqueOrThrow({ where: { id: created.body.post.id } })).toMatchObject({ status: 'active', is_nsfw: true });
     });
 });
+
+describe('picture sizes', () => {
+    it('caps a big phone photo at 2048 px with a 720 px copy for feeds, and keeps a moving GIF moving', async () => {
+        const author = await signUp('author');
+        const photo = await sharp({ create: { width: 4032, height: 3024, channels: 3, noise: { type: 'gaussian', mean: 128, sigma: 12 } } }).jpeg({ quality: 80 }).toBuffer();
+        const big = await upload(author.agent, photo);
+        expect(big.status).toBe(201);
+        expect(big.body.image).toMatchObject({ width: 2048, height: 1536 });
+        expect(big.body.image.variants.map((variant: { width: number }) => variant.width)).toEqual([2048, 720]);
+
+        // Two frames, red then blue
+        const frame = (colour: string) => sharp({ create: { width: 60, height: 40, channels: 3, background: colour } }).png().toBuffer();
+        const gif = await sharp([await frame('#ff0000'), await frame('#0000ff')], { join: { animated: true } }).gif().toBuffer();
+        const moving = await author.agent.post('/v1/images?purpose=post_image').set('Content-Type', 'image/gif').send(gif);
+        expect(moving.status).toBe(201);
+        expect(moving.body.image).toMatchObject({ width: 60, height: 40 });
+        const file = path.join(LOCAL_MEDIA_DIR, new URL(moving.body.image.url).pathname.replace(/^\/media\//, ''));
+        expect((await sharp(file, { animated: true }).metadata()).pages).toBe(2);
+    });
+});

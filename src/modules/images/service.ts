@@ -27,8 +27,9 @@ const VARIANTS: Record<ImagePurpose, { width: number; height?: number }[]> = {
     // picks or shown whole (AdCreative.image_focus_x/y, image_fit), so nothing is cut off here
     ad_image: [{ width: 1200 }, { width: 600 }],
     community_icon: [{ width: 256, height: 256 }],
-    // Pictures in posts keep their shape too; the page reserves space from the stored width and height
-    post_image: [{ width: 1600 }, { width: 800 }],
+    // Pictures in posts keep their shape too (the page reserves space from the stored width and height): the full one,
+    // its long edge at most 2048 px, for the post's page, and a 720 px one for feeds and cards
+    post_image: [{ width: 2048 }, { width: 720 }],
     // 4:1 header banner
     community_banner: [
         { width: 1600, height: 400 },
@@ -74,11 +75,13 @@ export async function processUpload(body: Buffer, purpose: ImagePurpose, uploade
     const verdict = await scanImage({ image: body, purpose, uploaderId });
     if (!verdict.allowed) throw badRequest(verdict.reason ?? "This picture can't be used here.", 'image_refused');
 
+    // A moving GIF in a post stays moving, as animated WebP (smaller than the GIF); everything else is one still frame
+    const animated = purpose === 'post_image' && meta.format === 'gif' && (meta.pages ?? 1) > 1;
     const id = randomUUID();
     const variants = await Promise.all(
         VARIANTS[purpose].map(async ({ width, height }) => {
-            // rotate() applies the EXIF orientation; WebP output carries no metadata
-            const { data, info } = await sharp(body, { animated: false })
+            // rotate() applies the EXIF orientation; WebP output carries no metadata (no camera, no location)
+            const { data, info } = await sharp(body, { animated })
                 .rotate()
                 .resize(
                     width,
@@ -88,7 +91,8 @@ export async function processUpload(body: Buffer, purpose: ImagePurpose, uploade
                 .webp({ quality: 82 })
                 .toBuffer({ resolveWithObject: true });
             const url = await putObject(`img/${purpose}/${id}-${width}.webp`, data, 'image/webp');
-            return { url, width: info.width, height: info.height };
+            // An animation's height counts every frame; one frame's is pageHeight
+            return { url, width: info.width, height: info.pageHeight ?? info.height };
         })
     );
     logger.info({ purpose, uploaderId, bytes: body.length }, 'Image stored');
