@@ -6,8 +6,8 @@ const rules = z
     .array(z.object({ title: z.string().trim().min(1).max(100), description: z.string().trim().max(500).default('') }))
     .max(15);
 
-// One of the twelve drawn icons the web app serves itself
-const DEFAULT_ICON = /^\/community-icons\/(?:[1-9]|1[0-2])\.svg$/;
+// A topic icon the web app draws itself
+const DEFAULT_ICON = /^\/community-icon\/[a-z]+-[a-z]+\.svg$/;
 
 export const createCommunitySchema = z.object({
     name: communityName,
