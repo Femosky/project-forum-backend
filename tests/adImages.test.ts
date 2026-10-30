@@ -95,3 +95,30 @@ describe('ad pictures', () => {
         expect(refreshed.body.creative.link_image_url).toMatch(/\.webp$/);
     });
 });
+
+describe('ads overview', () => {
+    it('gives each campaign its placements and the last 7 days next to all-time totals', async () => {
+        const prisma = (await import('../src/prismaConnection')).default;
+        const { addDays, lagosDay } = await import('../src/lib/days');
+        const { agent, campaignId } = await adminWithCampaign();
+        const ad = await agent
+            .post(`/v1/admin/ads/campaigns/${campaignId}/creatives`)
+            .send({ format: 'thread_comment', headline: 'Learn French words', click_url: 'https://cardernir.example' });
+        const at = (day: string) => new Date(`${day}T00:00:00Z`);
+        await prisma.adDailyStat.createMany({
+            data: [
+                { creative_id: ad.body.creative.id, date: at(lagosDay()), impressions: 30, clicks: 3 },
+                { creative_id: ad.body.creative.id, date: at(addDays(lagosDay(), -10)), impressions: 100, clicks: 5 },
+            ],
+        });
+
+        const { body } = await agent.get('/v1/admin/ads');
+        const campaign = body.advertisers[0].campaigns[0];
+        expect(campaign).toMatchObject({
+            impressions: 130,
+            clicks: 8,
+            last_7_days: { impressions: 30, clicks: 3 },
+            placements: { feed: false, comments: true },
+        });
+    });
+});

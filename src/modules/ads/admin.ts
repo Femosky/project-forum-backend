@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { env } from '../../config/env';
 import prisma from '../../prismaConnection';
 import { badRequest, notFound, parse, uuidParam } from '../../lib/http';
+import { addDays, lagosDay } from '../../lib/days';
 import { audit, staffOf } from '../staff/service';
 import { COMMUNITY_CATEGORIES, LIMITS } from '../../shared/validation';
 import { closeReports } from '../moderation/queue';
@@ -143,9 +144,14 @@ async function campaignData(input: CampaignInput) {
     };
 }
 
-const statsTotals = async (creativeIds: string[]) => {
+// Views and clicks per creative, all time or since a Lagos day (YYYY-MM-DD)
+const statsTotals = async (creativeIds: string[], since?: string) => {
     const rows = creativeIds.length
-        ? await prisma.adDailyStat.groupBy({ by: ['creative_id'], where: { creative_id: { in: creativeIds } }, _sum: { impressions: true, clicks: true } })
+        ? await prisma.adDailyStat.groupBy({
+              by: ['creative_id'],
+              where: { creative_id: { in: creativeIds }, ...(since ? { date: { gte: new Date(`${since}T00:00:00Z`) } } : {}) },
+              _sum: { impressions: true, clicks: true },
+          })
         : [];
     return new Map(rows.map((row) => [row.creative_id, { impressions: row._sum.impressions ?? 0, clicks: row._sum.clicks ?? 0 }]));
 };
@@ -161,12 +167,14 @@ router.get('/', async (request, response) => {
         include: {
             campaigns: {
                 orderBy: { created_at: 'desc' },
-                include: { creatives: { select: { id: true, is_active: true } } },
+                include: { creatives: { select: { id: true, is_active: true, format: true } } },
             },
         },
     });
     const campaigns = advertisers.flatMap((advertiser) => advertiser.campaigns);
-    const totals = await statsTotals(campaigns.flatMap((campaign) => campaign.creatives.map((creative) => creative.id)));
+    const creativeIds = campaigns.flatMap((campaign) => campaign.creatives.map((creative) => creative.id));
+    // The last 7 days, today included
+    const [totals, week] = await Promise.all([statsTotals(creativeIds), statsTotals(creativeIds, addDays(lagosDay(), -6))]);
     const spend = await campaignSpend(campaigns.filter((campaign) => campaign.pricing_model === 'cpm').map((campaign) => campaign.id));
 
     response.json({
@@ -178,18 +186,26 @@ router.get('/', async (request, response) => {
         advertisers: advertisers.map(({ campaigns: own, ...advertiser }) => ({
             ...advertiser,
             campaigns: own.map(({ creatives, ...campaign }) => {
-                const sum = creatives.reduce(
-                    (acc, creative) => {
-                        const total = totals.get(creative.id);
-                        return { impressions: acc.impressions + (total?.impressions ?? 0), clicks: acc.clicks + (total?.clicks ?? 0) };
-                    },
-                    { impressions: 0, clicks: 0 }
-                );
+                const add = (source: Map<string, { impressions: number; clicks: number }>) =>
+                    creatives.reduce(
+                        (acc, creative) => {
+                            const total = source.get(creative.id);
+                            return { impressions: acc.impressions + (total?.impressions ?? 0), clicks: acc.clicks + (total?.clicks ?? 0) };
+                        },
+                        { impressions: 0, clicks: 0 }
+                    );
+                const live = creatives.filter((creative) => creative.is_active);
                 return {
                     ...campaignOut(campaign),
                     creative_count: creatives.length,
-                    active_creatives: creatives.filter((creative) => creative.is_active).length,
-                    ...sum,
+                    active_creatives: live.length,
+                    // Where its live ads run
+                    placements: {
+                        feed: live.some((creative) => creative.format !== 'thread_comment'),
+                        comments: live.some((creative) => creative.format !== 'feed_post'),
+                    },
+                    ...add(totals),
+                    last_7_days: add(week),
                     spent_minor: campaign.pricing_model === 'cpm' ? (spend.get(campaign.id) ?? 0) : null,
                 };
             }),
