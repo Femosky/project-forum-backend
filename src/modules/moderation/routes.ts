@@ -13,6 +13,7 @@ import { assertFullModerator, assertModerator, findCommunity, findMembership, Vi
 import { findVisiblePost } from '../posts/service';
 import { alertModerators } from './alerts';
 import { Actor, actorFields, buildQueue, closeReports } from './queue';
+import './staffAlerts';
 
 // Reports, the mod queue, moderator actions on posts and comments, mutes, and the mod log.
 // Every action writes a ModAction row, which is the audit trail.
@@ -49,17 +50,23 @@ export const commentActionSchema = z.object({ action: z.enum(['remove', 'approve
 
 const reportsQuery = pageQuery.extend({ status: z.enum(['open', 'resolved', 'dismissed']).default('open') });
 
+// A report about a moderator's own content goes to the site's admins, so nobody can dismiss a report about themselves
+async function unlessByModerator(communityId: string, authorId: string) {
+    const author = await findMembership(communityId, authorId);
+    return author && author.role !== 'member' ? null : communityId;
+}
+
 // Which community's moderators should see a report (null: site admins)
 async function reportCommunity(targetType: string, targetId: string) {
     if (targetType === 'post') {
-        const post = await prisma.post.findUnique({ where: { id: targetId }, select: { community_id: true } });
+        const post = await prisma.post.findUnique({ where: { id: targetId }, select: { community_id: true, author_id: true } });
         if (!post) throw notFound('Post not found');
-        return post.community_id;
+        return unlessByModerator(post.community_id, post.author_id);
     }
     if (targetType === 'comment') {
-        const comment = await prisma.comment.findUnique({ where: { id: targetId }, select: { post: { select: { community_id: true } } } });
+        const comment = await prisma.comment.findUnique({ where: { id: targetId }, select: { author_id: true, post: { select: { community_id: true } } } });
         if (!comment) throw notFound('Comment not found');
-        return comment.post.community_id;
+        return unlessByModerator(comment.post.community_id, comment.author_id);
     }
     if (targetType === 'user') {
         if (!(await prisma.user.findUnique({ where: { id: targetId }, select: { id: true } }))) throw notFound('User not found');

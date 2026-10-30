@@ -129,6 +129,7 @@ export function publicStaff(account: StaffAccount) {
         password_change_required: account.password_temporary,
         disabled_at: account.disabled_at,
         last_login_at: account.last_login_at,
+        alert_email: account.alert_email,
         created_at: account.created_at,
     };
 }
