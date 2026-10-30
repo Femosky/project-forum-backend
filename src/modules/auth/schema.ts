@@ -36,6 +36,9 @@ export const changeEmailSchema = z.object({ new_email: email, password: z.string
 
 export const googleSchema = z.object({
     id_token: z.string().min(10).max(8192),
-    // Required the first time a Google user joins
+    // Both required the first time a Google user joins: the username they picked and the 18+ confirmation
+    username: username.optional(),
     is_adult: z.literal(true).optional(),
 });
+
+export const googleLinkSchema = z.object({ id_token: z.string().min(10).max(8192) });

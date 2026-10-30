@@ -26,7 +26,8 @@ Everything lives under `/v1`. Requests and responses are JSON. Auth is cookie-ba
 | POST | `/change-password` | `current_password?, new_password` | Signs out other devices |
 | POST | `/change-email` | `new_email, password` | Emails a confirmation link to the new address |
 | POST | `/confirm-email` | `token` | |
-| POST | `/google` | `id_token, is_adult?` | Google Identity Services ID token. `is_adult` required for new accounts. 503 until `GOOGLE_CLIENT_ID` is set |
+| POST | `/google` | `id_token, username?, is_adult?` | Google Identity Services ID token. A new person gets 400 `google_signup_details` (with `details.suggested_username`) and sends the token again with `username` and `is_adult`. An email that already has an account gets 409 `google_link_required`: sign in with the password, then `/google/link`. 503 until `GOOGLE_CLIENT_ID` is set |
+| POST | `/google/link` | `id_token` | Signed in. Connects that Google account to this account (409 `google_in_use` if it belongs to another) |
 | GET | `/sessions` | | Signed-in devices, `current` marks this one |
 | DELETE | `/sessions/:id` | | Sign out one device |
 | DELETE | `/sessions` | | Sign out every other device |
