@@ -4,7 +4,7 @@ import prisma from '../../prismaConnection';
 import { parse } from '../../lib/http';
 import { AuthRequest, optionalAuth } from '../../middlewares/auth';
 import { pageQuery, postSort, topWindow } from '../../shared/validation';
-import { viewerContext } from '../communities/access';
+import { notMaturePost, viewerContext } from '../communities/access';
 import { listPosts } from '../posts/service';
 
 const router = Router();
@@ -32,10 +32,13 @@ router.get('/', optionalAuth, async (request: AuthRequest, response) => {
     if (communityIds.length === 0) scope = 'all';
 
     const page = await listPosts({
-        where:
-            scope === 'home'
-                ? { community_id: { in: communityIds } }
-                : { community: { visibility: 'public', status: 'active' } },
+        where: {
+            AND: [
+                scope === 'home' ? { community_id: { in: communityIds } } : { community: { visibility: 'public', status: 'active' } },
+                // Mature posts only for viewers who switched them on; guests never get them here
+                notMaturePost(context),
+            ],
+        },
         sort: query.sort,
         window: query.t,
         cursor: query.cursor,

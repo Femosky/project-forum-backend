@@ -98,7 +98,7 @@ export function staffOf(request: Request) {
 
 // Lets staff read content the way site-wide moderators do: every community, anonymous authors, held and
 // shadow-hidden items
-export const STAFF_CONTEXT: ViewerContext = { userId: '00000000-0000-0000-0000-000000000000', isAdmin: true, moderates: new Set() };
+export const STAFF_CONTEXT: ViewerContext = { userId: '00000000-0000-0000-0000-000000000000', isAdmin: true, moderates: new Set(), showMature: true };
 
 // The audit log: who, what, on what, from where
 export function audit(request: Request, action: string, target?: { type: string; id: string }, details?: Prisma.InputJsonValue) {

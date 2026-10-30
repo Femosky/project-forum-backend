@@ -162,6 +162,9 @@ model User {
 
   // Users confirm they are 18+ at signup; we keep the time of the attestation, not a birth date
   adult_attested_at DateTime?
+  // Show posts and communities marked mature (NSFW) in feeds, search and the directory, without the blur. Off by
+  // default; guests never see them there
+  show_mature       Boolean   @default(false)
 
   karma          Int       @default(0)
   last_login_at  DateTime?
@@ -434,13 +437,15 @@ model Post {
   flair_id String? @db.Uuid
   flair    Flair?  @relation(fields: [flair_id], references: [id], onDelete: SetNull)
 
-  status        ContentStatus @default(active)
-  edited_at     DateTime?
-  pinned_at     DateTime?
+  status          ContentStatus @default(active)
+  edited_at       DateTime?
+  pinned_at       DateTime?
   // Why the automatic filters held this post for review (status pending); shown to moderators only
-  held_reason   String?
+  held_reason     String?
+  // Held for the site's admins only (sexual content, or worse): community moderators can't approve it
+  held_for_admins Boolean       @default(false)
   // Written by a shadow-banned account: only the author sees it
-  shadow_hidden Boolean       @default(false)
+  shadow_hidden   Boolean       @default(false)
 
   upvote_count   Int   @default(0)
   // Times a person (not a bot, not the author) opened it; shown to the author only
@@ -493,14 +498,16 @@ model Comment {
   depth     Int       @default(0)
   path      String
 
-  body          String
-  is_anonymous  Boolean       @default(false)
-  is_sponsored  Boolean       @default(false)
-  status        ContentStatus @default(active)
-  edited_at     DateTime?
-  pinned_at     DateTime?
-  held_reason   String?
-  shadow_hidden Boolean       @default(false)
+  body            String
+  is_anonymous    Boolean       @default(false)
+  is_sponsored    Boolean       @default(false)
+  status          ContentStatus @default(active)
+  edited_at       DateTime?
+  pinned_at       DateTime?
+  held_reason     String?
+  // Held for the site's admins only (sexual content, or worse): community moderators can't approve it
+  held_for_admins Boolean       @default(false)
+  shadow_hidden   Boolean       @default(false)
 
   upvote_count   Int   @default(0)
   // Times its thread was opened with this comment on screen (not by a bot or the author); author only

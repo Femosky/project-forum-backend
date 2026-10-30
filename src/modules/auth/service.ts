@@ -49,6 +49,7 @@ export function toPrivateUser(user: User) {
         is_email_verified: user.email_verified_at !== null,
         has_password: user.password_hash !== null,
         has_google: user.google_id !== null,
+        show_mature: user.show_mature,
         created_at: user.created_at,
         ...trustFlags(user),
     };

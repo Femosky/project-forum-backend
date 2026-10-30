@@ -25,6 +25,8 @@ const updateMeSchema = z
         avatar_id: z.enum(AVATAR_IDS).optional(),
         // The drawn avatar's parts (lib/avatars.ts); null goes back to the one derived from the username
         avatar_config: avatarConfigSchema.nullable().optional(),
+        // "Show mature content": NSFW posts and communities in feeds, search and the directory, unblurred
+        show_mature: z.boolean().optional(),
     })
     .refine((value) => Object.keys(value).length > 0, { message: 'Nothing to update' });
 
@@ -35,6 +37,9 @@ const savedQuery = pageQuery.extend({ type: z.enum(['posts', 'comments']).defaul
 router.patch('/me', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const input = parse(updateMeSchema, request.body);
+    if (input.show_mature && !user.adult_attested_at) {
+        throw badRequest('Confirm you are 18 or older to see mature content.', 'adult_attestation_required');
+    }
     const updated = await prisma.user.update({
         where: { id: user.id },
         data: {

@@ -82,8 +82,10 @@ type CreatePostInput = {
     is_anonymous: boolean;
     is_nsfw: boolean;
     flair_id?: string;
-    // Held by the filters for review, or written by a shadow-banned account
+    // Held by the filters for review (only the site's admins may clear held_for_admins), or written by a
+    // shadow-banned account
     held_reason: string | null;
+    held_for_admins?: boolean;
     shadow_hidden: boolean;
 };
 
@@ -107,6 +109,7 @@ export async function createPost(input: CreatePostInput) {
                     flair_id: input.flair_id ?? null,
                     status: input.held_reason ? 'pending' : 'active',
                     held_reason: input.held_reason,
+                    held_for_admins: Boolean(input.held_reason && input.held_for_admins),
                     shadow_hidden: input.shadow_hidden,
                     created_at: now,
                     hot_rank: hotRank(0, now),
@@ -141,6 +144,7 @@ export async function relatedPosts(post: { id: string; title: string; community_
         FROM q, "Post" p JOIN "Community" c ON c."id" = p."community_id"
         WHERE q.query IS NOT NULL AND p."id" <> ${post.id}::uuid
           AND p."status" IN ('active', 'locked') AND NOT p."shadow_hidden" AND c."status" = 'active' AND c."visibility" = 'public'
+          AND NOT p."is_nsfw" AND NOT c."is_nsfw"
           AND p."search_vector" @@ q.query
         ORDER BY ts_rank_cd(p."search_vector", q.query) DESC, p."hot_rank" DESC
         LIMIT ${RELATED_LIMIT}`;
@@ -153,6 +157,9 @@ export async function relatedPosts(post: { id: string; title: string; community_
             short_id: { notIn: relatedIds },
             status: { in: LISTED_POST_STATUSES },
             shadow_hidden: false,
+            // Related threads are the same for everyone (and cached for guests), so never mature ones
+            is_nsfw: false,
+            community: { is_nsfw: false },
             created_at: { gte: topWindowStart('month') },
         },
         orderBy: [{ score: 'desc' }, { id: 'desc' }],

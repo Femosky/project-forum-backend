@@ -220,6 +220,8 @@ type CreateCommentInput = {
     isAnonymous: boolean;
     // Held by the filters for review, or written by a shadow-banned account
     heldReason: string | null;
+    // Only the site's admins may clear the hold
+    heldForAdmins?: boolean;
     shadowHidden: boolean;
 };
 
@@ -254,6 +256,7 @@ export async function createComment(input: CreateCommentInput) {
                     is_anonymous: input.isAnonymous,
                     status: input.heldReason ? 'pending' : 'active',
                     held_reason: input.heldReason,
+                    held_for_admins: Boolean(input.heldReason && input.heldForAdmins),
                     shadow_hidden: input.shadowHidden,
                 },
                 include: commentInclude,

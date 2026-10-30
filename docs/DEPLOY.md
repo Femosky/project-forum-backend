@@ -53,6 +53,7 @@ Optional; each feature turns itself off without its key, and the boot log warns 
 | `TURNSTILE_SECRET_KEY` | Bot check on signup, password reset, repeated failed logins and a new account's first-day posts. Set it together with the web app's `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (one without the other blocks signups or skips the check). | Cloudflare → Turnstile → Add widget → Secret key |
 | `GOOGLE_CLIENT_ID` | "Continue with Google". The web app has no Google button yet, so this can wait. | Google Cloud console → OAuth client (web), origin `https://forum.oskeylabs.com` |
 | `POSTHOG_API_KEY` | Product analytics (see below) | posthog.com, **EU** cloud → Project settings → Project API key |
+| `OPENAI_API_KEY` | Optional, off by default: adds OpenAI's free moderation check on top of the site's own checks (an explicit-term list for text and an open-source picture classifier run inside the API, which need no key). Empty: only the site's own checks run | platform.openai.com → API keys → Create new secret key (docs/LAUNCH.md Part 15) |
 | `POSTHOG_HOST` | Defaults to `https://eu.i.posthog.com` | |
 | `SENTRY_DSN` | Error alerts: unexpected errors (500s, crashes) with the route and request id, never bodies or cookies. Repeats within a minute are sent once. | sentry.io → project (Node.js) → Settings → Client Keys (DSN) |
 | `INDEXNOW_KEY` | Pings Bing when a post is created. Leave unset while the site is private. | any 8-128 letters/digits, same value in the web app |

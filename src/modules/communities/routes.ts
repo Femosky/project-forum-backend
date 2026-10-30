@@ -18,6 +18,7 @@ import {
     findMembership,
     isActiveMember,
     isBanned,
+    notMatureCommunity,
     viewerContext,
 } from './access';
 import {
@@ -68,8 +69,9 @@ function viewerMembership(member: CommunityMember | null, hasPendingRequest: boo
     };
 }
 
-router.get('/', async (request, response) => {
+router.get('/', optionalAuth, async (request: AuthRequest, response) => {
     const query = parse(listCommunitiesQuery, request.query);
+    const context = await viewerContext(request.viewer);
     const field = query.sort === 'popular' ? 'member_count' : 'created_at';
     const search = query.q
         ? {
@@ -84,6 +86,8 @@ router.get('/', async (request, response) => {
         where: {
             AND: [
                 { status: 'active', ...(query.category ? { category: query.category } : {}), ...search },
+                // Mature (NSFW) communities only for viewers who switched them on; a direct link still opens them
+                notMatureCommunity(context),
                 afterCursor(field, 'desc', decodeCursor(query.cursor)),
             ],
         },
