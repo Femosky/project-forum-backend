@@ -23,6 +23,9 @@ services:
       # Pooled Neon URL (host contains "-pooler") for the app
       - key: DATABASE_URL
         sync: false
+      # Direct Neon URL (no "-pooler") for the job queue; without it the queue shares the pooled URL
+      - key: DIRECT_DATABASE_URL
+        sync: false
       - key: JWT_SECRET
         generateValue: true
       - key: WEB_ORIGIN
