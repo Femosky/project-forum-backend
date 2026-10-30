@@ -10,6 +10,8 @@ import { isTurnstileEnabled, requireTurnstile } from '../../lib/turnstile';
 import { AuthRequest, optionalAuth, requireAuth, viewerOf } from '../../middlewares/auth';
 import { assertCanParticipate, assertCanPost, findCommunity, viewerContext } from '../communities/access';
 import { reviewContent } from '../safety/review';
+import { checkImage } from '../safety/imageCheck';
+import { readStoredObject } from '../../lib/storage';
 import { assertAnonymousAllowed, assertLinksAllowed, assertWithinYoungAccountLimits, canPostLinks } from '../safety/policy';
 import { assertCommentable, createComment, listPostComments } from '../comments/service';
 import { notifyForComment } from '../notifications/service';
@@ -45,8 +47,14 @@ router.post('/', requireAuth, async (request: AuthRequest, response) => {
     }
 
     if (image && !canPostLinks(user)) throw forbidden("New accounts can't post pictures yet. You can once your account is a day old.", 'new_account_pictures');
-    // The picture was checked when it was uploaded; the post (words and picture together) is checked again here
-    const review = await reviewContent({ user, kind: 'post', title: input.title, body: input.body, url, imageUrls: image ? [image.url] : [], communityId: community.id });
+    // The picture was checked when it was uploaded; here it decides the post's fate along with the words: borderline
+    // holds the post for the admins, revealing adds the mature label (the small copy is enough to judge)
+    const picture = image ? await readStoredObject([...image.variants].sort((a, b) => a.width - b.width)[0]?.url ?? image.url) : null;
+    const pictureVerdict = picture ? await checkImage(picture, 'post_image') : null;
+    const review = await reviewContent(
+        { user, kind: 'post', title: input.title, body: input.body, url, imageUrls: image ? [image.url] : [], communityId: community.id },
+        pictureVerdict ? [pictureVerdict.action === 'refuse' ? { action: 'hold_for_admins', reason: pictureVerdict.reason } : pictureVerdict] : []
+    );
     const post = await createPost({
         communityId: community.id,
         authorId: user.id,

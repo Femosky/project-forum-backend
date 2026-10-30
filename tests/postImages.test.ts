@@ -111,3 +111,27 @@ describe('picture sizes', () => {
         expect((await sharp(file, { animated: true }).metadata()).pages).toBe(2);
     });
 });
+
+describe('the site’s own picture check on posts', () => {
+    it('refuses clear cases at upload, holds borderline ones for the admins, labels revealing ones mature', async () => {
+        const imageCheck = await import('../src/modules/safety/imageCheck');
+        const author = await signUp('author');
+        await createCommunity(author.agent, 'lounge');
+        const spy = vi.spyOn(imageCheck, 'checkImage');
+
+        spy.mockResolvedValue({ action: 'refuse', reason: "This picture can't be posted. Sexual content isn't allowed on the site." });
+        const refused = await upload(author.agent, await phonePhoto());
+        expect(refused.status).toBe(400);
+
+        spy.mockResolvedValue({ action: 'hold_for_admins', reason: 'Picture may be sexual (automatic check)' });
+        const borderline = await upload(author.agent, await phonePhoto());
+        expect(borderline.status).toBe(201);
+        const held = await author.agent.post('/v1/posts').send({ community: 'lounge', type: 'image', title: 'Beach day in Lagos', image: borderline.body.image });
+        expect(await prisma.post.findUniqueOrThrow({ where: { id: held.body.post.id } })).toMatchObject({ status: 'pending', held_for_admins: true });
+
+        spy.mockResolvedValue({ action: 'label_mature', reason: 'Revealing picture' });
+        const revealing = await upload(author.agent, await phonePhoto());
+        const labelled = await author.agent.post('/v1/posts').send({ community: 'lounge', type: 'image', title: 'Swimwear haul from the market', image: revealing.body.image });
+        expect(await prisma.post.findUniqueOrThrow({ where: { id: labelled.body.post.id } })).toMatchObject({ status: 'active', is_nsfw: true });
+    });
+});

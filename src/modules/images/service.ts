@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { badRequest } from '../../lib/http';
 import logger from '../../lib/logger';
+import { env } from '../../config/env';
 import { putObject } from '../../lib/storage';
-import { checkContent } from '../safety/moderation';
+import { checkImage } from '../safety/imageCheck';
+import { openAiVerdict } from '../safety/moderation';
 
 // Image uploads: ad logos and pictures, community icons and banners, and pictures in posts. (No profile photos, by
 // decision: people keep drawn avatars, which protects anonymity and saves storage.)
@@ -39,21 +41,28 @@ const VARIANTS: Record<ImagePurpose, { width: number; height?: number }[]> = {
 
 export type StoredImage = { url: string; width: number; height: number; variants: { url: string; width: number; height: number }[] };
 
-// Every upload is checked before anything is stored (modules/safety/moderation.ts): a sexual picture, or one that
-// suggests a minor, is refused outright for every purpose, since porn isn't allowed anywhere. Severe violence is
-// refused for icons, banners and ads; in a post it may still go up, and the post itself is checked again (held, or
-// labelled mature). Fails open like the text check: with no OPENAI_API_KEY or the service down, uploads go through.
+// Every upload is checked before anything is stored: the site's own picture classifier (modules/safety/
+// imageCheck.ts), plus OpenAI's check when it's switched on. A clearly sexual picture is refused for every purpose,
+// since porn isn't allowed anywhere. Icons, banners and ad pictures have no review step, so anything possibly sexual
+// is refused too (ads also refuse revealing pictures). A borderline picture in a post may go up: the post is checked
+// again with it and held for the admins (or labelled mature). If a check can't run, the upload goes through and a log
+// line says so.
 export async function scanImage(input: { image: Buffer; purpose: ImagePurpose; uploaderId: string }): Promise<{ allowed: boolean; reason?: string }> {
-    // A small copy is enough to judge, and keeps the request light
+    const isPost = input.purpose === 'post_image';
+    const local = await checkImage(input.image, input.purpose);
+    if (local.action === 'refuse' || (local.action === 'hold_for_admins' && !isPost)) {
+        logger.warn({ purpose: input.purpose, uploaderId: input.uploaderId }, 'Picture refused by the automatic check');
+        return { allowed: false, reason: local.action === 'refuse' ? local.reason : "This picture can't be used here." };
+    }
+    // The optional OpenAI layer, when it's switched on, gets a small inline copy
+    if (!env.OPENAI_API_KEY) return { allowed: true };
     const sample = await sharp(input.image, { animated: false }).rotate().resize(512, 512, { fit: 'inside' }).jpeg({ quality: 70 }).toBuffer();
-    const verdict = await checkContent({ imageUrls: [`data:image/jpeg;base64,${sample.toString('base64')}`] });
-    if (verdict.action === 'hold_for_admins') {
-        logger.warn({ purpose: input.purpose, uploaderId: input.uploaderId, reason: verdict.reason }, 'Picture refused by the automatic check');
+    const extra = await openAiVerdict({ imageUrls: [`data:image/jpeg;base64,${sample.toString('base64')}`] });
+    if (extra.action === 'hold_for_admins') {
+        logger.warn({ purpose: input.purpose, uploaderId: input.uploaderId, reason: extra.reason }, 'Picture refused by the automatic check');
         return { allowed: false, reason: "This picture can't be posted here. Sexual content isn't allowed on the site." };
     }
-    if (verdict.action === 'hold' && input.purpose !== 'post_image') {
-        return { allowed: false, reason: "This picture can't be used here." };
-    }
+    if (extra.action === 'hold' && !isPost) return { allowed: false, reason: "This picture can't be used here." };
     return { allowed: true };
 }
 

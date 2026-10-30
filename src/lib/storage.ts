@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { AwsClient } from 'aws4fetch';
 import { env } from '../config/env';
@@ -43,4 +43,21 @@ export async function putObject(key: string, body: Buffer, contentType: string):
         await writeFile(file, body);
     }
     return `${mediaBase()}/${key}`;
+}
+
+// Reads back a file we stored, by its public URL (null when it isn't ours or can't be read). For checks that run after
+// upload, such as a picture post's picture when the post is sent.
+export async function readStoredObject(url: string): Promise<Buffer | null> {
+    if (!isStoredMedia(url)) return null;
+    const key = url.slice(mediaBase().length + 1);
+    if (key.includes('..')) return null;
+    try {
+        if (r2) {
+            const response = await r2.client.fetch(`${r2.endpoint}/${key}`);
+            return response.ok ? Buffer.from(await response.arrayBuffer()) : null;
+        }
+        return await readFile(path.join(LOCAL_MEDIA_DIR, key));
+    } catch {
+        return null;
+    }
 }
