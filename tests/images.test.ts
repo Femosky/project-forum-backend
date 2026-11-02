@@ -76,6 +76,9 @@ describe('drawn avatars', () => {
         expect((await alice.agent.patch('/v1/users/me').send({ avatar_config: { hair: '../x' } })).status).toBe(400);
         expect((await alice.agent.patch('/v1/users/me').send({ avatar_config: { hair: 'added-in-2030' } })).status).toBe(200);
 
+        // Picking one of the starters is a saved choice too
+        expect((await alice.agent.patch('/v1/users/me').send({ avatar_config: { starter: 'teal' } })).body.user.avatar).toBe('y1_starter-teal');
+
         expect((await alice.agent.patch('/v1/users/me').send({ avatar_config: null })).body.user.avatar).toBe(avatarCode(null, 'alice'));
     });
 

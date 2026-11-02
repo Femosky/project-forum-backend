@@ -7,6 +7,7 @@ import { z } from 'zod';
 // Parts are stored by name, never by position, and this file does not list the options: a new hairstyle or thread
 // style only needs adding in the web app, and an option it no longer knows falls back to its default when drawn.
 export const AVATAR_PARTS = [
+    'starter',
     'skin',
     'hair',
     'hair_colour',
