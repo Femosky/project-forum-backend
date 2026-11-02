@@ -85,7 +85,7 @@ export async function fetchLinkPreview(rawUrl: string): Promise<LinkPreview | nu
         await assertSafeUrl(url);
         const response = await fetch(url, {
             redirect: 'manual',
-            headers: { 'User-Agent': 'ProjectForumBot/1.0 (+link preview)', Accept: 'text/html' },
+            headers: { 'User-Agent': 'YarnterBot/1.0 (+link preview)', Accept: 'text/html' },
             signal: AbortSignal.timeout(5_000),
         });
 
@@ -121,7 +121,7 @@ export async function fetchPublicImage(rawUrl: string, maxBytes: number): Promis
         await assertSafeUrl(url);
         const response = await fetch(url, {
             redirect: 'manual',
-            headers: { 'User-Agent': 'ProjectForumBot/1.0 (+link preview)', Accept: 'image/*' },
+            headers: { 'User-Agent': 'YarnterBot/1.0 (+link preview)', Accept: 'image/*' },
             signal: AbortSignal.timeout(5_000),
         });
         if (response.status >= 300 && response.status < 400) {

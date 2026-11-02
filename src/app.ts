@@ -148,7 +148,7 @@ if (storageDriver() === 'local') {
 }
 
 app.get('/', (request, response) => {
-    response.send('Welcome to the "Project Forum" API. See /v1.');
+    response.send('Welcome to the yarnter API. See /v1.');
 });
 
 app.use(notFoundHandler);

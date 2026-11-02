@@ -1,5 +1,6 @@
 import { env } from '../config/env';
 import logger from './logger';
+import { SITE_ACCOUNT_NAME } from '../shared/site';
 
 export type Email = { to: string; subject: string; text: string; html?: string; headers?: Record<string, string> };
 
@@ -30,10 +31,14 @@ export async function sendEmail(email: Email) {
 const escapeHtml = (value: string) =>
     value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 
+// The logo at the top of every HTML email. Live text, so it stays readable when images are blocked or in dark mode.
+export const emailHeader = () =>
+    `<p style="margin:0 0 20px"><img src="${escapeHtml(env.WEB_URL)}/yarner-email.png" width="16" height="24" alt="" style="vertical-align:middle;margin-right:6px"><span style="vertical-align:middle;font-family:sans-serif;font-size:18px;font-weight:600;letter-spacing:-.02em">${SITE_ACCOUNT_NAME}</span></p>`;
+
 // A plain email with one call-to-action link
 export function linkEmail(to: string, subject: string, intro: string, linkLabel: string, url: string, outro?: string): Email {
     const text = [intro, '', `${linkLabel}: ${url}`, ...(outro ? ['', outro] : [])].join('\n');
-    const html = `<p>${escapeHtml(intro)}</p><p><a href="${escapeHtml(url)}">${escapeHtml(linkLabel)}</a></p>${
+    const html = `${emailHeader()}<p>${escapeHtml(intro)}</p><p><a href="${escapeHtml(url)}">${escapeHtml(linkLabel)}</a></p>${
         outro ? `<p>${escapeHtml(outro)}</p>` : ''
     }`;
     return { to, subject, text, html };

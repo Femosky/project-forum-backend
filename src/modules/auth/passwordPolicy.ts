@@ -17,7 +17,7 @@ export async function isBreached(password: string, fetchImpl: typeof fetch = fet
     const suffix = hash.slice(5);
     try {
         const response = await fetchImpl(PWNED_RANGE + prefix, {
-            headers: { 'Add-Padding': 'true', 'User-Agent': 'project-forum' },
+            headers: { 'Add-Padding': 'true', 'User-Agent': 'yarnter' },
             signal: AbortSignal.timeout(PWNED_TIMEOUT_MS),
         });
         if (!response.ok) return false;
