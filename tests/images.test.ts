@@ -68,6 +68,16 @@ async function anonymousPostSetup() {
 }
 
 describe('drawn avatars', () => {
+    it('marks moderators on their own posts, but never on anonymous ones', async () => {
+        const alice = await signUp('alice');
+        await createCommunity(alice.agent, 'modplace');
+        const named = await createPost(alice.agent, 'modplace', { title: 'From the owner' });
+        const hidden = await createPost(alice.agent, 'modplace', { title: 'Quietly', is_anonymous: true });
+        expect((await api().get(`/v1/posts/${named.id}`)).body.post.author.is_moderator).toBe(true);
+        expect((await api().get(`/v1/posts/${hidden.id}`)).body.post.author).toBeNull();
+        expect((await alice.agent.get(`/v1/posts/${hidden.id}`)).body.post.author.is_moderator).toBe(false);
+    });
+
     it('shows anonymous posts on the author\'s own profile, and to nobody else', async () => {
         const { alice, bob } = await anonymousPostSetup();
         expect((await alice.agent.get('/v1/users/alice/posts')).body.posts[0]).toMatchObject({ is_anonymous: true, title: 'Mine, quietly' });

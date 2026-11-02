@@ -4,7 +4,7 @@ import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
 import { idOrShortId, withShortIdRetry } from '../../lib/ids';
 import { notFound } from '../../lib/http';
 import { hotRank, TopWindow, topWindowStart } from '../../lib/ranking';
-import { isHiddenFrom, isReadablePost, LISTED_POST_STATUSES, notShadowHidden, postInclude, PostRow, toPublicPost } from '../../lib/serializers';
+import { isHiddenFrom, isReadablePost, moderatorsAmong, LISTED_POST_STATUSES, notShadowHidden, postInclude, PostRow, toPublicPost } from '../../lib/serializers';
 import { slugify } from '../../lib/slug';
 import { urlKey } from '../../lib/urls';
 import { assertCanView, canModerate, ViewerContext } from '../communities/access';
@@ -50,7 +50,8 @@ export async function listPosts({ where, sort, window = 'day', cursor, limit, co
 
 export async function serializePosts(rows: PostRow[], context: ViewerContext) {
     const { votes, saved } = await postViewerState(context?.userId, rows.map((row) => row.id));
-    return rows.map((row) => toPublicPost(row, context, votes, saved));
+    const mods = await moderatorsAmong(rows);
+    return rows.map((row) => toPublicPost(row, context, votes, saved, mods));
 }
 
 // Finds a post by id or short id that this viewer is allowed to see. Removed and pending posts are visible only

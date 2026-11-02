@@ -1,4 +1,5 @@
 import { ContentStatus, Prisma } from '@prisma/client';
+import prisma from '../prismaConnection';
 import { canModerate, showsMature, ViewerContext } from '../modules/communities/access';
 import { isIndexable } from './indexing';
 import { anonymousAvatarCode, avatarCode } from './avatars';
@@ -52,15 +53,32 @@ export const notShadowHidden = (context: ViewerContext) =>
 export const isHiddenFrom = (item: { shadow_hidden: boolean; author_id: string }, context: ViewerContext) =>
     item.shadow_hidden && context?.userId !== item.author_id && !context?.isAdmin;
 
-function publicAuthor(author: AuthorRow) {
+// Who among these authors moderates the community they posted in, for the "Mod" badge. Keys come from modKey.
+export type ModSet = Set<string>;
+const modKey = (communityId: string, userId: string) => `${communityId}:${userId}`;
+
+export async function moderatorsAmong(items: { community_id: string; author_id: string }[]): Promise<ModSet> {
+    if (items.length === 0) return new Set();
+    const rows = await prisma.communityMember.findMany({
+        where: {
+            community_id: { in: [...new Set(items.map((item) => item.community_id))] },
+            user_id: { in: [...new Set(items.map((item) => item.author_id))] },
+            role: { in: ['moderator', 'owner'] },
+        },
+        select: { community_id: true, user_id: true },
+    });
+    return new Set(rows.map((row) => modKey(row.community_id, row.user_id)));
+}
+
+function publicAuthor(author: AuthorRow, isModerator = false) {
     if (!author || author.status === 'deleted') return null;
-    return { username: author.username, display_name: author.display_name, avatar_id: author.avatar_id, avatar: avatarCode(author.avatar_config, author.username) };
+    return { is_moderator: isModerator, username: author.username, display_name: author.display_name, avatar_id: author.avatar_id, avatar: avatarCode(author.avatar_config, author.username) };
 }
 
 export type VoteMap = Map<string, number>;
 export type SavedSet = Set<string>;
 
-export function toPublicPost(post: PostRow, context: ViewerContext, votes?: VoteMap, saved?: SavedSet) {
+export function toPublicPost(post: PostRow, context: ViewerContext, votes?: VoteMap, saved?: SavedSet, mods?: ModSet) {
     const isAuthor = context?.userId === post.author_id;
     // A tombstone shows no author (not even to moderators or the author), no body and no counts
     const isDeleted = post.status === 'deleted';
@@ -107,7 +125,8 @@ export function toPublicPost(post: PostRow, context: ViewerContext, votes?: Vote
             display_name: post.community.display_name,
             image_url: post.community.image_url,
         },
-        author: revealAuthor ? publicAuthor(post.author) : null,
+        // Never on an anonymous post: the badge would narrow down who wrote it
+        author: revealAuthor ? publicAuthor(post.author, !post.is_anonymous && mods?.has(modKey(post.community_id, post.author_id))) : null,
         anon_avatar: post.is_anonymous && !isDeleted ? anonymousAvatarCode(post.author_id, post.id) : null,
         viewer: context
             ? {
@@ -152,7 +171,7 @@ export type CommentRow = {
 
 export const commentInclude = { author: { select: authorSelect } } satisfies Prisma.CommentInclude;
 
-export function toPublicComment(comment: CommentRow, communityId: string, context: ViewerContext, votes?: VoteMap, saved?: SavedSet) {
+export function toPublicComment(comment: CommentRow, communityId: string, context: ViewerContext, votes?: VoteMap, saved?: SavedSet, mods?: ModSet) {
     const isAuthor = context?.userId === comment.author_id;
     const isMod = canModerate(context, communityId);
     const isGone = comment.status === 'deleted' || comment.status === 'removed';
@@ -180,7 +199,7 @@ export function toPublicComment(comment: CommentRow, communityId: string, contex
         downvote_count: isDeleted ? 0 : comment.downvote_count,
         score: isDeleted ? 0 : comment.score,
         reply_count: comment.reply_count,
-        author: revealAuthor ? publicAuthor(comment.author) : null,
+        author: revealAuthor ? publicAuthor(comment.author, !comment.is_anonymous && mods?.has(modKey(communityId, comment.author_id))) : null,
         anon_avatar: comment.is_anonymous && !isGone ? anonymousAvatarCode(comment.author_id, comment.post_id) : null,
         viewer: context
             ? {

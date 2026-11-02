@@ -3,7 +3,7 @@ import prisma from '../../prismaConnection';
 import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
 import { badRequest, forbidden, HttpError } from '../../lib/http';
 import { withShortIdRetry } from '../../lib/ids';
-import {
+import { moderatorsAmong,
     commentInclude,
     CommentRow,
     notShadowHidden,
@@ -119,11 +119,12 @@ async function buildTree(
     const descendants = await loadDescendants(top, levels, perParent, sort, context?.userId ?? null);
     const all = [...top, ...descendants];
     const { votes, saved } = await commentViewerState(context?.userId, all.map((comment) => comment.id));
+    const mods = await moderatorsAmong(all.map((comment) => ({ community_id: communityId, author_id: comment.author_id })));
 
     const nodes = new Map<string, PublicComment>();
     const depthOf = new Map<string, number>();
     for (const comment of top) {
-        nodes.set(comment.id, { ...toPublicComment(comment, communityId, context, votes, saved), replies: [] });
+        nodes.set(comment.id, { ...toPublicComment(comment, communityId, context, votes, saved, mods), replies: [] });
         depthOf.set(comment.id, 0);
     }
     // Rows arrive ordered by depth, so a parent is always placed before its replies
@@ -131,7 +132,7 @@ async function buildTree(
         const parent = comment.parent_id ? nodes.get(comment.parent_id) : undefined;
         const level = comment.parent_id ? (depthOf.get(comment.parent_id) ?? Infinity) + 1 : Infinity;
         if (!parent || level > levels) continue;
-        const node: PublicComment = { ...toPublicComment(comment, communityId, context, votes, saved), replies: [] };
+        const node: PublicComment = { ...toPublicComment(comment, communityId, context, votes, saved, mods), replies: [] };
         parent.replies!.push(node);
         nodes.set(comment.id, node);
         depthOf.set(comment.id, level);
