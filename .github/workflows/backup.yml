@@ -14,7 +14,7 @@ jobs:
     environment: production
     services:
       postgres:
-        image: postgres:17
+        image: postgres:18
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -39,14 +39,14 @@ jobs:
             echo "Set DIRECT_DATABASE_URL and BACKUP_PASSPHRASE (docs/DEPLOY.md)"; exit 1
           fi
 
-      # The dump client must be at least the server's version (Neon runs Postgres 17)
-      - name: Install Postgres 17 client
+      # The dump client must be at least the server's version (Neon runs Postgres 18)
+      - name: Install Postgres 18 client
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-common > /dev/null
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y > /dev/null
-          sudo apt-get install -y -qq postgresql-client-17 > /dev/null
-          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+          sudo apt-get install -y -qq postgresql-client-18 > /dev/null
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
 
       - name: Dump
         run: pg_dump --format=custom --no-owner --no-privileges --file=backup.dump "$DIRECT_DATABASE_URL"
