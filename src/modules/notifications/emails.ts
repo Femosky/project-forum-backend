@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import prisma from '../../prismaConnection';
 import { env } from '../../config/env';
 import { defineScheduledJob, onJobsWake } from '../../lib/jobs';
-import { Email } from '../../lib/email';
+import { Email, emailHeader } from '../../lib/email';
 import { unsubscribeHeaders, unsubscribeLink } from '../../lib/emailTokens';
 import { SITE_ACCOUNT_NAME } from '../../shared/site';
 import { emailJob } from '../auth/jobs';
@@ -78,6 +78,7 @@ export async function sendReplyEmails(now = new Date()) {
                 subject: wanted.length === 1 ? `${first.who} ${first.verb}` : `${wanted.length} new replies on ${SITE_ACCOUNT_NAME}`,
                 text: [...items.map((item) => `${item.who} ${item.verb} in "${item.title}":\n${item.excerpt}\n${item.url}`), `Stop these emails: ${stop}`].join('\n\n'),
                 html: [
+                    emailHeader(),
                     ...items.map(
                         (item) =>
                             `<p><strong>${escapeHtml(item.who)}</strong> ${item.verb} in <a href="${escapeHtml(item.url)}">${escapeHtml(item.title)}</a><br>${escapeHtml(item.excerpt)}</p>`
@@ -144,6 +145,7 @@ export function buildDigest(user: { id: string; email: string }, posts: Prisma.P
             `Stop these emails: ${stop}`,
         ].join('\n\n'),
         html: [
+            emailHeader(),
             ...items.map(
                 ({ post, url, excerpt, hide, by }) => `<div style="margin:0 0 24px;padding:0 0 16px;border-bottom:1px solid #e5e5e5;font-family:sans-serif">
 <div style="font-size:13px;color:#666"><strong>c/${escapeHtml(post.community.name)}</strong> · ${escapeHtml(by)}</div>

@@ -24,7 +24,7 @@ describe('reply emails', () => {
         await sendReplyEmails();
         const sent = mail('alice@example.test').slice(before);
         expect(sent).toHaveLength(1);
-        expect(sent[0].subject).toBe('2 new replies on Project Forum');
+        expect(sent[0].subject).toBe('2 new replies on yarnter');
         expect(sent[0].headers?.['List-Unsubscribe-Post']).toBe('List-Unsubscribe=One-Click');
 
         await createComment(bob.agent, post.id, { body: 'Third reply' });
