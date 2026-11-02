@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
-import { AVATAR_PARTS, avatarCode } from '../src/lib/avatars';
+import { avatarCode } from '../src/lib/avatars';
 import { LOCAL_MEDIA_DIR } from '../src/lib/storage';
 import { createCommunity, signUp, signInStaff } from './helpers';
 
@@ -60,18 +60,26 @@ describe('image uploads', () => {
 });
 
 describe('drawn avatars', () => {
-    it('gives every new account its own avatar and lets them change it within the parts that exist', async () => {
+    it('starts every account on a starter avatar and saves chosen parts by name', async () => {
         const alice = await signUp('alice');
         const me = await alice.agent.get('/v1/auth/me');
-        expect(me.body.user.avatar).toMatch(new RegExp(`^[0-9a-z]{${Object.keys(AVATAR_PARTS).length}}$`));
+        expect(me.body.user.avatar).toBe(avatarCode(null, 'alice'));
+        expect(me.body.user.avatar).toMatch(/^s-[0-9a-z]+$/);
 
-        const config = Object.fromEntries(Object.keys(AVATAR_PARTS).map((part) => [part, 1]));
+        const config = { hair: 'nok-topknot', skin: 'sienna', thread_style: 'fire' };
         const saved = await alice.agent.patch('/v1/users/me').send({ avatar_config: config });
-        expect(saved.body.user.avatar).toBe(avatarCode(config, 'alice'));
-        expect((await alice.agent.patch('/v1/users/me').send({ avatar_config: { ...config, hair: 99 } })).status).toBe(400);
-        expect((await alice.agent.get('/v1/users/alice')).body.user.avatar).toBe(avatarCode(config, 'alice'));
+        expect(saved.body.user.avatar).toBe('y1_skin-sienna_hair-nok-topknot_thread_style-fire');
+        expect((await alice.agent.get('/v1/users/alice')).body.user.avatar).toBe(saved.body.user.avatar);
 
-        // Back to the one derived from the username (the web app derives the same)
+        // A part that doesn't exist or an unsafe name is refused; an option the web app adds later needs no API change
+        expect((await alice.agent.patch('/v1/users/me').send({ avatar_config: { wings: 'big' } })).status).toBe(400);
+        expect((await alice.agent.patch('/v1/users/me').send({ avatar_config: { hair: '../x' } })).status).toBe(400);
+        expect((await alice.agent.patch('/v1/users/me').send({ avatar_config: { hair: 'added-in-2030' } })).status).toBe(200);
+
         expect((await alice.agent.patch('/v1/users/me').send({ avatar_config: null })).body.user.avatar).toBe(avatarCode(null, 'alice'));
+    });
+
+    it('moves avatars saved in the old numbered format onto a starter', () => {
+        expect(avatarCode({ face: 1, skin: 2, hair: 3 }, 'alice')).toBe(avatarCode(null, 'alice'));
     });
 });
