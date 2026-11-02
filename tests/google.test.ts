@@ -23,7 +23,7 @@ describe('continue with Google', () => {
         const user = await prisma.user.findUniqueOrThrow({ where: { username: 'ngozi' } });
         expect(user.google_id).toBe('g-new-1');
         expect(user.email_verified_at).not.toBeNull();
-        expect(user.avatar_config).not.toBeNull();
+        expect(user.avatar_config).toBeNull();
 
         // Next time the same Google account just signs in
         expect((await api().post('/v1/auth/google').send({ id_token: token })).status).toBe(200);

@@ -215,7 +215,7 @@ router.post('/confirm-email', async (request, response) => {
 //     and then connects Google (POST /google/link), so whoever controls a Google account with the same address
 //     can't take over an existing account;
 //   - a new person: asked to pick a username and confirm they're 18+ (400 google_signup_details, with a suggestion),
-//     then the same token is sent again with both. The email counts as verified, and they get a random avatar.
+//     then the same token is sent again with both. The email counts as verified, and they start on a starter avatar.
 // Staff accounts are separate (admin panel, password and authenticator only), so Google never signs into one.
 router.post('/google', async (request, response) => {
     const input = parse(googleSchema, request.body);

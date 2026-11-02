@@ -3,7 +3,7 @@ import { track } from '../../lib/analytics';
 import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { badRequest, forbidden, parse } from '../../lib/http';
-import { DELETED_POST_DATA, LISTED_POST_STATUSES, postInclude, toPublicComment, toPublicPost } from '../../lib/serializers';
+import { moderatorsAmong, DELETED_POST_DATA, LISTED_POST_STATUSES, postInclude, toPublicComment, toPublicPost } from '../../lib/serializers';
 import { urlKey } from '../../lib/urls';
 import { fetchLinkPreview } from '../../lib/linkPreview';
 import { isTurnstileEnabled, requireTurnstile } from '../../lib/turnstile';
@@ -116,7 +116,7 @@ router.get('/:id', optionalAuth, async (request: AuthRequest, response) => {
     const context = await viewerContext(request.viewer);
     const post = await findVisiblePost(String(request.params.id), request.viewer?.user, context);
     const { votes, saved } = await postViewerState(context?.userId, [post.id]);
-    response.json({ post: toPublicPost(post, context, votes, saved) });
+    response.json({ post: toPublicPost(post, context, votes, saved, await moderatorsAmong([post])) });
 });
 
 // A person opened this post's page. Counts one view for the post and one for each comment that was on screen (sent

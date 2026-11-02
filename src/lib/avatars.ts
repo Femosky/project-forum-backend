@@ -1,57 +1,52 @@
-import { randomInt } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 
-// Drawn avatars instead of profile photos (by decision: anonymity, and no storage of people's faces). An avatar is a
-// choice from each set of hand-drawn parts; the web app holds the drawings (frontend src/avatars) and renders them
-// as SVG. Here: how many options each part has, validation, and a compact code for URLs.
+// Drawn avatars instead of profile photos (by decision: anonymity, and no storage of people's faces). The web app holds
+// the drawings (frontend src/avatars); here an avatar is only a set of named parts, like { hair: 'nok-topknot' }.
 //
-// The order and counts must match the web app's parts. New options go at the end of a list, never in the middle,
-// so existing avatars keep their look.
-export const AVATAR_PARTS = {
-    face: 4,
-    skin: 10,
-    eyes: 8,
-    mouth: 6,
-    hair: 12,
-    hair_colour: 8,
-    accessory: 6,
-    outfit: 8,
-    background: 8,
-} as const;
+// Parts are stored by name, never by position, and this file does not list the options: a new hairstyle or thread
+// style only needs adding in the web app, and an option it no longer knows falls back to its default when drawn.
+export const AVATAR_PARTS = [
+    'starter',
+    'skin',
+    'hair',
+    'hair_colour',
+    'top',
+    'cloth',
+    'neck',
+    'eyewear',
+    'eyes',
+    'mouth',
+    'beard',
+    'background',
+    'thread',
+    'thread_style',
+] as const;
 
-export type AvatarPart = keyof typeof AVATAR_PARTS;
-export type AvatarConfig = Record<AvatarPart, number>;
-const PARTS = Object.keys(AVATAR_PARTS) as AvatarPart[];
+export type AvatarPart = (typeof AVATAR_PARTS)[number];
+export type AvatarConfig = Partial<Record<AvatarPart, string>>;
 
-export const avatarConfigSchema = z.object(
-    Object.fromEntries(PARTS.map((part) => [part, z.number().int().min(0).max(AVATAR_PARTS[part] - 1)])) as Record<
-        AvatarPart,
-        z.ZodNumber
-    >
-);
+const optionName = z.string().regex(/^[a-z0-9-]{1,24}$/);
 
-export const randomAvatar = (): AvatarConfig =>
-    Object.fromEntries(PARTS.map((part) => [part, randomInt(AVATAR_PARTS[part])])) as AvatarConfig;
+export const avatarConfigSchema = z
+    .strictObject(Object.fromEntries(AVATAR_PARTS.map((part) => [part, optionName.optional()])) as Record<AvatarPart, z.ZodOptional<typeof optionName>>)
+    .refine((config) => Object.keys(config).length > 0);
 
-const encode = (config: AvatarConfig) => PARTS.map((part) => config[part].toString(36)).join('');
-
-// The same picture for a username every time, for accounts that never chose one: FNV-1a, then one slice of the
-// hash per part. The web app's avatars/code.ts has the same function; keep them in step.
-export function avatarFromName(name: string): AvatarConfig {
+// A number that stays the same for a username: the web app turns it into one of the starter avatars
+function starterNumber(name: string): string {
     let hash = 2166136261;
     for (const char of name.toLowerCase()) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619) >>> 0;
-    const config = {} as AvatarConfig;
-    for (const part of PARTS) {
-        config[part] = hash % AVATAR_PARTS[part];
-        hash = Math.imul(hash ^ (hash >>> 13), 2654435761) >>> 0;
-    }
-    return config;
+    return hash.toString(36);
 }
 
-// "a3k0..." one base-36 character per part, in AVATAR_PARTS order: what the web app draws at /avatar/{code}.svg.
-// Accounts that never chose get the one derived from their username, so everyone looks different by default.
+// The starter shown on anonymous posts and comments. It comes from the person and the post together, so one post's
+// picture says nothing about their other posts, and it can't be matched to the starter on their profile.
+export const anonymousAvatarCode = (authorId: string, postId: string) => `s-${starterNumber(`${authorId}:${postId}`)}`;
+
+// What the web app draws at /avatar/{code}.svg. "y1_hair-afro_skin-sienna" for chosen parts, in AVATAR_PARTS order;
+// "s-1a2b3c" for accounts that never chose, and for avatars saved before parts had names.
 export function avatarCode(config: Prisma.JsonValue | null | undefined, username: string): string {
     const parsed = avatarConfigSchema.safeParse(config);
-    return encode(parsed.success ? parsed.data : avatarFromName(username));
+    if (!parsed.success) return `s-${starterNumber(username)}`;
+    return ['y1', ...AVATAR_PARTS.flatMap((part) => (parsed.data[part] ? [`${part}-${parsed.data[part]}`] : []))].join('_');
 }
