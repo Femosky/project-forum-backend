@@ -254,14 +254,15 @@ router.get('/:username', async (request, response) => {
     });
 });
 
-// Anonymous posts and posts in private communities never appear on a profile
+// Anonymous posts and posts in private communities never appear on a profile, except that people see their own
+// anonymous posts and comments there, marked as anonymous
 router.get('/:username/posts', optionalAuth, async (request: AuthRequest, response) => {
     const query = parse(pageQuery, request.query);
     const user = await findPublicUser(String(request.params.username));
     const context = await viewerContext(request.viewer);
     response.json(
         await listPosts({
-            where: { author_id: user.id, is_anonymous: false, community: { visibility: 'public' } },
+            where: { author_id: user.id, ...(context?.userId === user.id ? {} : { is_anonymous: false }), community: { visibility: 'public' } },
             sort: 'new',
             cursor: query.cursor,
             limit: query.limit,
@@ -280,7 +281,7 @@ router.get('/:username/comments', optionalAuth, async (request: AuthRequest, res
             AND: [
                 {
                     author_id: user.id,
-                    is_anonymous: false,
+                    ...(context?.userId === user.id ? {} : { is_anonymous: false }),
                     status: { in: ['active', 'locked'] },
                     ...notShadowHidden(context),
                     post: { ...READABLE_POST_WHERE, community: { visibility: 'public' } },

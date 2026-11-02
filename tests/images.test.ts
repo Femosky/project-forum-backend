@@ -4,7 +4,7 @@ import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import { anonymousAvatarCode, avatarCode } from '../src/lib/avatars';
 import { LOCAL_MEDIA_DIR } from '../src/lib/storage';
-import { createCommunity, signUp, signInStaff } from './helpers';
+import { api, createCommunity, createPost, signUp, signInStaff } from './helpers';
 
 // A JPEG with EXIF data (a camera make), to check uploads drop it
 const photo = () =>
@@ -59,7 +59,22 @@ describe('image uploads', () => {
     });
 });
 
+async function anonymousPostSetup() {
+    const alice = await signUp('alice');
+    const bob = await signUp('bob');
+    await createCommunity(alice.agent, 'quietplace');
+    await createPost(alice.agent, 'quietplace', { title: 'Mine, quietly', is_anonymous: true });
+    return { alice, bob };
+}
+
 describe('drawn avatars', () => {
+    it('shows anonymous posts on the author\'s own profile, and to nobody else', async () => {
+        const { alice, bob } = await anonymousPostSetup();
+        expect((await alice.agent.get('/v1/users/alice/posts')).body.posts[0]).toMatchObject({ is_anonymous: true, title: 'Mine, quietly' });
+        expect((await bob.agent.get('/v1/users/alice/posts')).body.posts).toEqual([]);
+        expect((await api().get('/v1/users/alice/posts')).body.posts).toEqual([]);
+    });
+
     it('gives anonymous items a starter tied to the post, not the person', () => {
         expect(anonymousAvatarCode('user-1', 'post-1')).toBe(anonymousAvatarCode('user-1', 'post-1'));
         expect(anonymousAvatarCode('user-1', 'post-1')).not.toBe(anonymousAvatarCode('user-1', 'post-2'));
