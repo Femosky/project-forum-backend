@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
-import { avatarCode } from '../src/lib/avatars';
+import { anonymousAvatarCode, avatarCode } from '../src/lib/avatars';
 import { LOCAL_MEDIA_DIR } from '../src/lib/storage';
 import { createCommunity, signUp, signInStaff } from './helpers';
 
@@ -60,6 +60,11 @@ describe('image uploads', () => {
 });
 
 describe('drawn avatars', () => {
+    it('gives anonymous items a starter tied to the post, not the person', () => {
+        expect(anonymousAvatarCode('user-1', 'post-1')).toBe(anonymousAvatarCode('user-1', 'post-1'));
+        expect(anonymousAvatarCode('user-1', 'post-1')).not.toBe(anonymousAvatarCode('user-1', 'post-2'));
+    });
+
     it('starts every account on a starter avatar and saves chosen parts by name', async () => {
         const alice = await signUp('alice');
         const me = await alice.agent.get('/v1/auth/me');

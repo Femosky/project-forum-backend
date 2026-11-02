@@ -39,6 +39,10 @@ function starterNumber(name: string): string {
     return hash.toString(36);
 }
 
+// The starter shown on anonymous posts and comments. It comes from the person and the post together, so one post's
+// picture says nothing about their other posts, and it can't be matched to the starter on their profile.
+export const anonymousAvatarCode = (authorId: string, postId: string) => `s-${starterNumber(`${authorId}:${postId}`)}`;
+
 // What the web app draws at /avatar/{code}.svg. "y1_hair-afro_skin-sienna" for chosen parts, in AVATAR_PARTS order;
 // "s-1a2b3c" for accounts that never chose, and for avatars saved before parts had names.
 export function avatarCode(config: Prisma.JsonValue | null | undefined, username: string): string {

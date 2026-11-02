@@ -1,7 +1,7 @@
 import { ContentStatus, Prisma } from '@prisma/client';
 import { canModerate, showsMature, ViewerContext } from '../modules/communities/access';
 import { isIndexable } from './indexing';
-import { avatarCode } from './avatars';
+import { anonymousAvatarCode, avatarCode } from './avatars';
 
 // The only way posts and comments leave the API. Anonymous authors are hidden from everyone except the author
 // and moderators of that community; deleted and removed comments become placeholders.
@@ -108,6 +108,7 @@ export function toPublicPost(post: PostRow, context: ViewerContext, votes?: Vote
             image_url: post.community.image_url,
         },
         author: revealAuthor ? publicAuthor(post.author) : null,
+        anon_avatar: post.is_anonymous && !isDeleted ? anonymousAvatarCode(post.author_id, post.id) : null,
         viewer: context
             ? {
                   vote: isDeleted ? 0 : (votes?.get(post.id) ?? 0),
@@ -180,6 +181,7 @@ export function toPublicComment(comment: CommentRow, communityId: string, contex
         score: isDeleted ? 0 : comment.score,
         reply_count: comment.reply_count,
         author: revealAuthor ? publicAuthor(comment.author) : null,
+        anon_avatar: comment.is_anonymous && !isGone ? anonymousAvatarCode(comment.author_id, comment.post_id) : null,
         viewer: context
             ? {
                   vote: isDeleted ? 0 : (votes?.get(comment.id) ?? 0),
