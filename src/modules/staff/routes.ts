@@ -177,6 +177,11 @@ staffAuthRoutes.put('/alerts', requireStaff('owner', 'admin'), async (request: S
     response.json({ staff: publicStaff(account) });
 });
 
+// Owners: a deliberate 500 from the admin panel's "Test API error" button, to check that errors reach Sentry
+staffAuthRoutes.post('/test-error', requireStaff('owner'), () => {
+    throw new Error('Test error from the API (admin panel button)');
+});
+
 const passwordSchema = z.object({ current_password: z.string().min(1).max(200), new_password: password });
 
 staffAuthRoutes.post('/password', requirePendingSession, async (request: StaffRequest, response) => {
