@@ -10,6 +10,7 @@ import { AuthRequest, optionalAuth, requireAuth, viewerOf } from '../../middlewa
 import { COMMUNITY_CATEGORIES } from '../../shared/validation';
 import { listPosts, serializePosts } from '../posts/service';
 import { queueCount } from '../moderation/queue';
+import { assertCanCreateCommunity } from '../safety/policy';
 import {
     activeMute,
     assertCanView,
@@ -112,6 +113,7 @@ router.get('/categories', async (request, response) => {
 router.post('/', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const input = parse(createCommunitySchema, request.body);
+    await assertCanCreateCommunity(user);
     if (RESERVED_NAMES.has(input.name.toLowerCase())) throw badRequest('That name is reserved.', 'name_reserved');
     // An old name still points at the community that had it
     if (await prisma.communityAlias.findUnique({ where: { name: input.name } })) {

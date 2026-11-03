@@ -19,6 +19,8 @@ async function setup() {
     // Staff run the ads; a forum account owns the communities (staff accounts can't post)
     const admin = await signInStaff('adminy');
     const owner = await signUp('owner');
+    // Starts more communities than the monthly cap allows
+    await prisma.user.update({ where: { username: 'owner' }, data: { is_trusted: true } });
     await createCommunity(owner.agent, 'lagosjobs', { category: 'careers' });
     await createCommunity(owner.agent, 'cooking', { category: 'food' });
     return { ...admin, owner };
