@@ -42,7 +42,7 @@ const reportSchema = z.object({
 });
 
 export const postActionSchema = z.object({
-    action: z.enum(['remove', 'approve', 'lock', 'unlock', 'pin', 'unpin', 'sponsor', 'unsponsor']),
+    action: z.enum(['remove', 'approve', 'lock', 'unlock', 'pin', 'unpin', 'mark_mature', 'unmark_mature', 'sponsor', 'unsponsor']),
     reason,
 });
 
@@ -312,6 +312,11 @@ export async function moderatePost(post: PostForModeration, input: z.infer<typeo
                 return { pinned_at: new Date() };
             case 'unpin':
                 return { pinned_at: null };
+            // Blurred and kept out of search and ads, like a post its author marked mature
+            case 'mark_mature':
+                return { is_nsfw: true };
+            case 'unmark_mature':
+                return { is_nsfw: false };
             case 'sponsor':
                 return { is_sponsored: true };
             case 'unsponsor':

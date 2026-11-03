@@ -19,6 +19,10 @@ export const TRUST = {
     // Anonymous posting needs an account this old, a verified email and karma at or above this
     ANONYMOUS_MIN_AGE_MS: DAY,
     ANONYMOUS_MIN_KARMA: 0,
+    // Starting a community needs a week-old account (or LINK_KARMA reputation) and a verified email, at most this
+    // many per COMMUNITY_WINDOW_MS, so throwaway accounts can't squat names
+    COMMUNITIES_PER_WINDOW: 3,
+    COMMUNITY_WINDOW_MS: 30 * DAY,
 } as const;
 
 const ageOf = (user: Pick<User, 'created_at'>) => Date.now() - user.created_at.getTime();
@@ -71,6 +75,29 @@ export const canPostAnonymously = (user: Pick<User, 'created_at' | 'karma' | 'em
     user.karma >= TRUST.ANONYMOUS_MIN_KARMA &&
     user.shadow_banned_at === null;
 
+// Why this account can't start a community yet, or null when it can (the per-month cap is checked on create)
+export function communityCreateBlock(user: User): string | null {
+    if (user.role === 'admin') return null;
+    if (user.shadow_banned_at) return 'Your account can\'t start communities.';
+    if (!user.email_verified_at) return 'Confirm your email to start a community.';
+    if (isYoungAccount(user)) {
+        return `Accounts can start a community once they are a week old or have ${TRUST.LINK_KARMA} reputation.`;
+    }
+    return null;
+}
+
+export async function assertCanCreateCommunity(user: User) {
+    const block = communityCreateBlock(user);
+    if (block) throw new HttpError(403, 'community_create_not_allowed', block);
+    // Admins, and accounts the admins marked trusted, have no monthly cap
+    if (user.role === 'admin' || user.is_trusted) return;
+    const since = new Date(Date.now() - TRUST.COMMUNITY_WINDOW_MS);
+    const recent = await prisma.community.count({ where: { created_by: user.id, created_at: { gte: since } } });
+    if (recent >= TRUST.COMMUNITIES_PER_WINDOW) {
+        throw new HttpError(429, 'community_create_limit', `You can start up to ${TRUST.COMMUNITIES_PER_WINDOW} communities a month. Try again later.`);
+    }
+}
+
 // What the web app needs to shape the composer (sent with the signed-in user)
 export const trustFlags = (user: User) => {
     const limit = linkLimit(user);
@@ -79,6 +106,7 @@ export const trustFlags = (user: User) => {
         links_unlock_at: limit?.unlocks_at ?? null,
         reputation_needed: limit?.reputation_needed ?? 0,
         can_post_anonymously: canPostAnonymously(user),
+        community_create_block: communityCreateBlock(user),
     };
 };
 

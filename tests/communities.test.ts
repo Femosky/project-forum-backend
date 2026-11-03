@@ -153,3 +153,40 @@ describe('community icons', () => {
         expect((await set('https://example.com/a.png')).status).toBe(400);
     });
 });
+
+describe('starting a community', () => {
+    it('needs an established, verified account and allows three a month', async () => {
+        const fresh = await signUp('fresh', { fresh: true });
+        const blocked = await fresh.agent.post('/v1/communities').send({ name: 'freshspot' });
+        expect(blocked.status).toBe(403);
+        expect(blocked.body.error.code).toBe('community_create_not_allowed');
+        expect((await fresh.agent.get('/v1/auth/me')).body.user.community_create_block).toMatch(/Confirm your email/);
+        await prisma.user.update({ where: { username: 'fresh' }, data: { email_verified_at: new Date() } });
+        expect((await fresh.agent.get('/v1/auth/me')).body.user.community_create_block).toMatch(/week old/);
+
+        const alice = await signUp('alice');
+        expect((await alice.agent.get('/v1/auth/me')).body.user.community_create_block).toBeNull();
+        for (const name of ['first', 'second', 'third']) await createCommunity(alice.agent, name);
+        const fourth = await alice.agent.post('/v1/communities').send({ name: 'fourth' });
+        expect(fourth.status).toBe(429);
+        expect(fourth.body.error.code).toBe('community_create_limit');
+    });
+});
+
+describe('mature posts', () => {
+    it("lets a community's moderators mark a member's post mature and back", async () => {
+        const alice = await signUp('alice');
+        const bob = await signUp('bob');
+        await createCommunity(alice.agent, 'nightlife');
+        const post = await createPost(bob.agent, 'nightlife');
+
+        expect((await bob.agent.post(`/v1/posts/${post.id}/moderation`).send({ action: 'mark_mature' })).status).toBe(403);
+        const marked = await alice.agent.post(`/v1/posts/${post.id}/moderation`).send({ action: 'mark_mature' });
+        expect(marked.status).toBe(200);
+        expect(marked.body.post).toMatchObject({ is_nsfw: true, is_indexable: false });
+        expect(await prisma.modAction.count({ where: { action: 'mark_mature_post', target_id: post.id } })).toBe(1);
+
+        const unmarked = await alice.agent.post(`/v1/posts/${post.id}/moderation`).send({ action: 'unmark_mature' });
+        expect(unmarked.body.post.is_nsfw).toBe(false);
+    });
+});

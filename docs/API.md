@@ -61,7 +61,7 @@ Everything lives under `/v1`. Requests and responses are JSON. Auth is cookie-ba
 |---|---|---|
 | GET | `/?sort=popular\|new&category=&q=` | `q` matches name, display name or description |
 | GET | `/categories` | `{ categories: [{ id, label, count }] }` for the directory |
-| POST | `/` | `name (3-21, letters/digits/_), display_name?, description?, visibility: public\|private, is_nsfw?, rules?, category?` |
+| POST | `/` | `name (3-21, letters/digits/_), display_name?, description?, visibility: public\|private, is_nsfw?, rules?, category?`. Needs a verified email and a week-old account (or 10 reputation); 3 a month (403 `community_create_not_allowed`, 429 `community_create_limit`; admins and trusted accounts skip the cap) |
 | GET | `/:name` | Community, moderators, and `viewer: { is_member, role, is_banned, has_pending_request, muted_until, queue_count }` (`queue_count` for moderators only) |
 | PATCH | `/:name` | Moderators |
 | GET | `/:name/posts?sort&t` | Pinned posts lead the first "hot" page |
@@ -88,7 +88,7 @@ Everything lives under `/v1`. Requests and responses are JSON. Auth is cookie-ba
 | POST | `/reports` | `target_type: post\|comment\|user\|community, target_id, reason_code: spam\|scam\|harassment\|hate\|sexual\|violence\|misinformation\|personal_info\|other, note?` |
 | POST | `/reports/:id/resolve` | `{ status: resolved \| dismissed }`; closes every open report on that target |
 | GET | `/admin/reports` | Site admins: reports about users and communities |
-| POST | `/posts/:id/moderation` | `{ action: remove\|approve\|lock\|unlock\|pin\|unpin, reason? }`; `sponsor`/`unsponsor` for site admins. Remove closes the target's open reports as resolved, approve as dismissed |
+| POST | `/posts/:id/moderation` | `{ action: remove\|approve\|lock\|unlock\|pin\|unpin\|mark_mature\|unmark_mature, reason? }`; `sponsor`/`unsponsor` for site admins. Remove closes the target's open reports as resolved, approve as dismissed |
 | POST | `/comments/:id/moderation` | `{ action: remove\|approve\|lock\|unlock\|pin\|unpin, reason? }` |
 
 ## Safety (Phase 5)
@@ -99,7 +99,7 @@ Rules live in `src/modules/safety/policy.ts` (numbers) and `filters.ts` (pattern
 - **New accounts** (under a day old and under 10 karma) can't post links (`403 new_account_links`). Accounts under a week old with under 10 karma get 3 posts and 10 comments an hour (`429 new_account_limit`). Signups are limited to 5 per IP per day.
 - **Anonymous** posts and comments need an account at least a day old, a verified email, karma of 0 or more and no shadow-ban (`403 anonymous_not_allowed`). Moderators of the community still see the author.
 - **Mutes** answer `403 muted`; bans `403 banned`.
-- The signed-in user (`/auth/me`, login, signup) carries `can_post_links` and `can_post_anonymously` so the composer can explain limits up front.
+- The signed-in user (`/auth/me`, login, signup) carries `can_post_links`, `can_post_anonymously` and `community_create_block` (why it can't start a community yet, or null) so the composer can explain limits up front.
 
 ## Admin sign-in `/v1/admin/auth` (staff accounts)
 
