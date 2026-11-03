@@ -25,7 +25,21 @@ export function mediaBase() {
     return r2 ? r2.publicUrl : `${env.API_URL}/media`;
 }
 
-export const isStoredMedia = (url: string) => url.startsWith(`${mediaBase()}/`);
+// Earlier public addresses of the bucket (R2_OLD_PUBLIC_URLS). Files keep their keys when the address changes.
+export function oldMediaBases() {
+    if (!r2 || !env.R2_OLD_PUBLIC_URLS) return [];
+    return env.R2_OLD_PUBLIC_URLS.split(',')
+        .map((url) => url.trim().replace(/\/$/, ''))
+        .filter((url) => /^https?:\/\//.test(url) && URL.canParse(url) && url !== r2.publicUrl);
+}
+
+// The stored file's key (img/...), when the URL is one of ours on the current or an earlier bucket address
+function storedKey(url: string) {
+    const prefix = [mediaBase(), ...oldMediaBases()].find((candidate) => url.startsWith(`${candidate}/`));
+    return prefix ? url.slice(prefix.length + 1) : null;
+}
+
+export const isStoredMedia = (url: string) => storedKey(url) !== null;
 
 // Stores a file under `key` (e.g. img/ad_logo/0193...-256.webp) and returns its public URL. Keys are never reused,
 // so files are served with a year-long immutable cache.
@@ -48,9 +62,8 @@ export async function putObject(key: string, body: Buffer, contentType: string):
 // Reads back a file we stored, by its public URL (null when it isn't ours or can't be read). For checks that run after
 // upload, such as a picture post's picture when the post is sent.
 export async function readStoredObject(url: string): Promise<Buffer | null> {
-    if (!isStoredMedia(url)) return null;
-    const key = url.slice(mediaBase().length + 1);
-    if (key.includes('..')) return null;
+    const key = storedKey(url);
+    if (!key || key.includes('..')) return null;
     try {
         if (r2) {
             const response = await r2.client.fetch(`${r2.endpoint}/${key}`);

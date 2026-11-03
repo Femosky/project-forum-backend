@@ -92,6 +92,10 @@ const envSchema = z.object({
     R2_BUCKET: z.string().optional(),
     // Public base URL of the bucket, e.g. https://media.yarnter.com or https://pub-xxxx.r2.dev
     R2_PUBLIC_URL: z.string().url().optional(),
+    // Earlier public addresses of the same bucket, comma-separated (e.g. the r2.dev one after moving to media.yarnter.com).
+    // Stored addresses on them are rewritten to R2_PUBLIC_URL on boot, and still count as our uploads until then. Entries
+    // that aren't web addresses are skipped (lib/storage.ts) rather than stopping the server.
+    R2_OLD_PUBLIC_URLS: z.string().optional(),
     MEDIA_DIR: z.string().optional(),
     // This API's own public address, for local /media URLs; defaults to http://localhost:PORT
     API_URL: z.string().url().optional(),
