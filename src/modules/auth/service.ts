@@ -10,7 +10,7 @@ import { hashToken, randomToken, safeEqual } from '../../lib/tokens';
 import { linkEmail } from '../../lib/email';
 import { emailJob } from './jobs';
 import { trustFlags } from '../safety/policy';
-import { SITE_ACCOUNT_USERNAME } from '../../shared/site';
+import { SITE_ACCOUNT_NAME, SITE_ACCOUNT_USERNAME } from '../../shared/site';
 import {
     formatRefreshToken,
     newRefreshSecret,
@@ -248,7 +248,7 @@ export async function sendVerificationEmail(user: Pick<User, 'id' | 'email'>) {
         linkEmail(
             user.email,
             'Confirm your email',
-            'Welcome! Confirm your email address to finish setting up your account.',
+            `Welcome to ${SITE_ACCOUNT_NAME}! Confirm your email address to finish setting up your account.`,
             'Confirm email',
             `${env.WEB_URL}/auth/verify-email?token=${token}`,
             'If you did not sign up, you can ignore this email.'

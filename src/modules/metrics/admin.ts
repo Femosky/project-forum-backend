@@ -5,6 +5,7 @@ import { badRequest, parse } from '../../lib/http';
 import { addDays, lagosDay } from '../../lib/days';
 import { flushMetrics } from './buffer';
 import { dayTotals, ensureDailyStats } from './stats';
+import { SITE_ACCOUNT_NAME } from '../../shared/site';
 
 // Admin -> Stats (mounted under /v1/admin, so site admins only): headline numbers, daily series, top communities
 // and CSV exports for advertiser and marketing decks.
@@ -112,7 +113,7 @@ router.get('/export', async (request, response) => {
             ? (await series(range.from, range.to)).map(({ countries, ...row }) => ({ ...row, countries: countries ?? '' }))
             : await topCommunities(range.from, range.to, 1000);
     response.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    response.setHeader('Content-Disposition', `attachment; filename="forum-${query.kind}-${range.from}-to-${range.to}.csv"`);
+    response.setHeader('Content-Disposition', `attachment; filename="${SITE_ACCOUNT_NAME.toLowerCase()}-${query.kind}-${range.from}-to-${range.to}.csv"`);
     response.setHeader('Cache-Control', 'private, no-store');
     response.send(toCsv(rows as Record<string, unknown>[]));
 });
