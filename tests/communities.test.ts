@@ -127,6 +127,8 @@ describe('profiles and accounts', () => {
 
         expect((await alice.agent.delete('/v1/users/me').send({ password: 'wrong' })).status).toBe(400);
         expect((await alice.agent.delete('/v1/users/me').send({ password: 'Passw0rd!Passw0rd' })).status).toBe(200);
+        expect(await prisma.session.count({ where: { user: { username: 'alice' } } })).toBe(0);
+        expect((await prisma.user.findUniqueOrThrow({ where: { username: 'alice' } })).notification_preferences).toBeNull();
         expect((await api().get('/v1/users/alice')).status).toBe(404);
         expect((await api().get(`/v1/posts/${post.id}`)).body.post.author).toBeNull();
         expect((await api().post('/v1/auth/login').send({ identifier: 'alice', password: 'Passw0rd!Passw0rd' })).status).toBe(401);

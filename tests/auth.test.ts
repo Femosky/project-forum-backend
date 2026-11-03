@@ -80,6 +80,23 @@ describe('sessions (bug 14)', () => {
         expect((await other.get('/v1/auth/me')).status).toBe(401);
         expect((await agent.get('/v1/auth/me')).status).toBe(200);
     });
+
+    it('deletes sign-in records 30 days after they end, at the next sign-in', async () => {
+        await signUp('alice');
+        const longAgo = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+        const recent = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const [old, ended] = await prisma.session.findMany({ orderBy: { created_at: 'asc' }, take: 1 }).then(async ([first]) => [
+            first,
+            await prisma.session.create({ data: { user_id: first.user_id, refresh_token_hash: 'x', expires_at: recent, revoked_at: recent } }),
+        ]);
+        await prisma.session.update({ where: { id: old.id }, data: { revoked_at: longAgo } });
+
+        await api().post('/v1/auth/login').send({ identifier: 'alice', password: PASSWORD }).expect(200);
+        const left = await prisma.session.findMany({ where: { user_id: old.user_id } });
+        expect(left.map((session) => session.id)).not.toContain(old.id);
+        expect(left.map((session) => session.id)).toContain(ended.id);
+        expect(left).toHaveLength(2);
+    });
 });
 
 describe('refresh token rotation', () => {
