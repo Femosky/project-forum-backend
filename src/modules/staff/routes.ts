@@ -37,7 +37,7 @@ export const staffRoutes = Router();
 
 // The name authenticator apps show. Test copies add their address, so a phone can hold the live entry and a local
 // one side by side without mixing them up (same email, different site)
-const ISSUER = env.IS_PRODUCTION ? 'yarnter admin' : `yarnter admin (${new URL(env.WEB_URL).host})`;
+const ISSUER = env.IS_PRODUCTION ? 'Yarnter admin' : `Yarnter admin (${new URL(env.WEB_URL).host})`;
 
 // Only failed attempts count towards the sign-in limit: a wrong password or a wrong code. Page loads, session checks
 // and successful steps never do. 5 failures per account from one network in 15 minutes, and 20 from one network

@@ -49,7 +49,7 @@ Optional; each feature turns itself off without its key, and the boot log warns 
 
 | Variable | What it does | Where to get it |
 |---|---|---|
-| `RESEND_API_KEY`, `EMAIL_FROM` | Verification and password-reset email. Without it, emails only go to the log. | resend.com → API Keys; verify `forum.oskeylabs.com` as a sending domain. `EMAIL_FROM` like `yarnter <no-reply@forum.oskeylabs.com>` |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Verification and password-reset email. Without it, emails only go to the log. | resend.com → API Keys; verify `forum.oskeylabs.com` as a sending domain. `EMAIL_FROM` like `Yarnter <no-reply@forum.oskeylabs.com>` |
 | `TURNSTILE_SECRET_KEY` | Bot check on signup, password reset, repeated failed logins and a new account's first-day posts. Set it together with the web app's `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (one without the other blocks signups or skips the check). | Cloudflare → Turnstile → Add widget → Secret key |
 | `GOOGLE_CLIENT_ID` | "Continue with Google". Set the same value as `NEXT_PUBLIC_GOOGLE_CLIENT_ID` on Vercel; without it the button is hidden. | Google Cloud console → OAuth client (web), origin `https://forum.oskeylabs.com` |
 | `POSTHOG_API_KEY` | Product analytics (see below) | posthog.com, **EU** cloud → Project settings → Project API key |
