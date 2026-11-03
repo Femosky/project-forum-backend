@@ -58,3 +58,13 @@ describe('admin alerts', () => {
         expect(sent()).toBe(before + 2);
     });
 });
+
+describe('test error', () => {
+    it('answers 500 for owners only', async () => {
+        const { agent: owner } = await signInStaff('sam', 'owner');
+        const { agent: moderator } = await signInStaff('mo', 'moderator');
+        const response = await owner.post('/v1/admin/auth/test-error').expect(500);
+        expect(response.body.error.code).toBe('internal');
+        await moderator.post('/v1/admin/auth/test-error').expect(403);
+    });
+});
