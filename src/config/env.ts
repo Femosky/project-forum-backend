@@ -17,11 +17,11 @@ const envSchema = z.object({
     // Connections the app keeps open (read in prismaConnection.ts); the job queue adds up to 3
     DATABASE_POOL_SIZE: z.coerce.number().int().min(1).max(50).default(5),
     JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
-    // Comma-separated list of allowed web origins, e.g. https://forum.oskeylabs.com
+    // Comma-separated list of allowed web origins, e.g. https://yarnter.com
     WEB_ORIGIN: z.string().default('http://localhost:3000'),
     // Base URL used in email links; defaults to the first WEB_ORIGIN
     WEB_URL: z.string().url().optional(),
-    // Set to the shared parent domain (e.g. .oskeylabs.com) when the web app and API are on different subdomains
+    // Set to the shared parent domain (e.g. .yarnter.com) when the web app and API are on different subdomains
     COOKIE_DOMAIN: z.string().optional(),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 
@@ -40,11 +40,11 @@ const envSchema = z.object({
     // Web push. Without the keys it stays off. Generate with: npx web-push generate-vapid-keys
     VAPID_PUBLIC_KEY: z.string().optional(),
     VAPID_PRIVATE_KEY: z.string().optional(),
-    VAPID_SUBJECT: z.string().default('mailto:hello@forum.oskeylabs.com'),
+    VAPID_SUBJECT: z.string().default('mailto:hello@yarnter.com'),
 
     // Email (Resend). Without a key, emails are logged instead of sent.
     RESEND_API_KEY: z.string().optional(),
-    EMAIL_FROM: z.string().default('Yarnter <no-reply@forum.oskeylabs.com>'),
+    EMAIL_FROM: z.string().default('Yarnter <no-reply@yarnter.com>'),
 
     // Google sign-in. Without a client id the endpoint answers 503.
     GOOGLE_CLIENT_ID: z.string().optional(),
@@ -90,7 +90,7 @@ const envSchema = z.object({
     R2_ACCESS_KEY_ID: z.string().optional(),
     R2_SECRET_ACCESS_KEY: z.string().optional(),
     R2_BUCKET: z.string().optional(),
-    // Public base URL of the bucket, e.g. https://media.forum.oskeylabs.com or https://pub-xxxx.r2.dev
+    // Public base URL of the bucket, e.g. https://media.yarnter.com or https://pub-xxxx.r2.dev
     R2_PUBLIC_URL: z.string().url().optional(),
     MEDIA_DIR: z.string().optional(),
     // This API's own public address, for local /media URLs; defaults to http://localhost:PORT

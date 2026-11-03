@@ -42,7 +42,7 @@ export function parseRefreshToken(token: string | undefined): { sessionId: strin
     return { sessionId: token.slice(0, dot), secret: token.slice(dot + 1) };
 }
 
-// Secure + SameSite=Lax works when the web app and API share a parent domain (e.g. *.oskeylabs.com)
+// Secure + SameSite=Lax works when the web app and API share a parent domain (e.g. *.yarnter.com)
 function cookieOptions(maxAge?: number): CookieOptions {
     return {
         httpOnly: true,
