@@ -47,7 +47,7 @@ services:
       - key: EMAIL_FROM
         sync: false
       - key: API_URL
-        value: https://api.forum.oskeylabs.com
+        value: https://api.yarnter.com
       - key: VAPID_PUBLIC_KEY
         sync: false
       - key: VAPID_PRIVATE_KEY

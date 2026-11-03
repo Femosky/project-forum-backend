@@ -1,12 +1,12 @@
 # Deploying the API
 
-Private testing runs on the API on **Render** and Postgres on **Neon**, DNS wherever `oskeylabs.com` lives. The web app is on Vercel; see `docs/DEPLOY.md` in the web repo. Both started in Ohio (`us-east-2`); `render.yaml` now describes a Starter service in **Frankfurt**, next to a Neon project in AWS Europe Central 1, the closest region to Nigeria that either offers (neither has Africa, Render has no London). The move is click by click in `docs/LAUNCH.md` at the project root, "Moving to Frankfurt".
+Private testing runs on the API on **Render** and Postgres on **Neon**, DNS wherever `yarnter.com` lives. The web app is on Vercel; see `docs/DEPLOY.md` in the web repo. Both started in Ohio (`us-east-2`); `render.yaml` now describes a Starter service in **Frankfurt**, next to a Neon project in AWS Europe Central 1, the closest region to Nigeria that either offers (neither has Africa, Render has no London). The move is click by click in `docs/LAUNCH.md` at the project root, "Moving to Frankfurt".
 
 | | Testing address |
 |---|---|
-| Web app | `https://forum.oskeylabs.com` |
-| API | `https://api.forum.oskeylabs.com` |
-| Cookies | `COOKIE_DOMAIN=.forum.oskeylabs.com`, so both hosts share the sign-in cookies |
+| Web app | `https://yarnter.com` |
+| API | `https://api.yarnter.com` |
+| Cookies | `COOKIE_DOMAIN=.yarnter.com`, so both hosts share the sign-in cookies |
 
 The `forum` label is neutral on purpose: when the name is picked, the site moves to its own domain and only the settings in this file and the web app's change.
 
@@ -24,8 +24,8 @@ Migrations run before the new code starts, so a migration must work with the old
 2. **Render:** New → Blueprint → pick `Femosky/project-forum-backend`. It reads `render.yaml`. Fill in the variables marked below. JWT_SECRET is generated for you.
 3. **Render deploy hook:** service → Settings → Deploy Hook → copy the URL.
 4. **GitHub secrets** (repo → Settings → Secrets and variables → Actions): `DIRECT_DATABASE_URL` (direct Neon URL) and `RENDER_DEPLOY_HOOK_URL`.
-5. **Custom domain:** Render service → Settings → Custom Domains → add `api.forum.oskeylabs.com`, then add the CNAME it shows (`api.forum` → `forum-api.onrender.com`) at the DNS host. On Cloudflare, leave the record **DNS only** (grey cloud) so Render can issue the certificate.
-6. Run the Deploy workflow once by hand, then open `https://api.forum.oskeylabs.com/v1/health`.
+5. **Custom domain:** Render service → Settings → Custom Domains → add `api.yarnter.com`, then add the CNAME it shows (`api` → `forum-api-t06e.onrender.com`) at the DNS host. On Cloudflare, leave the record **DNS only** (grey cloud) so Render can issue the certificate.
+6. Run the Deploy workflow once by hand, then open `https://api.yarnter.com/v1/health`.
 
 ## Settings
 
@@ -41,17 +41,17 @@ Needed for the site to work across subdomains:
 
 | Variable | Value for testing |
 |---|---|
-| `WEB_ORIGIN` | `https://forum.oskeylabs.com` (comma-separate extra origins) |
-| `WEB_URL` | `https://forum.oskeylabs.com` (links in emails) |
-| `COOKIE_DOMAIN` | `.forum.oskeylabs.com` |
+| `WEB_ORIGIN` | `https://yarnter.com` (comma-separate extra origins) |
+| `WEB_URL` | `https://yarnter.com` (links in emails) |
+| `COOKIE_DOMAIN` | `.yarnter.com` |
 
 Optional; each feature turns itself off without its key, and the boot log warns about the missing ones:
 
 | Variable | What it does | Where to get it |
 |---|---|---|
-| `RESEND_API_KEY`, `EMAIL_FROM` | Verification and password-reset email. Without it, emails only go to the log. | resend.com → API Keys; verify `forum.oskeylabs.com` as a sending domain. `EMAIL_FROM` like `Yarnter <no-reply@forum.oskeylabs.com>` |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Verification and password-reset email. Without it, emails only go to the log. | resend.com → API Keys; verify `yarnter.com` as a sending domain. `EMAIL_FROM` like `Yarnter <no-reply@yarnter.com>` |
 | `TURNSTILE_SECRET_KEY` | Bot check on signup, password reset, repeated failed logins and a new account's first-day posts. Set it together with the web app's `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (one without the other blocks signups or skips the check). | Cloudflare → Turnstile → Add widget → Secret key |
-| `GOOGLE_CLIENT_ID` | "Continue with Google". Set the same value as `NEXT_PUBLIC_GOOGLE_CLIENT_ID` on Vercel; without it the button is hidden. | Google Cloud console → OAuth client (web), origin `https://forum.oskeylabs.com` |
+| `GOOGLE_CLIENT_ID` | "Continue with Google". Set the same value as `NEXT_PUBLIC_GOOGLE_CLIENT_ID` on Vercel; without it the button is hidden. | Google Cloud console → OAuth client (web), origin `https://yarnter.com` |
 | `POSTHOG_API_KEY` | Product analytics (see below) | posthog.com, **EU** cloud → Project settings → Project API key |
 | `OPENAI_API_KEY` | Optional, off by default: adds OpenAI's free moderation check on top of the site's own checks (an explicit-term list for text and an open-source picture classifier run inside the API, which need no key). Empty: only the site's own checks run | platform.openai.com → API keys → Create new secret key (docs/LAUNCH.md Part 15) |
 | `POSTHOG_HOST` | Defaults to `https://eu.i.posthog.com` | |
@@ -88,7 +88,7 @@ The admin panel (`/admin`) uses staff accounts, separate from forum accounts, wi
 npm run admin:create-owner -- --email you@example.com --name "Your name"
 ```
 
-It prints a temporary password. Sign in at `https://forum.oskeylabs.com/admin/login`, scan the QR code with an authenticator app, save the recovery codes, then choose a new password. Invite everyone else from Admin → Admins. The old forum-account admin role no longer opens the panel.
+It prints a temporary password. Sign in at `https://yarnter.com/admin/login`, scan the QR code with an authenticator app, save the recovery codes, then choose a new password. Invite everyone else from Admin → Admins. The old forum-account admin role no longer opens the panel.
 
 ## Jobs
 
