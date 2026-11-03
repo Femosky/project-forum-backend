@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { anonymousAvatarCode, avatarCode } from '../src/lib/avatars';
 import { LOCAL_MEDIA_DIR } from '../src/lib/storage';
 import { api, createCommunity, createPost, signUp, signInStaff } from './helpers';
@@ -114,5 +114,88 @@ describe('drawn avatars', () => {
 
     it('moves avatars saved in the old numbered format onto a starter', () => {
         expect(avatarCode({ face: 1, skin: 2, hair: 3 }, 'alice')).toBe(avatarCode(null, 'alice'));
+    });
+});
+
+describe('moving the bucket to a new public address', () => {
+    it('rewrites stored image addresses with the old base, and nothing else', async () => {
+        const { rebaseMediaUrls } = await import('../src/modules/images/rebase');
+        const prisma = (await import('../src/prismaConnection')).default;
+        const owner = await signUp('owner');
+        await createCommunity(owner.agent, 'Lounge');
+        await createCommunity(owner.agent, 'Garden');
+        const old = 'https://pub-abc.r2.dev';
+        await prisma.community.update({
+            where: { name: 'lounge' },
+            data: {
+                image_url: `${old}/img/community_icon/1-256.webp`,
+                banner_url: `${old}/img/community_banner/1-1600.webp`,
+            },
+        });
+        // A look-alike host must not match
+        await prisma.community.update({
+            where: { name: 'garden' },
+            data: { image_url: 'https://pub-abc.r2.dev.evil.test/x.webp' },
+        });
+        // Picture posts keep their addresses inside JSON
+        const post = await createPost(owner.agent, 'lounge', {
+            title: 'A picture',
+        });
+        const picture = (prefix: string) => ({
+            url: `${prefix}/img/post_image/2-2048.webp`,
+            width: 2048,
+            height: 1365,
+            variants: [{ url: `${prefix}/img/post_image/2-720.webp`, width: 720, height: 480 }],
+        });
+        await prisma.post.update({
+            where: { short_id: post.short_id },
+            data: { image: picture(old) },
+        });
+
+        const dryRun = await rebaseMediaUrls(`${old}/`, 'https://media.yarnter.example', false);
+        expect(dryRun).toMatchObject({
+            'Community.image_url': 1,
+            'Community.banner_url': 1,
+            'Advertiser.logo_url': 0,
+            'Post.image': 1,
+        });
+        expect((await prisma.community.findUnique({ where: { name: 'lounge' } }))?.image_url).toBe(`${old}/img/community_icon/1-256.webp`);
+
+        await rebaseMediaUrls(old, 'https://media.yarnter.example', true);
+        expect(await prisma.community.findUnique({ where: { name: 'lounge' } })).toMatchObject({
+            image_url: 'https://media.yarnter.example/img/community_icon/1-256.webp',
+            banner_url: 'https://media.yarnter.example/img/community_banner/1-1600.webp',
+        });
+        expect((await prisma.post.findUnique({ where: { short_id: post.short_id } }))?.image).toEqual(
+            picture('https://media.yarnter.example'),
+        );
+        expect((await prisma.community.findUnique({ where: { name: 'garden' } }))?.image_url).toBe(
+            'https://pub-abc.r2.dev.evil.test/x.webp',
+        );
+        // Running again finds nothing left
+        expect(Object.values(await rebaseMediaUrls(old, 'https://media.yarnter.example', true)).every((n) => n === 0)).toBe(true);
+        await expect(rebaseMediaUrls(old, `${old}/`, false)).rejects.toThrow('same');
+    });
+});
+
+describe('earlier bucket addresses', () => {
+    it('still count as our uploads until the addresses are rewritten', async () => {
+        vi.resetModules();
+        vi.stubEnv('R2_ACCOUNT_ID', 'account');
+        vi.stubEnv('R2_ACCESS_KEY_ID', 'key');
+        vi.stubEnv('R2_SECRET_ACCESS_KEY', 'secret');
+        vi.stubEnv('R2_BUCKET', 'bucket');
+        vi.stubEnv('R2_PUBLIC_URL', 'https://media.yarnter.example/');
+        vi.stubEnv('R2_OLD_PUBLIC_URLS', 'https://pub-abc.r2.dev/, https://media.yarnter.example, not an address');
+        try {
+            const storage = await import('../src/lib/storage');
+            expect(storage.oldMediaBases()).toEqual(['https://pub-abc.r2.dev']);
+            expect(storage.isStoredMedia('https://media.yarnter.example/img/community_icon/1-256.webp')).toBe(true);
+            expect(storage.isStoredMedia('https://pub-abc.r2.dev/img/community_icon/1-256.webp')).toBe(true);
+            expect(storage.isStoredMedia('https://pub-abc.r2.dev.evil.test/img/community_icon/1-256.webp')).toBe(false);
+        } finally {
+            vi.unstubAllEnvs();
+            vi.resetModules();
+        }
     });
 });

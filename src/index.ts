@@ -6,12 +6,14 @@ import prisma from './prismaConnection';
 import { flushAnalytics } from './lib/analytics';
 import { reportError } from './lib/errorReport';
 import { startMetricsFlusher, stopMetricsFlusher } from './modules/metrics/buffer';
+import { rebaseOldMediaUrls } from './modules/images/rebase';
 
 const server = app.listen(env.PORT, () => {
     logger.info(`Server is running on port: ${env.PORT}`);
 });
 
 startMetricsFlusher();
+rebaseOldMediaUrls().catch((error) => logger.error({ err: error }, 'Moving stored image addresses failed; they still load from the old address'));
 startJobs().catch((error) => logger.error({ err: error }, 'Job queue failed to start; jobs will run inline'));
 
 async function shutdown(signal: string) {
