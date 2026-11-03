@@ -33,7 +33,7 @@ const escapeHtml = (value: string) =>
 
 // The logo at the top of every HTML email. Live text, so it stays readable when images are blocked or in dark mode.
 export const emailHeader = () =>
-    `<p style="margin:0 0 20px"><img src="${escapeHtml(env.WEB_URL)}/yarner-email.png" width="16" height="24" alt="" style="vertical-align:middle;margin-right:6px"><span style="vertical-align:middle;font-family:sans-serif;font-size:18px;font-weight:600;letter-spacing:-.02em">${SITE_ACCOUNT_NAME}</span></p>`;
+    `<p style="margin:0 0 20px"><img src="${escapeHtml(env.WEB_URL)}/yarner-email.png" width="16" height="24" alt="" style="vertical-align:middle;margin-right:6px"><span style="vertical-align:middle;font-family:sans-serif;font-size:18px;font-weight:600;letter-spacing:-.02em">${SITE_ACCOUNT_NAME.toLowerCase()}</span></p>`;
 
 // A plain email with one call-to-action link
 export function linkEmail(to: string, subject: string, intro: string, linkLabel: string, url: string, outro?: string): Email {

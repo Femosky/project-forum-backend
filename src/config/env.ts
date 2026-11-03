@@ -44,7 +44,7 @@ const envSchema = z.object({
 
     // Email (Resend). Without a key, emails are logged instead of sent.
     RESEND_API_KEY: z.string().optional(),
-    EMAIL_FROM: z.string().default('yarnter <no-reply@forum.oskeylabs.com>'),
+    EMAIL_FROM: z.string().default('Yarnter <no-reply@forum.oskeylabs.com>'),
 
     // Google sign-in. Without a client id the endpoint answers 503.
     GOOGLE_CLIENT_ID: z.string().optional(),
