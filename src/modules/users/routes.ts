@@ -9,7 +9,7 @@ import { badRequest, notFound, parse } from '../../lib/http';
 import { commentInclude, notShadowHidden, postInclude, READABLE_POST_WHERE, toPublicComment } from '../../lib/serializers';
 import { AuthRequest, optionalAuth, requireAuth, viewerOf } from '../../middlewares/auth';
 import { LIMITS, pageQuery } from '../../shared/validation';
-import { revokeAllSessions, toPrivateUser, verifyPassword } from '../auth/service';
+import { toPrivateUser, verifyPassword } from '../auth/service';
 import { clearAuthCookies } from '../auth/tokens';
 import { toPublicCommunity } from '../communities/routes';
 import { viewerContext } from '../communities/access';
@@ -221,10 +221,12 @@ router.delete('/me', requireAuth, async (request: AuthRequest, response) => {
             password_hash: null,
             google_id: null,
             display_name: null,
-            notification_preferences: undefined,
+            notification_preferences: Prisma.DbNull,
         },
     });
-    await revokeAllSessions(user.id);
+    // Sign-in records and push subscriptions are personal data with no use once the account is gone
+    await prisma.session.deleteMany({ where: { user_id: user.id } });
+    await prisma.pushSubscription.deleteMany({ where: { user_id: user.id } });
     clearAuthCookies(response);
     response.json({ success: true });
 });

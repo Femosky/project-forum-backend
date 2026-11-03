@@ -83,6 +83,7 @@ export async function createSession(user: User, request: Request): Promise<Token
         },
     });
     await prisma.user.update({ where: { id: user.id }, data: { last_login_at: new Date() } });
+    await pruneOldSessions(user.id);
     return { accessToken: signAccessToken(session.id, user.id), refreshToken: formatRefreshToken(session.id, secret) };
 }
 
@@ -148,6 +149,16 @@ export async function revokeSessionByRefreshToken(rawToken: string | undefined) 
     if (session && safeEqual(hashToken(parsed.secret), session.refresh_token_hash)) {
         await prisma.session.update({ where: { id: session.id }, data: { revoked_at: new Date() } });
     }
+}
+
+// Sign-in records (device, IP address, rough location) are kept 30 days after a session ends, for spotting account
+// takeovers, then deleted. Done at each sign-in rather than by a job, since jobs are off on the free plan.
+// The privacy policy (frontend policies.ts) promises this period.
+export const ENDED_SESSION_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
+
+export async function pruneOldSessions(userId: string) {
+    const cutoff = new Date(Date.now() - ENDED_SESSION_KEEP_MS);
+    await prisma.session.deleteMany({ where: { user_id: userId, OR: [{ expires_at: { lt: cutoff } }, { revoked_at: { lt: cutoff } }] } });
 }
 
 export async function revokeAllSessions(userId: string, exceptSessionId?: string) {
