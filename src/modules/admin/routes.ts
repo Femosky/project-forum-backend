@@ -4,7 +4,7 @@ import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
 import { badRequest, conflict, notFound, parse, uuidParam } from '../../lib/http';
-import { SITE_ACCOUNT_USERNAME } from '../../shared/site';
+import { SEED_EMAIL_DOMAIN, SITE_ACCOUNT_USERNAME } from '../../shared/site';
 import { LIMITS, pageQuery, username as usernameField } from '../../shared/validation';
 import { findCommunity } from '../communities/access';
 import { handOverOwnership, setOwner } from '../communities/ownership';
@@ -97,14 +97,17 @@ router.post('/reports/:id/resolve', requireStaff(...MODERATION), async (request,
     response.json({ success: true, closed });
 });
 
+// Launch seed accounts and the site account aren't people, so they're left out of the counts
+const realPeople: Prisma.UserWhereInput = { NOT: [{ email: { endsWith: `@${SEED_EMAIL_DOMAIN}` } }, { username: SITE_ACCOUNT_USERNAME }] };
+
 router.get('/overview', async (request, response) => {
     const day = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const [queue, users, newUsers, posts, comments, suspended, shadowBanned] = await Promise.all([
         queueCount({ site: true }),
-        prisma.user.count({ where: { status: { not: 'deleted' } } }),
-        prisma.user.count({ where: { created_at: { gte: day } } }),
-        prisma.post.count({ where: { created_at: { gte: day } } }),
-        prisma.comment.count({ where: { created_at: { gte: day } } }),
+        prisma.user.count({ where: { status: { not: 'deleted' }, ...realPeople } }),
+        prisma.user.count({ where: { created_at: { gte: day }, ...realPeople } }),
+        prisma.post.count({ where: { created_at: { gte: day }, author: realPeople } }),
+        prisma.comment.count({ where: { created_at: { gte: day }, author: realPeople } }),
         prisma.user.count({ where: { status: 'suspended' } }),
         prisma.user.count({ where: { shadow_banned_at: { not: null } } }),
     ]);

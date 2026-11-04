@@ -144,6 +144,14 @@ describe('daily stats', () => {
         await bob.agent.get('/v1/auth/me');
         await flushMetrics();
 
+        // A launch seed account's activity isn't counted
+        const lounge0 = await prisma.community.findUniqueOrThrow({ where: { name: 'lounge' } });
+        const seed = await prisma.user.create({ data: { username: 'seed_person', email: 'seed_person@seed.invalid' } });
+        await prisma.communityMember.create({ data: { community_id: lounge0.id, user_id: seed.id } });
+        await prisma.community.update({ where: { id: lounge0.id }, data: { member_count: { increment: 1 } } });
+        await prisma.post.create({ data: { short_id: 'seedpost', slug: 'seed', author_id: seed.id, community_id: lounge0.id, title: 'Seeded' } });
+        await prisma.postVote.create({ data: { post_id: post.id, user_id: seed.id, value: 1 } });
+
         // Everything above happened "yesterday"
         const yesterday = addDays(lagosDay(), -1);
         const at = new Date(lagosDayBounds(yesterday).start.getTime() + 60 * 60 * 1000);
@@ -158,6 +166,8 @@ describe('daily stats', () => {
         expect(day).toMatchObject({ total_users: 2, posts: 1, comments: 1, votes: 1, dau: 2, wau: 2, mau: 2 });
         const lounge = await prisma.communityDailyStat.findFirstOrThrow();
         expect(lounge).toMatchObject({ posts: 1, comments: 1, votes: 1, new_members: 1 });
+        const { member_count } = await prisma.community.findUniqueOrThrow({ where: { name: 'lounge' } });
+        expect(lounge.members).toBe(member_count - 1);
 
         // Rewriting is safe, and missing days in a range are filled
         await writeDailyStats(yesterday);

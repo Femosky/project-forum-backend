@@ -5,7 +5,7 @@ import { hotRank, wilsonLowerBound } from '../src/lib/ranking';
 import { slugify } from '../src/lib/slug';
 import { SEED_ACCOUNTS } from './launch/accounts';
 import { LAUNCH_COMMUNITIES, type SeedComment } from './launch/content';
-import { SITE_ACCOUNT_NAME, SITE_ACCOUNT_USERNAME } from '../src/shared/site';
+import { SEED_EMAIL_DOMAIN, SITE_ACCOUNT_NAME, SITE_ACCOUNT_USERNAME } from '../src/shared/site';
 
 // Launch content: the communities, threads and replies in prisma/launch/, written by the seed accounts there.
 //
@@ -112,7 +112,7 @@ async function main() {
                 where: { username: account.username },
                 create: {
                     username: account.username,
-                    email: `${account.username}@seed.invalid`,
+                    email: `${account.username}@${SEED_EMAIL_DOMAIN}`,
                     display_name: account.display_name,
                     avatar_id: `default_${1 + (account.username.length % 3)}`,
                     email_verified_at: new Date(now - account.days_old * DAY),
