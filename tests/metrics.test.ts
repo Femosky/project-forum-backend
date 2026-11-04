@@ -146,7 +146,7 @@ describe('daily stats', () => {
 
         // A launch seed account's activity isn't counted
         const lounge0 = await prisma.community.findUniqueOrThrow({ where: { name: 'lounge' } });
-        const seed = await prisma.user.create({ data: { username: 'seed_person', email: 'seed_person@seed.invalid' } });
+        const seed = await prisma.user.create({ data: { username: 'seed_person', email: 'seed_person@seed.invalid', is_seed: true } });
         await prisma.communityMember.create({ data: { community_id: lounge0.id, user_id: seed.id } });
         await prisma.community.update({ where: { id: lounge0.id }, data: { member_count: { increment: 1 } } });
         await prisma.post.create({ data: { short_id: 'seedpost', slug: 'seed', author_id: seed.id, community_id: lounge0.id, title: 'Seeded' } });

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
 import { badRequest, conflict, notFound, parse, uuidParam } from '../../lib/http';
-import { SEED_EMAIL_DOMAIN, SITE_ACCOUNT_USERNAME } from '../../shared/site';
+import { SITE_ACCOUNT_USERNAME } from '../../shared/site';
 import { LIMITS, pageQuery, username as usernameField } from '../../shared/validation';
 import { findCommunity } from '../communities/access';
 import { handOverOwnership, setOwner } from '../communities/ownership';
@@ -97,8 +97,8 @@ router.post('/reports/:id/resolve', requireStaff(...MODERATION), async (request,
     response.json({ success: true, closed });
 });
 
-// Launch seed accounts and the site account aren't people, so they're left out of the counts
-const realPeople: Prisma.UserWhereInput = { NOT: [{ email: { endsWith: `@${SEED_EMAIL_DOMAIN}` } }, { username: SITE_ACCOUNT_USERNAME }] };
+// Seed accounts (is_seed: launch seed accounts and the site account) aren't people, so they're left out of the counts
+const realPeople: Prisma.UserWhereInput = { is_seed: false };
 
 router.get('/overview', async (request, response) => {
     const day = new Date(Date.now() - 24 * 60 * 60 * 1000);
