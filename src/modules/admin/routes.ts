@@ -97,14 +97,17 @@ router.post('/reports/:id/resolve', requireStaff(...MODERATION), async (request,
     response.json({ success: true, closed });
 });
 
+// Seed accounts (is_seed: launch seed accounts and the site account) aren't people, so they're left out of the counts
+const realPeople: Prisma.UserWhereInput = { is_seed: false };
+
 router.get('/overview', async (request, response) => {
     const day = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const [queue, users, newUsers, posts, comments, suspended, shadowBanned] = await Promise.all([
         queueCount({ site: true }),
-        prisma.user.count({ where: { status: { not: 'deleted' } } }),
-        prisma.user.count({ where: { created_at: { gte: day } } }),
-        prisma.post.count({ where: { created_at: { gte: day } } }),
-        prisma.comment.count({ where: { created_at: { gte: day } } }),
+        prisma.user.count({ where: { status: { not: 'deleted' }, ...realPeople } }),
+        prisma.user.count({ where: { created_at: { gte: day }, ...realPeople } }),
+        prisma.post.count({ where: { created_at: { gte: day }, author: realPeople } }),
+        prisma.comment.count({ where: { created_at: { gte: day }, author: realPeople } }),
         prisma.user.count({ where: { status: 'suspended' } }),
         prisma.user.count({ where: { shadow_banned_at: { not: null } } }),
     ]);

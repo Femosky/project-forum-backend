@@ -1,15 +1,18 @@
+import { Prisma } from '@prisma/client';
 import prisma from '../../prismaConnection';
 import { addDays, lagosDay, lagosDayBounds } from '../../lib/days';
 import { defineScheduledJob, onJobsWake } from '../../lib/jobs';
 import logger from '../../lib/logger';
 import { flushMetrics } from './buffer';
+import { NOT_REAL_PERSON_SQL } from '../../shared/site';
 
 // Daily snapshots for Admin -> Stats and advertiser decks: one DailyStat row per Lagos day plus one
 // CommunityDailyStat row per community that had anything going on. Written nightly for the day before; when the
 // job queue is off (JOBS_ENABLED=false) the stats page fills in missing days itself (ensureDailyStats).
 //
 // Counted: visible content only (not held, removed or shadow-hidden), people only (visitors come from page-view
-// beacons with bots filtered out), active accounts by their own signed-in requests.
+// beacons with bots filtered out), active accounts by their own signed-in requests. Launch seed accounts and the
+// site account are left out of users, content, votes and members.
 
 type Totals = {
     total_users: number;
@@ -29,6 +32,12 @@ type Totals = {
 };
 
 const VISIBLE = `"status" IN ('active', 'locked') AND NOT "shadow_hidden"`;
+const REAL = (column: string) => `${column} NOT IN (${NOT_REAL_PERSON_SQL})`;
+const REAL_RAW = (column: string) => Prisma.raw(REAL(column));
+// A community's members who are real people (its member_count includes the seed accounts)
+export const REAL_MEMBERS = Prisma.raw(
+    `(SELECT count(*) FROM "CommunityMember" m WHERE m."community_id" = c."id" AND NOT m."is_banned" AND ${REAL('m."user_id"')})`
+);
 
 // A Lagos day's start and end as UTC timestamps without a zone, like the created_at columns. Passed as text and
 // cast in SQL, so the database session's time zone can't shift them.
@@ -44,17 +53,17 @@ export async function dayTotals(day: string): Promise<Totals & { countries: Reco
     const [[row], countries] = await Promise.all([
         prisma.$queryRawUnsafe<Record<keyof Totals, bigint | number>[]>(
             `SELECT
-                (SELECT count(*) FROM "User" WHERE "status" <> 'deleted' AND "created_at" < $2::timestamp) AS total_users,
-                (SELECT count(*) FROM "User" WHERE "created_at" >= $1::timestamp AND "created_at" < $2::timestamp) AS new_signups,
+                (SELECT count(*) FROM "User" WHERE "status" <> 'deleted' AND "created_at" < $2::timestamp AND ${REAL('"id"')}) AS total_users,
+                (SELECT count(*) FROM "User" WHERE "created_at" >= $1::timestamp AND "created_at" < $2::timestamp AND ${REAL('"id"')}) AS new_signups,
                 (SELECT count(*) FROM "DailyActiveUser" WHERE "date" = $3::date) AS dau,
                 (SELECT count(DISTINCT "user_id") FROM "DailyActiveUser" WHERE "date" > $3::date - 7 AND "date" <= $3::date) AS wau,
                 (SELECT count(DISTINCT "user_id") FROM "DailyActiveUser" WHERE "date" > $3::date - 30 AND "date" <= $3::date) AS mau,
                 (SELECT count(*) FROM "DailyVisitor" WHERE "date" = $3::date) AS unique_visitors,
                 (SELECT coalesce(sum("page_views"), 0) FROM "DailyTraffic" WHERE "date" = $3::date) AS page_views,
-                (SELECT count(*) FROM "Post" WHERE "created_at" >= $1::timestamp AND "created_at" < $2::timestamp AND ${VISIBLE}) AS posts,
-                (SELECT count(*) FROM "Comment" WHERE "created_at" >= $1::timestamp AND "created_at" < $2::timestamp AND ${VISIBLE}) AS comments,
-                (SELECT count(*) FROM "PostVote" WHERE "created_at" >= $1::timestamp AND "created_at" < $2::timestamp)
-                    + (SELECT count(*) FROM "CommentVote" WHERE "created_at" >= $1::timestamp AND "created_at" < $2::timestamp) AS votes,
+                (SELECT count(*) FROM "Post" WHERE "created_at" >= $1::timestamp AND "created_at" < $2::timestamp AND ${VISIBLE} AND ${REAL('"author_id"')}) AS posts,
+                (SELECT count(*) FROM "Comment" WHERE "created_at" >= $1::timestamp AND "created_at" < $2::timestamp AND ${VISIBLE} AND ${REAL('"author_id"')}) AS comments,
+                (SELECT count(*) FROM "PostVote" WHERE "created_at" >= $1::timestamp AND "created_at" < $2::timestamp AND ${REAL('"user_id"')})
+                    + (SELECT count(*) FROM "CommentVote" WHERE "created_at" >= $1::timestamp AND "created_at" < $2::timestamp AND ${REAL('"user_id"')}) AS votes,
                 (SELECT coalesce(sum(s."impressions"), 0) FROM "AdDailyStat" s JOIN "AdCreative" a ON a."id" = s."creative_id"
                     JOIN "Campaign" c ON c."id" = a."campaign_id" WHERE s."date" = $3::date AND c."kind" = 'direct') AS ad_impressions,
                 (SELECT coalesce(sum(s."clicks"), 0) FROM "AdDailyStat" s JOIN "AdCreative" a ON a."id" = s."creative_id"
@@ -90,28 +99,28 @@ export async function writeDailyStats(day: string) {
         prisma.$executeRaw`
             WITH posts AS (
                 SELECT "community_id", count(*) AS n FROM "Post"
-                WHERE "created_at" >= ${start}::timestamp AND "created_at" < ${end}::timestamp AND "status" IN ('active', 'locked') AND NOT "shadow_hidden"
+                WHERE "created_at" >= ${start}::timestamp AND "created_at" < ${end}::timestamp AND "status" IN ('active', 'locked') AND NOT "shadow_hidden" AND ${REAL_RAW('"author_id"')}
                 GROUP BY 1),
             comments AS (
                 SELECT p."community_id", count(*) AS n FROM "Comment" c JOIN "Post" p ON p."id" = c."post_id"
-                WHERE c."created_at" >= ${start}::timestamp AND c."created_at" < ${end}::timestamp AND c."status" IN ('active', 'locked') AND NOT c."shadow_hidden"
+                WHERE c."created_at" >= ${start}::timestamp AND c."created_at" < ${end}::timestamp AND c."status" IN ('active', 'locked') AND NOT c."shadow_hidden" AND ${REAL_RAW('c."author_id"')}
                 GROUP BY 1),
             votes AS (
                 SELECT p."community_id", count(*) AS n FROM "PostVote" v JOIN "Post" p ON p."id" = v."post_id"
-                WHERE v."created_at" >= ${start}::timestamp AND v."created_at" < ${end}::timestamp GROUP BY 1
+                WHERE v."created_at" >= ${start}::timestamp AND v."created_at" < ${end}::timestamp AND ${REAL_RAW('v."user_id"')} GROUP BY 1
                 UNION ALL
                 SELECT p."community_id", count(*) FROM "CommentVote" v JOIN "Comment" c ON c."id" = v."comment_id" JOIN "Post" p ON p."id" = c."post_id"
-                WHERE v."created_at" >= ${start}::timestamp AND v."created_at" < ${end}::timestamp GROUP BY 1),
+                WHERE v."created_at" >= ${start}::timestamp AND v."created_at" < ${end}::timestamp AND ${REAL_RAW('v."user_id"')} GROUP BY 1),
             joins AS (
                 SELECT "community_id", count(*) AS n FROM "CommunityMember"
-                WHERE "joined_at" >= ${start}::timestamp AND "joined_at" < ${end}::timestamp AND NOT "is_banned" GROUP BY 1),
+                WHERE "joined_at" >= ${start}::timestamp AND "joined_at" < ${end}::timestamp AND NOT "is_banned" AND ${REAL_RAW('"user_id"')} GROUP BY 1),
             visitors AS (
                 SELECT "community_id", count(*) AS n FROM "CommunityDailyVisitor" WHERE "date" = ${day}::date GROUP BY 1),
             traffic AS (
                 SELECT "community_id", "page_views" AS n FROM "CommunityDailyTraffic" WHERE "date" = ${day}::date)
             INSERT INTO "CommunityDailyStat"
                 ("date", "community_id", "members", "new_members", "posts", "comments", "votes", "unique_visitors", "page_views")
-            SELECT ${day}::date, c."id", c."member_count",
+            SELECT ${day}::date, c."id", ${REAL_MEMBERS},
                    coalesce(j.n, 0), coalesce(p.n, 0), coalesce(cm.n, 0), coalesce((SELECT sum(n) FROM votes v WHERE v."community_id" = c."id"), 0),
                    coalesce(vi.n, 0), coalesce(t.n, 0)
             FROM "Community" c

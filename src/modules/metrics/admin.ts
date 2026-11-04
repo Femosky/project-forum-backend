@@ -4,7 +4,7 @@ import prisma from '../../prismaConnection';
 import { badRequest, parse } from '../../lib/http';
 import { addDays, lagosDay } from '../../lib/days';
 import { flushMetrics } from './buffer';
-import { dayTotals, ensureDailyStats } from './stats';
+import { REAL_MEMBERS, dayTotals, ensureDailyStats } from './stats';
 import { SITE_ACCOUNT_NAME } from '../../shared/site';
 
 // Admin -> Stats (mounted under /v1/admin, so site admins only): headline numbers, daily series, top communities
@@ -57,13 +57,13 @@ type CommunityTotals = {
 
 async function topCommunities(from: string, to: string, limit: number) {
     const rows = await prisma.$queryRaw<Record<keyof CommunityTotals, string | number | bigint | null>[]>`
-        SELECT c."name", c."display_name", c."member_count" AS members,
+        SELECT c."name", c."display_name", ${REAL_MEMBERS} AS members,
                sum(s."new_members") AS new_members, sum(s."posts") AS posts, sum(s."comments") AS comments,
                sum(s."votes") AS votes, sum(s."unique_visitors") AS visitors, sum(s."page_views") AS page_views
         FROM "CommunityDailyStat" s JOIN "Community" c ON c."id" = s."community_id"
         WHERE s."date" BETWEEN ${from}::date AND ${to}::date
         GROUP BY c."id"
-        ORDER BY sum(s."page_views") DESC, sum(s."posts" + s."comments") DESC, c."member_count" DESC
+        ORDER BY sum(s."page_views") DESC, sum(s."posts" + s."comments") DESC, members DESC
         LIMIT ${limit}`;
     return rows.map((row) => ({
         ...row,

@@ -151,6 +151,8 @@ model User {
   password_hash     String?
   google_id         String?   @unique
   email_verified_at DateTime?
+  // Launch seed accounts and the site account: not real people, so stats leave them out
+  is_seed           Boolean   @default(false)
 
   display_name  String?
   avatar_id     String  @default("default_1")

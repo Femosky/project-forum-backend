@@ -94,8 +94,8 @@ async function main() {
     if (!lead) throw new Error(`Lead account "${leadName}" doesn't exist. Pass --lead=<username>.`);
     const owner = await prisma.user.upsert({
         where: { username: SITE_ACCOUNT_USERNAME },
-        create: { username: SITE_ACCOUNT_USERNAME, email: 'site-team@invalid.local', display_name: SITE_ACCOUNT_NAME, email_verified_at: new Date() },
-        update: {},
+        create: { username: SITE_ACCOUNT_USERNAME, email: 'site-team@invalid.local', display_name: SITE_ACCOUNT_NAME, email_verified_at: new Date(), is_seed: true },
+        update: { is_seed: true },
     });
 
     if (!reset) {
@@ -113,13 +113,14 @@ async function main() {
                 create: {
                     username: account.username,
                     email: `${account.username}@seed.invalid`,
+                    is_seed: true,
                     display_name: account.display_name,
                     avatar_id: `default_${1 + (account.username.length % 3)}`,
                     email_verified_at: new Date(now - account.days_old * DAY),
                     adult_attested_at: new Date(now - account.days_old * DAY),
                     created_at: new Date(now - account.days_old * DAY),
                 },
-                update: {},
+                update: { is_seed: true },
             })
         )
     );
