@@ -26,7 +26,7 @@ export const LAUNCH_COMMUNITIES: SeedCommunity[] = [
         name: 'Elections2027',
         display_name: 'Elections 2027',
         category: 'other',
-        description: 'The 2027 general elections: candidates, issues, INEC updates and how to vote. Every side is welcome. Bring sources.',
+        description: "Nigeria's 2027 general elections: presidential and governorship candidates, INEC dates, voter registration and the issues on the ballot. Every side is welcome and claims need sources. Ask how to vote, check viral claims and compare the candidates' plans.",
         rules: [
             BE_DECENT,
             { title: 'Source your claims', description: 'Results, polls and quotes need a link to where they came from. No screenshots of "leaked" results.' },
@@ -38,7 +38,7 @@ export const LAUNCH_COMMUNITIES: SeedCommunity[] = [
                 by: 'seun_adeyemi',
                 ago: 62,
                 up: 27,
-                title: 'INEC has cleared 18 presidential candidates. What single issue decides your vote?',
+                title: 'Nigeria 2027 presidential election: which issue matters most to your vote?',
                 body: `Premium Times ran the full list over the weekend. 18 candidates for January 16, and possibly 19 if the Accord candidate's court win gets added.
 
 Forget the personalities for a second. If you could only judge them on one thing, what would it be? For me it's power supply. Every business I know is spending more on diesel and solar than on staff.`,
@@ -58,7 +58,7 @@ Forget the personalities for a second. If you could only judge them on one thing
                 by: 'ngozi_ek',
                 ago: 140,
                 up: 22,
-                title: 'Reminder: the presidential election is January 16, not February. Check your registration now',
+                title: "When is Nigeria's 2027 presidential election? Dates and how to check your voter registration",
                 body: `A lot of people in my family group chat still think the election is in February. INEC revised the timetable after the Electoral Act 2026 was signed:
 
 - Presidential and National Assembly: Saturday, January 16, 2027
@@ -80,7 +80,7 @@ If you moved since 2023, check your polling unit details on INEC's site before D
                 ago: 95,
                 up: 18,
                 down: 2,
-                title: 'The running mate picks are more interesting than the main candidates this time',
+                title: 'Do running mates change how Nigerians vote in presidential elections?',
                 body: `Shettima again for Tinubu, Amaechi with Atiku, and Kwankwaso on Obi's ticket according to the list. Each one is clearly about a particular region or base.
 
 Do running mates actually move votes in Nigeria, or does everyone just vote for the top of the ticket?`,
@@ -96,7 +96,7 @@ Do running mates actually move votes in Nigeria, or does everyone just vote for 
                 by: 'ruth_ab',
                 ago: 30,
                 up: 15,
-                title: 'Fact-check thread: post the claim, people help find the source',
+                title: 'Election fact-check: how to verify viral claims and videos before you share them',
                 body: `Campaign season means fake quotes, old videos with new captions and "results" months before anyone votes.
 
 If you see something in a group chat and you're not sure, post it here. Others can help find where it came from. Please don't repost the thing itself as if it's true, describe it.`,
@@ -113,7 +113,7 @@ If you see something in a group chat and you're not sure, post it here. Others c
         name: 'BBNaija',
         display_name: 'Big Brother Naija',
         category: 'entertainment',
-        description: 'Everything Big Brother Naija: the house, the evictions, the fights and life after the show.',
+        description: 'Big Brother Naija discussion: housemates, evictions, weekly highlights and life after the show. Talk about the latest season, past winners and what former housemates are doing now.',
         rules: [
             BE_DECENT,
             { title: 'No leaking private information', description: "Housemates' and ex-housemates' private details, addresses and family members are off limits." },
@@ -125,7 +125,7 @@ If you see something in a group chat and you're not sure, post it here. Others c
                 by: 'kemi_o',
                 ago: 200,
                 up: 25,
-                title: 'Three weeks after the finale: was Temi Nkem the right winner?',
+                title: 'Was Temi Nkem the right winner of BBNaija Season 11?',
                 body: `Now that everyone has calmed down a bit. I was on Team Sheba for most of the season and I was disappointed on finale night, but rewatching some of the clips, I get why Temi won. She never really had a bad week.
 
 Was it the right result for you?`,
@@ -144,7 +144,7 @@ Was it the right result for you?`,
                 by: 'lola_k',
                 ago: 75,
                 up: 14,
-                title: 'Which Season 11 housemate will have the biggest career in a year?',
+                title: 'Which BBNaija Season 11 housemates will have the biggest careers after the show?',
                 body: 'Winning is one thing, but some of the biggest names from past seasons never won. Who from this season do you think brands and producers will be chasing by this time next year?',
                 comments: [
                     c('kemi_o', 'Temi obviously has the momentum, but the person with a skill outside the show will last longest. Watch who gets an acting role first.', 7),
@@ -156,7 +156,7 @@ Was it the right result for you?`,
                 by: 'chiomaa',
                 ago: 30,
                 up: 11,
-                title: 'Should Big Brother bring back shorter seasons?',
+                title: 'Should Big Brother Naija seasons be shorter than ten weeks?',
                 body: "Ten weeks is a long time to keep up with the show every night. By week seven, I'm only watching the highlights on X. Would you watch more if it were six or eight weeks?",
                 comments: [
                     c('folake_b', "Shorter, please. The middle weeks drag and that's when the forced drama starts.", 5),
@@ -171,7 +171,7 @@ Was it the right result for you?`,
         name: 'SuperEagles',
         display_name: 'Super Eagles',
         category: 'sports',
-        description: 'The Super Eagles, the Super Falcons and Nigerian players abroad. Match threads, squad news and arguments about the coach.',
+        description: 'Nigeria national football team news and discussion: the Super Eagles, the Super Falcons and Nigerian players abroad. Match threads, AFCON and World Cup qualifiers, squad lists and debate about the coach.',
         rules: [BE_DECENT, { title: 'No betting tips', description: 'Odds, betting codes and tipster links are removed.' }, NO_SPAM],
         threads: [
             {
@@ -179,7 +179,7 @@ Was it the right result for you?`,
                 ago: 170,
                 up: 31,
                 down: 2,
-                title: "Four weeks on from 3-0 in Bissau, what's actually wrong with this team?",
+                title: 'Super Eagles lost 3-0 to Guinea-Bissau: what went wrong and what needs to change?',
                 body: `Beat Madagascar 2-1 in Uyo with two debutants scoring, everyone was happy. Then four days later Guinea-Bissau put three past us and it could have been more.
 
 I don't think it's one thing. Midfield got overrun, the full-backs were caught high all game, and we had no plan B once we went behind. Tanzania home and away in November now feels like must-win.`,
@@ -199,7 +199,7 @@ I don't think it's one thing. Midfield got overrun, the full-backs were caught h
                 by: 'nnamdi_m',
                 ago: 115,
                 up: 19,
-                title: 'Ilenikhena and Usor both scored on debut. Should they start against Tanzania?',
+                title: 'Should Ilenikhena and Usor start for the Super Eagles against Tanzania?',
                 body: "Both scored on their first senior caps against Madagascar. I'd like to see them start in November rather than coming on with ten minutes left. Too early, or is this exactly the time?",
                 comments: [
                     c('obinna_fc', 'Start at least one of them at home. Away, go with experience.', 8),
@@ -211,7 +211,7 @@ I don't think it's one thing. Midfield got overrun, the full-backs were caught h
                 by: 'bayo_kicks',
                 ago: 44,
                 up: 12,
-                title: 'Weekend round-up: how did our players abroad do?',
+                title: 'Nigerian footballers abroad: how did they play this weekend?',
                 body: "Fulham won 1-0 at Coventry with Bassey and Iwobi both involved, and Iheanacho is still scoring in Turkey. Who else had a good weekend? Add the ones I've missed.",
                 comments: [
                     c('ahmed_ib', 'Arokodare is in good form too. He should be in the conversation for November.', 6),
@@ -224,7 +224,7 @@ I don't think it's one thing. Midfield got overrun, the full-backs were caught h
         name: 'PremierLeague',
         display_name: 'Premier League',
         category: 'sports',
-        description: 'English Premier League talk for fans everywhere. Match threads, transfers, tactics and banter (keep it friendly).',
+        description: 'English Premier League discussion for fans everywhere: match threads, the title race, transfers and tactics. Friendly rivalry is welcome, abuse is not.',
         rules: [BE_DECENT, { title: 'Friendly banter only', description: 'Rivalry is fine. Abuse of players or other users is not.' }, NO_SPAM],
         threads: [
             {
@@ -232,7 +232,7 @@ I don't think it's one thing. Midfield got overrun, the full-backs were caught h
                 ago: 128,
                 up: 23,
                 down: 3,
-                title: 'City top, Arsenal three points behind, Brighton third. Is this the title race already?',
+                title: 'Premier League title race 2026/27: can anyone catch Man City and Arsenal?',
                 body: "Seven games in and City are on 21 points, Arsenal on 18, Brighton sitting third. It's early, but it already feels like a two-horse race. Who's staying in it until May?",
                 comments: [
                     c('obinna_fc', "Arsenal fan here. I've seen this movie before and I'm not getting excited until March.", 14, [
@@ -249,7 +249,7 @@ I don't think it's one thing. Midfield got overrun, the full-backs were caught h
                 by: 'timi_w',
                 ago: 20,
                 up: 13,
-                title: "Saka won the Sócrates Award, and Burna Boy presented it. Didn't expect that crossover",
+                title: "Bukayo Saka wins the Sócrates Award at the Ballon d'Or, presented by Burna Boy",
                 body: 'Burna Boy handed the Sócrates Award to Bukayo Saka at the Ballon d\'Or in London last night. First Nigerian artist to present an award there, apparently. Nice moment, and a deserved award for Saka\'s work off the pitch.',
                 comments: [
                     c('kunle_builds', "Saka's charity work doesn't get enough coverage. Glad it got recognised.", 8),
@@ -262,7 +262,7 @@ I don't think it's one thing. Midfield got overrun, the full-backs were caught h
                 by: 'ahmed_ib',
                 ago: 60,
                 up: 9,
-                title: 'Where do you watch matches in Lagos without paying for a full DStv package?',
+                title: 'Where to watch Premier League matches in Lagos without a DStv subscription',
                 body: 'My subscription ran out and I refuse to renew at these prices just for football. Viewing centres, bars, apps? Looking for somewhere around Yaba or Surulere with a decent screen and not too rowdy.',
                 comments: [
                     c('tunde_lag', 'Most of the lounges around Herbert Macaulay show the big games. Go early for the 5:30 kickoffs.', 4),
@@ -275,14 +275,14 @@ I don't think it's one thing. Midfield got overrun, the full-backs were caught h
         name: 'Afrobeats',
         display_name: 'Afrobeats',
         category: 'entertainment',
-        description: 'Afrobeats, Afropop, Amapiano and alté. New releases, old classics, concerts and the business of the music.',
+        description: 'Afrobeats, Afropop, Amapiano and alté: new releases, albums, concerts and the artists behind them. Share playlists, debate rankings and follow the business of Nigerian music.',
         rules: [BE_DECENT, { title: 'No piracy links', description: 'Share streaming links or videos, not downloads.' }, NO_SPAM],
         threads: [
             {
                 by: 'efe_jays',
                 ago: 52,
                 up: 21,
-                title: 'Are the big artists too quiet about politics? Interesting piece on OkayAfrica this week',
+                title: 'Should Afrobeats artists speak out about politics before the 2027 election?',
                 body: `There is an op-ed going round arguing against the idea that labels keep Afrobeats apolitical. It points out Wizkid and Davido were both on Sony when they backed EndSARS, and that Burna Boy's "Monsters You Made" came out on Warner.
 
 With the election in January, do you expect any of the big names to say anything? Should they?`,
@@ -298,7 +298,7 @@ With the election in January, do you expect any of the big names to say anything
                 by: 'temi_reads',
                 ago: 150,
                 up: 17,
-                title: 'Rank the big three in 2026 so far: Wizkid, Davido, Burna',
+                title: 'Wizkid, Davido or Burna Boy: who has had the best year in 2026?',
                 body: "It's been a big year for all three, with festival slots abroad and the AMA nominations. If you had to rank them on this year alone, not their careers, how does it go?",
                 comments: [
                     c('chuka_r', "Burna for this year. The Ballon d'Or appearance alone shows how far his name travels.", 7),
@@ -313,7 +313,7 @@ With the election in January, do you expect any of the big names to say anything
                 by: 'chuka_r',
                 ago: 26,
                 up: 10,
-                title: 'What are you playing at Detty December parties this year?',
+                title: 'Best Afrobeats and highlife songs for a December family party playlist',
                 body: "Making a playlist for a family party in December. I need songs that work for my parents' generation and my cousins at the same time. Give me your safest picks.",
                 comments: [
                     c('amaka_eats', 'Anything Flavour. Works on every age group without fail.', 7),
@@ -327,7 +327,7 @@ With the election in January, do you expect any of the big names to say anything
         name: 'Japa',
         display_name: 'Japa',
         category: 'relocation',
-        description: 'Moving abroad: visas, jobs, schools, costs and what settling in is really like. Help people make informed decisions.',
+        description: 'Practical help with relocating abroad from Nigeria: visas, study and work routes to the UK, Canada, the US and Europe, the real costs and settling in. Ask questions, share what worked and link official sources, because the rules change often.',
         rules: [
             BE_DECENT,
             { title: 'No visa agents or "guaranteed" offers', description: 'Posts offering paid visa help, job placements or proof-of-funds services are removed.' },
@@ -339,7 +339,7 @@ With the election in January, do you expect any of the big names to say anything
                 by: 'uche_dev',
                 ago: 110,
                 up: 28,
-                title: 'UK Graduate Route is changing from January 2027. Is a UK master\'s still worth it?',
+                title: "UK Graduate Route changes in January 2027: is a UK master's still worth it for Nigerians?",
                 body: `From 1 January 2027 the Graduate Route is changing for most graduates, and the English requirement for Skilled Worker went up to B2 in January this year. Most sponsored roles have also had to be degree level since last year.
 
 I'm deciding between a UK master's next September or staying here and applying for remote roles. For those who went recently, would you still do it with these rules?`,
@@ -357,7 +357,7 @@ I'm deciding between a UK master's next September or staying here and applying f
                 by: 'precious_u',
                 ago: 48,
                 up: 16,
-                title: 'Canada study permit processing for Nigeria is now 10 weeks',
+                title: 'Canada study permit processing time for Nigeria is now 10 weeks',
                 body: "IRCC moved Nigeria from 9 to 10 weeks for study permits. If you're aiming for January intake and haven't applied, it's going to be very tight. Anyone else waiting right now?",
                 comments: [
                     c('ruth_ab', 'Applied in August, still waiting. The posted times are an average, mine is already past it.', 6),
@@ -369,7 +369,7 @@ I'm deciding between a UK master's next September or staying here and applying f
                 by: 'gbenga_ola',
                 ago: 210,
                 up: 22,
-                title: 'Two years in Toronto. Things I wish someone had told me',
+                title: 'Moving to Toronto from Nigeria: what I wish I knew before relocating',
                 body: `Not trying to scare anyone, just being honest.
 
 1. Your first job will probably not be in your field. Budget for that.
@@ -391,7 +391,7 @@ Would I do it again? Yes. But I would have come with more savings.`,
                 by: 'tunde_lag',
                 ago: 18,
                 up: 9,
-                title: 'Anyone decided to stay instead? Why?',
+                title: 'Why some Nigerians choose not to relocate abroad',
                 body: "Everyone in my team has either left or is in the process. I have options, but I'm leaning towards staying. My family is here and my business is finally growing. Would love to hear from people who chose not to go.",
                 comments: [
                     c('kunle_builds', 'I stayed. Earning in dollars remotely and spending in naira has been better for my family than moving would have been. It is not for everyone, but it is an option.', 10),
@@ -404,7 +404,7 @@ Would I do it again? Yes. But I would have come with more savings.`,
         name: 'LagosRent',
         display_name: 'Lagos Rent',
         category: 'housing',
-        description: 'Renting in Lagos: prices by area, agents, landlords, tenancy law and house hunting tips.',
+        description: 'Renting in Lagos: rent prices by area, agency and legal fees, landlords, tenancy law and house-hunting tips. Compare what other tenants pay and know your rights before you pay.',
         rules: [
             BE_DECENT,
             { title: 'No listings from agents', description: 'Tenants sharing a vacancy is fine. Agent adverts and fee requests are removed.' },
@@ -415,7 +415,7 @@ Would I do it again? Yes. But I would have come with more savings.`,
                 by: 'funmi_a',
                 ago: 88,
                 up: 26,
-                title: 'The tenancy bill would cap agency fees at 5%. Will it actually change anything?',
+                title: 'Lagos tenancy bill: will a 5% cap on agency fees help tenants?',
                 body: `For anyone who missed it: the Lagos Tenancy and Recovery of Premises Bill is still going through the House of Assembly. It's not law yet. The draft would cap agent commission at 5% of a year's rent, so ₦100k on a ₦2m flat instead of the 10 to 20% people are charged now.
 
 The 2011 law is what applies today, and agents have to be registered with LASRERA. But who actually checks?`,
@@ -433,7 +433,7 @@ The 2011 law is what applies today, and agents have to be registered with LASRER
                 by: 'kunle_builds',
                 ago: 160,
                 up: 19,
-                title: 'Rough rent check: what are you paying for a mini flat right now?',
+                title: 'How much is rent for a mini flat in Lagos now? Prices by area',
                 body: 'Trying to see if my landlord is being reasonable. I pay ₦2.4m a year for a mini flat in Yaba, and he wants ₦3m at renewal. Share your area and rent so we can all compare.',
                 comments: [
                     c('folake_b', 'Mini flat in Gbagada, ₦2.2m. Renewed in June, he wanted more but settled at the same price because I pay on time.', 8),
@@ -448,7 +448,7 @@ The 2011 law is what applies today, and agents have to be registered with LASRER
                 by: 'bisola_t',
                 ago: 36,
                 up: 13,
-                title: 'Checklist before you pay for any apartment',
+                title: 'What to check before you pay rent for an apartment in Lagos',
                 body: `Learned some of these the hard way:
 
 - See the landlord or a letter from them, not just the agent
@@ -470,14 +470,14 @@ What would you add?`,
         name: 'NaijaTech',
         display_name: 'Naija Tech',
         category: 'tech',
-        description: 'Tech in and from Nigeria: startups, funding, products, policy and building things.',
+        description: 'Nigerian tech news and discussion: startups, funding, fintech, layoffs, policy and the people building products in Nigeria and across Africa. Share news with a source and ask builders what they think.',
         rules: [BE_DECENT, { title: 'No crypto shilling', description: 'Discussing crypto is fine. Promoting tokens, signals or schemes is not.' }, NO_SPAM],
         threads: [
             {
                 by: 'dami_codes',
                 ago: 34,
                 up: 24,
-                title: 'Moniepoint is offering engineers and product staff a voluntary exit. Thoughts?',
+                title: 'Moniepoint offers engineers and product staff a voluntary exit: what it means',
                 body: `TechCabal reported that Moniepoint told staff on October 19 about a restructuring across backend, frontend, mobile, QA and product, moving to smaller teams that own products end to end. People who leave get five months' salary. No number on how many roles are affected.
 
 Five months is generous compared with what we usually see here. But it's another sign that 2026 is the year of "do more with fewer people".`,
@@ -494,7 +494,7 @@ Five months is generous compared with what we usually see here. But it's another
                 by: 'kunle_builds',
                 ago: 300,
                 up: 17,
-                title: 'African startups raised $2.49B in the first nine months, Nigeria still top with $624M',
+                title: 'African startup funding hit $2.49B in nine months, with Nigeria top at $624M',
                 body: "From TechCabal's Q3 numbers. Up about 8% year on year, with Q3 a rebound. Nigeria is still number one, but the number of small pre-seed deals has dropped a lot. Is it getting easier or harder to raise here?",
                 comments: [
                     c('seun_adeyemi', 'Easier if you already have revenue. Much harder if you have only a deck. Most of the money is going to later rounds.', 9),
@@ -506,7 +506,7 @@ Five months is generous compared with what we usually see here. But it's another
                 by: 'nnamdi_m',
                 ago: 70,
                 up: 11,
-                title: '$1bn for two new data centres in Nigeria. Will it make cloud cheaper here?',
+                title: 'Will $1bn of new data centres make cloud hosting cheaper in Nigeria?',
                 body: "TechCabal had the story this week. More local capacity should help with latency and data rules, but power is the real cost for any data centre in Nigeria. Will we see local pricing that's actually competitive?",
                 comments: [
                     c('uche_dev', 'Only if they can sort power without running everything on diesel. Otherwise it gets passed to customers.', 7),
@@ -519,14 +519,14 @@ Five months is generous compared with what we usually see here. But it's another
         name: 'TechCareers',
         display_name: 'Tech Careers',
         category: 'careers',
-        description: 'Getting into tech, getting promoted and getting paid. CVs, interviews, salaries and remote work.',
+        description: 'Career advice for tech jobs in Nigeria and remote roles abroad: getting a first job, switching careers, CVs, interviews and developer salaries. Share what you earn and what worked for you.',
         rules: [BE_DECENT, { title: 'No paid course promotion', description: 'Recommending a free resource is fine. Selling your bootcamp is not.' }, NO_SPAM],
         threads: [
             {
                 by: 'ifeoma_n',
                 ago: 82,
                 up: 20,
-                title: 'Salary check: what are mid-level developers earning in Lagos now?',
+                title: 'How much do mid-level software developers earn in Lagos?',
                 body: "I'm about to negotiate an offer and I don't know what's normal anymore. Three years' experience, backend. Local company offering ₦850k a month. Is that low? Remote roles pay in dollars, but I'm not getting callbacks.",
                 comments: [
                     c('uche_dev', "₦850k for three years backend is around the middle for local companies, maybe slightly low for fintech. Ask for ₦1.1m and settle around ₦1m.", 11),
@@ -540,7 +540,7 @@ Five months is generous compared with what we usually see here. But it's another
                 by: 'zainab_m',
                 ago: 140,
                 up: 16,
-                title: 'Switching from accounting to data analysis at 31. Is it too late?',
+                title: 'Is 31 too late to switch careers from accounting to data analysis?',
                 body: 'Eight years in audit, and I want out. I have been learning SQL and Power BI in the evenings. Is 31 too late to start as a junior, and should I take a pay cut for it?',
                 comments: [
                     c('halima_b', "Not too late at all. Your audit background is an advantage; you already understand the data most analysts are trying to learn about.", 12),
@@ -552,7 +552,7 @@ Five months is generous compared with what we usually see here. But it's another
                 by: 'uche_dev',
                 ago: 22,
                 up: 8,
-                title: 'How do you deal with interviews at 2am for US companies?',
+                title: 'How to handle late-night interviews with US companies when you work from Nigeria',
                 body: 'Got a final round with a US company and the only slots are 9am Pacific, which is 5pm here. That one is fine, but the previous round was at 1am. Anyone else just push back on times?',
                 comments: [
                     c('dami_codes', "Always ask. Most recruiters don't think about time zones until you mention it.", 6),
@@ -565,7 +565,7 @@ Five months is generous compared with what we usually see here. But it's another
         name: 'MoneyMatters',
         display_name: 'Money Matters',
         category: 'money',
-        description: 'Personal finance in Nigeria: saving, investing, budgeting, banking and the cost of living. No get-rich-quick schemes.',
+        description: 'Personal finance in Nigeria: saving, budgeting, investing, banking, inflation and the cost of living. Practical answers from people managing money in naira, with no get-rich-quick schemes.',
         rules: [
             BE_DECENT,
             { title: 'No investment schemes', description: 'Ponzi, "double your money", signals and forex groups are removed and the poster banned.' },
@@ -576,7 +576,7 @@ Five months is generous compared with what we usually see here. But it's another
                 by: 'dayo_fin',
                 ago: 120,
                 up: 23,
-                title: 'Inflation is down to 14.63% in September. Why doesn\'t it feel like it?',
+                title: "Nigeria's inflation fell to 14.63% in September. Why are prices still rising?",
                 body: `NBS says headline inflation dropped to 14.63%, the lowest since 2020. Food inflation is still at 19.59%, and petrol is around ₦1,350 to ₦1,400 a litre depending on where you are.
 
 A lower inflation rate means prices are rising more slowly. It doesn't mean they're falling. I think that's why nobody believes the headline number.`,
@@ -592,7 +592,7 @@ A lower inflation rate means prices are rising more slowly. It doesn't mean they
                 by: 'halima_b',
                 ago: 64,
                 up: 17,
-                title: 'Where are you keeping savings right now? Money market, T-bills, dollars?',
+                title: 'Where to keep savings in Nigeria: money market funds, treasury bills or dollars?',
                 body: "I have about ₦1.5m in a regular savings account doing nothing. What are people actually using that isn't risky? Not looking for anything fancy, just to keep up with inflation if possible.",
                 comments: [
                     c('dayo_fin', 'Money market funds from the big asset managers are a reasonable starting point. You can withdraw in a few days and the returns are much better than a savings account.', 10),
@@ -605,7 +605,7 @@ A lower inflation rate means prices are rising more slowly. It doesn't mean they
                 by: 'musa_dan',
                 ago: 28,
                 up: 12,
-                title: 'Fuel is ~₦1,355 at NNPC in Lagos. How are you cutting transport costs?',
+                title: 'How to cut transport costs in Lagos with petrol at about ₦1,355 a litre',
                 body: "I drive about 30km each way, three days a week, and fuel is now one of my biggest expenses. I've started carpooling twice a week. What else are people doing?",
                 comments: [
                     c('tunde_lag', 'Negotiated two remote days with my manager. Saves me more than any other trick.', 8),
@@ -619,14 +619,14 @@ A lower inflation rate means prices are rising more slowly. It doesn't mean they
         name: 'SmallBusiness',
         display_name: 'Small Business',
         category: 'business',
-        description: 'Running a small business in Nigeria: customers, suppliers, power, payments, registration and growth.',
+        description: 'Help for small business owners in Nigeria: CAC registration, customers and payments, suppliers, power and solar costs, and growing the business. Ask questions and share what worked for you.',
         rules: [BE_DECENT, { title: 'One promo post a month', description: 'You may share your own business once a month in a post that clearly says so.' }, NO_SPAM],
         threads: [
             {
                 by: 'amaka_eats',
                 ago: 96,
                 up: 18,
-                title: 'My diesel bill is now more than my rent. Did solar pay off for anyone?',
+                title: 'Is solar worth it for a small business in Nigeria compared with a diesel generator?',
                 body: "I run a small bakery in Surulere. The ovens are gas, but the fridge, mixers and lights run on generator for most of the day. I've been quoted around ₦4.5m for a solar and battery setup. Has anyone done this and actually saved money?",
                 comments: [
                     c('chuka_r', "Did it for my shop last year. It paid for itself in about 18 months. Get the battery size right, that's where installers cut corners.", 11, [
@@ -641,7 +641,7 @@ A lower inflation rate means prices are rising more slowly. It doesn't mean they
                 by: 'folake_b',
                 ago: 180,
                 up: 14,
-                title: 'Is it worth registering with CAC as a one-person business?',
+                title: 'Should a one-person business register with CAC in Nigeria?',
                 body: "I sell skincare on Instagram. It's going well, and some bigger customers are asking for invoices from a registered business. Is CAC registration worth the time and cost at this stage?",
                 comments: [
                     c('ese_ok', 'Yes. It takes a few weeks online, and it lets you open a business account. Customers trust you more.', 9),
@@ -652,7 +652,7 @@ A lower inflation rate means prices are rising more slowly. It doesn't mean they
                 by: 'yusuf_k',
                 ago: 40,
                 up: 10,
-                title: 'Customers keep asking to pay on delivery. How do you handle it?',
+                title: "How to handle pay on delivery when customers don't pick up their orders",
                 body: "About 40% of my orders want pay on delivery, and a lot of them don't pick up when the rider arrives. I lose the delivery fee every time. Do you just stop offering it?",
                 comments: [
                     c('folake_b', 'Ask for the delivery fee upfront and the rest on delivery. The people who are serious will pay.', 10),
@@ -665,14 +665,14 @@ A lower inflation rate means prices are rising more slowly. It doesn't mean they
         name: 'NaijaFood',
         display_name: 'Naija Food',
         category: 'food',
-        description: 'Cooking, eating and arguing about Nigerian food. Recipes, restaurants, market prices and the jollof wars.',
+        description: 'Nigerian food: recipes, cooking tips, restaurants, street food and market prices across the country. Share where to eat and how to cook it, and settle the jollof debate.',
         rules: [BE_DECENT, NO_SPAM],
         threads: [
             {
                 by: 'amaka_eats',
                 ago: 54,
                 up: 20,
-                title: 'Food prices this month: what has gone down and what is still crazy?',
+                title: 'Nigerian food prices this month: what has gone down and what is still expensive?',
                 body: "Tomatoes are finally reasonable in my market, and rice has eased a bit, but beans and meat are still painful. What are you seeing where you are?",
                 comments: [
                     c('ngozi_ek', 'Garri has come down a little here in Enugu. Oil is still expensive.', 7),
@@ -686,7 +686,7 @@ A lower inflation rate means prices are rising more slowly. It doesn't mean they
                 ago: 230,
                 up: 25,
                 down: 3,
-                title: 'Controversial: party jollof is better than home jollof',
+                title: 'Party jollof vs home jollof: which one is better?',
                 body: "It's the firewood, the big pot and the bottom of the pot. You can't recreate it in a home kitchen, and I'll die on this hill.",
                 comments: [
                     c('adaeze_o', 'Party jollof is a whole genre on its own. Not better, just different.', 12),
@@ -700,7 +700,7 @@ A lower inflation rate means prices are rising more slowly. It doesn't mean they
                 by: 'lola_k',
                 ago: 14,
                 up: 8,
-                title: 'Best suya spots in Abuja? Visiting next week',
+                title: 'Where to find the best suya in Abuja',
                 body: "Going to be in Abuja for work for three days. Where is the best suya? Not the hotel kind, the proper stuff.",
                 comments: [
                     c('sadiq_a', 'Go out at night around Wuse, you will smell the good ones before you see them. Ask for extra yaji.', 6),
@@ -713,14 +713,14 @@ A lower inflation rate means prices are rising more slowly. It doesn't mean they
         name: 'StudyAbroad',
         display_name: 'Study Abroad',
         category: 'education',
-        description: 'Admissions, scholarships, visas and student life abroad. Ask questions, share what worked.',
+        description: 'Studying abroad from Nigeria: admissions, scholarships, student visas, proof of funds and student life in the UK, Canada, the US and beyond. Ask questions and share what worked, with links to official pages.',
         rules: [BE_DECENT, { title: 'No paid admission agents', description: 'Advice is free here. Posts selling admission or visa services are removed.' }, NO_SPAM],
         threads: [
             {
                 by: 'temi_reads',
                 ago: 100,
                 up: 19,
-                title: 'Scholarship deadlines coming up. Share the ones you are applying for',
+                title: 'Scholarship deadlines for Nigerian students: Chevening, Commonwealth and more',
                 body: "Chevening and a few others close in the next few weeks. Let's put the deadlines in one place. Please include a link to the official page, not a blog.",
                 comments: [
                     c('ifeoma_n', 'Applying for Chevening. The essays take much longer than you think. Start now if you have not.', 10),
@@ -732,7 +732,7 @@ A lower inflation rate means prices are rising more slowly. It doesn't mean they
                 by: 'ese_ok',
                 ago: 46,
                 up: 12,
-                title: 'Proof of funds is the hardest part. How did you manage it?',
+                title: 'How to show proof of funds for a student visa from Nigeria',
                 body: "Admission is sorted, and now I need to show the funds. My family can help, but not all at once. How did you handle it without doing anything risky?",
                 comments: [
                     c('halima_b', 'Start saving into one account early. Embassies want to see the money has been there for a while, not one big deposit last week.', 9),
@@ -745,7 +745,7 @@ A lower inflation rate means prices are rising more slowly. It doesn't mean they
         name: 'Relationships',
         display_name: 'Relationships',
         category: 'relationships',
-        description: 'Dating, marriage, family and friendships. Ask for advice, share your story, be kind.',
+        description: 'Relationship advice and discussion: dating, marriage, family, introductions, weddings and friendships. Ask for advice, share your story and be kind.',
         rules: [
             BE_DECENT,
             { title: 'Protect privacy', description: 'No names, photos or details that could identify the people in your story.' },
@@ -756,7 +756,7 @@ A lower inflation rate means prices are rising more slowly. It doesn't mean they
                 by: 'bisola_t',
                 ago: 76,
                 up: 21,
-                title: 'My partner wants to japa next year. I want to stay. How do couples handle this?',
+                title: 'My partner wants to relocate abroad and I want to stay. How do couples handle this?',
                 body: "We've been together four years. He has a job offer abroad, and I have a career I've built here and my mum, who isn't well. Neither of us wants to break up. Has anyone made long distance work, or found another way?",
                 comments: [
                     c('gbenga_ola', 'My wife and I did a year apart. It works if there is a clear end date. Open-ended long distance is where it falls apart.', 13),
@@ -768,7 +768,7 @@ A lower inflation rate means prices are rising more slowly. It doesn't mean they
                 by: 'jide_o',
                 ago: 132,
                 up: 15,
-                title: 'How much are people spending on introductions now?',
+                title: 'How much does a Nigerian introduction ceremony cost now?',
                 body: "Our introduction is in December. Between the list from her family, food, drinks and travel, we're already over ₦3m and we haven't even started on the wedding. Is this normal?",
                 comments: [
                     c('ngozi_ek', 'Normal, unfortunately. Sit down with both families and agree on what is required vs what is nice to have.', 9),
