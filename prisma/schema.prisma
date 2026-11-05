@@ -509,6 +509,9 @@ model Post {
   @@index([search_vector], type: Gin)
   // The mod queue's held posts
   @@index([community_id, status])
+
+  daily_stats   PostDailyStat[]
+  daily_sources PostDailySource[]
 }
 
 model Comment {
@@ -1064,6 +1067,39 @@ model DailyStat {
   // { "NG": 120, "GB": 8, ... } unique visitors by country, when known
   countries         Json?
   computed_at       DateTime @default(now())
+}
+
+// Post insights for its author: one row per post per Lagos day, written from the in-memory metrics buffer. readers is
+// approximate (unique visitor hashes seen by one API process that day); the hashes themselves are never stored.
+model PostDailyStat {
+  post_id String   @db.Uuid
+  post    Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  date    DateTime @db.Date
+  views   Int      @default(0)
+  readers Int      @default(0)
+  shares  Int      @default(0)
+
+  @@id([post_id, date])
+  @@index([date])
+}
+
+// Where a post's views came from, per day: kind country (ISO code or "unknown") or source (a fixed set of labels such
+// as Google, WhatsApp, Direct; never a full address). Kept 90 days (the nightly stats job prunes older rows).
+model PostDailySource {
+  post_id String         @db.Uuid
+  post    Post           @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  date    DateTime       @db.Date
+  kind    PostSourceKind
+  key     String
+  views   Int            @default(0)
+
+  @@id([post_id, date, kind, key])
+  @@index([date])
+}
+
+enum PostSourceKind {
+  country
+  source
 }
 
 model CommunityDailyStat {

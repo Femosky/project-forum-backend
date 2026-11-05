@@ -15,6 +15,9 @@ export const ACTIVE_EVERY_MS = 15 * 60 * 1000;
 const MAX_ENTRIES = 20_000;
 
 let postViews = new Map<string, number>();
+// Post insights. Key: day | post id. Breakdowns key: day | post id | kind | label.
+let postDaily = new Map<string, { views: number; readers: number; shares: number }>();
+let postSources = new Map<string, number>();
 // Key: comment id | post id | viewer id ('' for guests). The post and viewer are checked when written, so a page
 // can only count comments that are in its own thread and never the viewer's own.
 let commentViews = new Map<string, number>();
@@ -36,7 +39,7 @@ let flushing: Promise<void> | null = null;
 const add = (map: Map<string, number>, key: string, by = 1) => map.set(key, (map.get(key) ?? 0) + by);
 
 function bufferedEntries() {
-    return postViews.size + commentViews.size + activeUsers.size + visitors.size + communityVisitors.size + pageViews.size;
+    return postViews.size + postDaily.size + postSources.size + commentViews.size + activeUsers.size + visitors.size + communityVisitors.size + pageViews.size;
 }
 
 function maybeFlushEarly() {
@@ -54,10 +57,36 @@ function firstToday(key: string) {
     return true;
 }
 
+const daily = (key: string) => {
+    let row = postDaily.get(key);
+    if (!row) postDaily.set(key, (row = { views: 0, readers: 0, shares: 0 }));
+    return row;
+};
+
+// For a post's insights: who it was (a daily visitor hash, used only to count readers once), where they are and
+// where they came from
+export type ViewOrigin = { visitor: string; country: string | null; source: string };
+
 // A person opened a post: one view for it (unless they wrote it) and one for each listed comment of that thread
-export function recordPostView(post: { id: string; author_id: string }, commentIds: string[], viewerId: string | null) {
-    if (post.author_id !== viewerId) add(postViews, post.id);
+export function recordPostView(post: { id: string; author_id: string }, commentIds: string[], viewerId: string | null, origin?: ViewOrigin) {
+    if (post.author_id !== viewerId) {
+        add(postViews, post.id);
+        if (origin) {
+            const day = lagosDay();
+            const row = daily(`${day}|${post.id}`);
+            row.views += 1;
+            if (firstToday(`p|${post.id}|${origin.visitor}`)) row.readers += 1;
+            add(postSources, `${day}|${post.id}|country|${origin.country ?? 'unknown'}`);
+            add(postSources, `${day}|${post.id}|source|${origin.source}`);
+        }
+    }
     for (const commentId of commentIds) add(commentViews, `${commentId}|${post.id}|${viewerId ?? ''}`);
+    maybeFlushEarly();
+}
+
+// Someone used a post's Share menu
+export function recordPostShare(postId: string) {
+    daily(`${lagosDay()}|${postId}`).shares += 1;
     maybeFlushEarly();
 }
 
@@ -97,8 +126,10 @@ export function flushMetrics(): Promise<void> {
 }
 
 async function writeAll() {
-    const batch = { postViews, commentViews, activeUsers, activeDays, visitors, communityVisitors, pageViews, communityPageViews };
+    const batch = { postViews, postDaily, postSources, commentViews, activeUsers, activeDays, visitors, communityVisitors, pageViews, communityPageViews };
     postViews = new Map();
+    postDaily = new Map();
+    postSources = new Map();
     commentViews = new Map();
     activeUsers = new Set();
     activeDays = new Set();
@@ -113,6 +144,15 @@ async function writeAll() {
 
     const steps: [string, () => Promise<unknown>, () => void][] = [
         ['post views', () => writePostViews(batch.postViews), () => batch.postViews.forEach((n, key) => add(postViews, key, n))],
+        ['post insights', () => writePostInsights(batch.postDaily, batch.postSources), () => {
+            batch.postDaily.forEach((row, key) => {
+                const into = daily(key);
+                into.views += row.views;
+                into.readers += row.readers;
+                into.shares += row.shares;
+            });
+            batch.postSources.forEach((n, key) => add(postSources, key, n));
+        }],
         ['comment views', () => writeCommentViews(batch.commentViews), () => batch.commentViews.forEach((n, key) => add(commentViews, key, n))],
         ['active users', () => writeActiveUsers(batch.activeUsers, batch.activeDays), () => {
             batch.activeUsers.forEach((id) => activeUsers.add(id));
@@ -145,6 +185,36 @@ async function writePostViews(views: Map<string, number>) {
         UPDATE "Post" p SET "view_count" = p."view_count" + v.n
         FROM unnest(${ids}::uuid[], ${counts}::int[]) AS v(id, n)
         WHERE p."id" = v.id`;
+}
+
+// Posts deleted since the view was buffered are skipped (the JOIN), not an error
+async function writePostInsights(rows: Map<string, { views: number; readers: number; shares: number }>, sources: Map<string, number>) {
+    if (rows.size > 0) {
+        const entries = [...rows].map(([key, row]) => {
+            const [day, postId] = split(key);
+            return [day, postId, row] as const;
+        });
+        await prisma.$executeRaw`
+            INSERT INTO "PostDailyStat" ("post_id", "date", "views", "readers", "shares")
+            SELECT p."id", v.day, v.views, v.readers, v.shares
+            FROM unnest(${entries.map((row) => row[0])}::date[], ${entries.map((row) => row[1])}::uuid[], ${entries.map((row) => row[2].views)}::int[],
+                        ${entries.map((row) => row[2].readers)}::int[], ${entries.map((row) => row[2].shares)}::int[]) AS v(day, post_id, views, readers, shares)
+            JOIN "Post" p ON p."id" = v.post_id
+            ON CONFLICT ("post_id", "date") DO UPDATE SET
+                "views" = "PostDailyStat"."views" + EXCLUDED."views",
+                "readers" = "PostDailyStat"."readers" + EXCLUDED."readers",
+                "shares" = "PostDailyStat"."shares" + EXCLUDED."shares"`;
+    }
+    if (sources.size > 0) {
+        const entries = [...sources].map(([key, n]) => [...split(key), n] as const);
+        await prisma.$executeRaw`
+            INSERT INTO "PostDailySource" ("post_id", "date", "kind", "key", "views")
+            SELECT p."id", v.day, v.kind::"PostSourceKind", v.key, v.n
+            FROM unnest(${entries.map((row) => row[0])}::date[], ${entries.map((row) => row[1])}::uuid[], ${entries.map((row) => row[2])}::text[],
+                        ${entries.map((row) => row[3])}::text[], ${entries.map((row) => row[4])}::int[]) AS v(day, post_id, kind, key, n)
+            JOIN "Post" p ON p."id" = v.post_id
+            ON CONFLICT ("post_id", "date", "kind", "key") DO UPDATE SET "views" = "PostDailySource"."views" + EXCLUDED."views"`;
+    }
 }
 
 async function writeCommentViews(views: Map<string, number>) {
@@ -238,6 +308,8 @@ export async function stopMetricsFlusher() {
 // Tests start each case with nothing buffered and nothing remembered
 export function resetMetricsForTests() {
     postViews = new Map();
+    postDaily = new Map();
+    postSources = new Map();
     commentViews = new Map();
     activeUsers = new Set();
     activeDays = new Set();

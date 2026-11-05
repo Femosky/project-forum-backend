@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { SOURCE_RETENTION_DAYS } from '../posts/insights';
 import prisma from '../../prismaConnection';
 import { addDays, lagosDay, lagosDayBounds } from '../../lib/days';
 import { defineScheduledJob, onJobsWake } from '../../lib/jobs';
@@ -156,6 +157,8 @@ export const dailyStatsJob = defineScheduledJob('stats.daily', '20 0 * * *', asy
     const yesterday = addDays(lagosDay(), -1);
     await writeDailyStats(yesterday);
     await prisma.$executeRaw`DELETE FROM "DailySalt" WHERE "date" < ${yesterday}::date`;
+    // Post insights keep their country and source breakdowns for SOURCE_RETENTION_DAYS (daily totals stay)
+    await prisma.$executeRaw`DELETE FROM "PostDailySource" WHERE "date" < ${addDays(lagosDay(), -SOURCE_RETENTION_DAYS)}::date`;
     logger.info({ day: yesterday }, 'Daily stats written');
 });
 
