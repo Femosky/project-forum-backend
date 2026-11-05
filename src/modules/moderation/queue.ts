@@ -33,6 +33,8 @@ export type QueueItem = {
     report_ids: string[];
     // Sent on to the site's admins by a community moderator
     escalation: Escalation | null;
+    // Site queue only: whether the author (or reported account) is already suspended or shadow-banned
+    account?: { suspended: boolean; shadow_banned: boolean } | null;
     post?: ReturnType<typeof toPublicPost>;
     comment?: ReturnType<typeof toPublicComment> & { post: { short_id: string; slug: string; title: string; community: string } };
     user?: { username: string; status: string; karma: number; created_at: Date };
@@ -172,11 +174,21 @@ export async function buildQueue(scope: Scope, context: ViewerContext): Promise<
     const communitiesById = new Map(communities.map((row) => [row.id, row]));
     const adsById = new Map(ads.map((row) => [row.id, row]));
 
+    // The site queue shows the author's account state, so staff can see a suspension or shadow-ban took and undo it
+    const authorIds = 'communityId' in scope ? [] : [...posts.map((row) => row.author_id), ...comments.map((row) => row.author_id), ...idsOf('user')];
+    const accounts = new Map(
+        (authorIds.length
+            ? await prisma.user.findMany({ where: { id: { in: authorIds } }, select: { id: true, status: true, shadow_banned_at: true } })
+            : []
+        ).map((row) => [row.id, { suspended: row.status === 'suspended', shadow_banned: row.shadow_banned_at !== null }])
+    );
+    const accountOf = (id: string | null | undefined) => ('communityId' in scope ? {} : { account: (id && accounts.get(id)) || null });
+
     // Content that has since gone (deleted by its author, cascade-deleted) drops out
     return ordered.flatMap((item): QueueItem[] => {
         if (item.target_type === 'post') {
             const post = postsById.get(item.target_id);
-            return post ? [{ ...item, post: toPublicPost(post, context) }] : [];
+            return post ? [{ ...item, post: toPublicPost(post, context), ...accountOf(post.author_id) }] : [];
         }
         if (item.target_type === 'comment') {
             const comment = commentsById.get(item.target_id);
@@ -185,6 +197,7 @@ export async function buildQueue(scope: Scope, context: ViewerContext): Promise<
             return [
                 {
                     ...item,
+                    ...accountOf(comment.author_id),
                     comment: {
                         ...toPublicComment(comment, post.community_id, context),
                         post: { short_id: post.short_id, slug: post.slug, title: post.title, community: post.community.name },
@@ -194,7 +207,9 @@ export async function buildQueue(scope: Scope, context: ViewerContext): Promise<
         }
         if (item.target_type === 'user') {
             const user = usersById.get(item.target_id);
-            return user ? [{ ...item, user: { username: user.username, status: user.status, karma: user.karma, created_at: user.created_at } }] : [];
+            return user
+                ? [{ ...item, user: { username: user.username, status: user.status, karma: user.karma, created_at: user.created_at }, ...accountOf(user.id) }]
+                : [];
         }
         if (item.target_type === 'ad') {
             const ad = adsById.get(item.target_id);

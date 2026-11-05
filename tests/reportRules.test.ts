@@ -46,6 +46,12 @@ describe('community-rule and site-rule reports', () => {
         expect(ids(await admin.agent.get('/v1/admin/queue'))).toEqual([comment.id]);
         expect(ids(await admin.agent.get('/v1/admin/queue?view=reports')).sort()).toEqual([post.id, comment.id].sort());
         expect((await admin.agent.get('/v1/admin/overview')).body.queue).toBe(1);
+
+        // The site queue shows whether the author is already dealt with; the community's queue doesn't
+        await admin.agent.post('/v1/admin/users/author/shadow-ban').send({ shadow_banned: true }).expect(200);
+        const [site] = (await admin.agent.get('/v1/admin/queue')).body.items;
+        expect(site.account).toEqual({ suspended: false, shadow_banned: true });
+        expect((await mod.agent.get('/v1/communities/lounge/mod-queue')).body.items[0].account).toBeUndefined();
     });
 
     it('rejects a missing or mixed rule, a rule the community lacks, and community rules on accounts', async () => {
