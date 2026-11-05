@@ -8,9 +8,20 @@ import { ViewerContext } from '../communities/access';
 
 const QUEUE_LIMIT = 100;
 
-type Scope = { communityId: string } | { site: true };
+// site: what needs the site's admins (held for them, site-rule, escalated, or about users/communities/ads);
+// allReports: every open report in every community, for the admin panel's Reports tab (no held items)
+type Scope = { communityId: string } | { site: true; allReports?: boolean };
 
-type ReportSummary = { total: number; reasons: Record<string, number>; notes: { note: string; reporter: string; created_at: Date }[] };
+// reasons: site rules by reason code; rules: community rules by title; site: how many of the reports name a site rule
+type ReportSummary = {
+    total: number;
+    site: number;
+    reasons: Record<string, number>;
+    rules: Record<string, number>;
+    notes: { note: string; reporter: string; created_at: Date }[];
+};
+
+type Escalation = { at: Date; by: string | null; note: string | null };
 
 export type QueueItem = {
     target_type: ReportTargetType;
@@ -20,6 +31,10 @@ export type QueueItem = {
     held_reason: string | null;
     reports: ReportSummary;
     report_ids: string[];
+    // Sent on to the site's admins by a community moderator
+    escalation: Escalation | null;
+    // Site queue only: whether the author (or reported account) is already suspended or shadow-banned
+    account?: { suspended: boolean; shadow_banned: boolean } | null;
     post?: ReturnType<typeof toPublicPost>;
     comment?: ReturnType<typeof toPublicComment> & { post: { short_id: string; slug: string; title: string; community: string } };
     user?: { username: string; status: string; karma: number; created_at: Date };
@@ -27,45 +42,71 @@ export type QueueItem = {
     ad?: { headline: string; advertiser: string; campaign_id: string; campaign: string; is_active: boolean };
 };
 
-// Community queues see reports filed against that community's content; the site queue (admins) sees every
-// open report plus held content everywhere
-const reportWhere = (scope: Scope): Prisma.ReportWhereInput =>
-    'communityId' in scope ? { status: 'open', community_id: scope.communityId } : { status: 'open' };
+// Reports the site's admins act on: site-level targets, site-rule reports and escalations. Community-rule reports are
+// for the community's moderators, as on Reddit.
+export const FOR_ADMINS: Prisma.ReportWhereInput = { OR: [{ community_id: null }, { rule_kind: 'site' }, { escalated_at: { not: null } }] };
 
-// Held for the site's admins: only the site queue lists it
+// Community queues see every report filed against that community's content; the site queue sees what needs admins
+const reportWhere = (scope: Scope): Prisma.ReportWhereInput =>
+    'communityId' in scope
+        ? { status: 'open', community_id: scope.communityId }
+        : scope.allReports
+          ? { status: 'open' }
+          : { status: 'open', ...FOR_ADMINS };
+
+// Held for the site's admins: only the site queue lists it. The all-reports view lists reports only.
 const heldFilter = (scope: Scope) => ('communityId' in scope ? { held_for_admins: false } : {});
+const withHeld = (scope: Scope) => !('allReports' in scope && scope.allReports);
 
 export async function queueCount(scope: Scope) {
     const communityFilter = 'communityId' in scope ? { community_id: scope.communityId } : {};
     const [reports, posts, comments] = await Promise.all([
         prisma.report.findMany({ where: reportWhere(scope), distinct: ['target_type', 'target_id'], select: { id: true } }),
-        prisma.post.count({ where: { status: 'pending', ...heldFilter(scope), ...communityFilter } }),
-        prisma.comment.count({ where: { status: 'pending', ...heldFilter(scope), post: communityFilter } }),
+        withHeld(scope) ? prisma.post.count({ where: { status: 'pending', ...heldFilter(scope), ...communityFilter } }) : 0,
+        withHeld(scope) ? prisma.comment.count({ where: { status: 'pending', ...heldFilter(scope), post: communityFilter } }) : 0,
     ]);
     return reports.length + posts + comments;
 }
 
 export async function buildQueue(scope: Scope, context: ViewerContext): Promise<QueueItem[]> {
     const communityFilter = 'communityId' in scope ? { community_id: scope.communityId } : {};
+    const held = async <T>(query: () => Promise<T[]>) => (withHeld(scope) ? query() : []);
     const [reports, heldPosts, heldComments] = await Promise.all([
         prisma.report.findMany({
             where: reportWhere(scope),
             orderBy: { created_at: 'desc' },
             take: 500,
-            select: { id: true, created_at: true, target_type: true, target_id: true, reason_code: true, note: true, reporter: { select: { username: true } } },
+            select: {
+                id: true,
+                created_at: true,
+                target_type: true,
+                target_id: true,
+                reason_code: true,
+                rule_kind: true,
+                rule_title: true,
+                note: true,
+                escalated_at: true,
+                escalation_note: true,
+                reporter: { select: { username: true } },
+                escalator: { select: { username: true } },
+            },
         }),
-        prisma.post.findMany({
-            where: { status: 'pending', ...heldFilter(scope), ...communityFilter },
-            orderBy: { created_at: 'desc' },
-            take: QUEUE_LIMIT,
-            select: { id: true, created_at: true, held_reason: true },
-        }),
-        prisma.comment.findMany({
-            where: { status: 'pending', ...heldFilter(scope), post: communityFilter },
-            orderBy: { created_at: 'desc' },
-            take: QUEUE_LIMIT,
-            select: { id: true, created_at: true, held_reason: true },
-        }),
+        held(() =>
+            prisma.post.findMany({
+                where: { status: 'pending', ...heldFilter(scope), ...communityFilter },
+                orderBy: { created_at: 'desc' },
+                take: QUEUE_LIMIT,
+                select: { id: true, created_at: true, held_reason: true },
+            })
+        ),
+        held(() =>
+            prisma.comment.findMany({
+                where: { status: 'pending', ...heldFilter(scope), post: communityFilter },
+                orderBy: { created_at: 'desc' },
+                take: QUEUE_LIMIT,
+                select: { id: true, created_at: true, held_reason: true },
+            })
+        ),
     ]);
 
     const items = new Map<string, QueueItem>();
@@ -73,7 +114,15 @@ export async function buildQueue(scope: Scope, context: ViewerContext): Promise<
         const key = `${target_type}:${target_id}`;
         let item = items.get(key);
         if (!item) {
-            item = { target_type, target_id, updated_at: at, held_reason: null, reports: { total: 0, reasons: {}, notes: [] }, report_ids: [] };
+            item = {
+                target_type,
+                target_id,
+                updated_at: at,
+                held_reason: null,
+                reports: { total: 0, site: 0, reasons: {}, rules: {}, notes: [] },
+                report_ids: [],
+                escalation: null,
+            };
             items.set(key, item);
         }
         if (at > item.updated_at) item.updated_at = at;
@@ -83,7 +132,15 @@ export async function buildQueue(scope: Scope, context: ViewerContext): Promise<
     for (const report of reports) {
         const item = itemFor(report.target_type, report.target_id, report.created_at);
         item.reports.total += 1;
-        item.reports.reasons[report.reason_code] = (item.reports.reasons[report.reason_code] ?? 0) + 1;
+        if (report.rule_kind === 'community' && report.rule_title) {
+            item.reports.rules[report.rule_title] = (item.reports.rules[report.rule_title] ?? 0) + 1;
+        } else {
+            item.reports.site += 1;
+            item.reports.reasons[report.reason_code] = (item.reports.reasons[report.reason_code] ?? 0) + 1;
+        }
+        if (report.escalated_at && (!item.escalation || report.escalated_at < item.escalation.at)) {
+            item.escalation = { at: report.escalated_at, by: report.escalator?.username ?? null, note: report.escalation_note };
+        }
         item.report_ids.push(report.id);
         if (report.note && item.reports.notes.length < 5) {
             item.reports.notes.push({ note: report.note, reporter: report.reporter.username, created_at: report.created_at });
@@ -117,11 +174,21 @@ export async function buildQueue(scope: Scope, context: ViewerContext): Promise<
     const communitiesById = new Map(communities.map((row) => [row.id, row]));
     const adsById = new Map(ads.map((row) => [row.id, row]));
 
+    // The site queue shows the author's account state, so staff can see a suspension or shadow-ban took and undo it
+    const authorIds = 'communityId' in scope ? [] : [...posts.map((row) => row.author_id), ...comments.map((row) => row.author_id), ...idsOf('user')];
+    const accounts = new Map(
+        (authorIds.length
+            ? await prisma.user.findMany({ where: { id: { in: authorIds } }, select: { id: true, status: true, shadow_banned_at: true } })
+            : []
+        ).map((row) => [row.id, { suspended: row.status === 'suspended', shadow_banned: row.shadow_banned_at !== null }])
+    );
+    const accountOf = (id: string | null | undefined) => ('communityId' in scope ? {} : { account: (id && accounts.get(id)) || null });
+
     // Content that has since gone (deleted by its author, cascade-deleted) drops out
     return ordered.flatMap((item): QueueItem[] => {
         if (item.target_type === 'post') {
             const post = postsById.get(item.target_id);
-            return post ? [{ ...item, post: toPublicPost(post, context) }] : [];
+            return post ? [{ ...item, post: toPublicPost(post, context), ...accountOf(post.author_id) }] : [];
         }
         if (item.target_type === 'comment') {
             const comment = commentsById.get(item.target_id);
@@ -130,6 +197,7 @@ export async function buildQueue(scope: Scope, context: ViewerContext): Promise<
             return [
                 {
                     ...item,
+                    ...accountOf(comment.author_id),
                     comment: {
                         ...toPublicComment(comment, post.community_id, context),
                         post: { short_id: post.short_id, slug: post.slug, title: post.title, community: post.community.name },
@@ -139,7 +207,9 @@ export async function buildQueue(scope: Scope, context: ViewerContext): Promise<
         }
         if (item.target_type === 'user') {
             const user = usersById.get(item.target_id);
-            return user ? [{ ...item, user: { username: user.username, status: user.status, karma: user.karma, created_at: user.created_at } }] : [];
+            return user
+                ? [{ ...item, user: { username: user.username, status: user.status, karma: user.karma, created_at: user.created_at }, ...accountOf(user.id) }]
+                : [];
         }
         if (item.target_type === 'ad') {
             const ad = adsById.get(item.target_id);

@@ -54,9 +54,12 @@ async function log(request: Request, action: string, target: { type: 'user' | 'c
     await audit(request, action, target, { ...(extra.reason ? { reason: extra.reason } : {}), ...((extra.details as object | undefined) ?? {}) });
 }
 
-// Every open report and every held item, across all communities
+// What needs the site's admins, across all communities: site-rule and escalated reports, reports about users,
+// communities and ads, and held items. ?view=reports lists every open report in every community instead, community-rule
+// ones included, so staff can see what community moderators are handling.
 router.get('/queue', requireStaff(...MODERATION), async (request, response) => {
-    const items = await buildQueue({ site: true }, STAFF_CONTEXT);
+    const allReports = request.query.view === 'reports';
+    const items = await buildQueue({ site: true, allReports }, STAFF_CONTEXT);
     response.json({ items });
 });
 
@@ -133,13 +136,25 @@ const userSelect = {
     _count: { select: { posts: true, comments: true, reports_sent: true } },
 } satisfies Prisma.UserSelect;
 
+const USERS_PAGE = 50;
+
 const usersQuery = z.object({
     q: z.string().trim().max(254).optional(),
     filter: z.enum(['all', 'suspended', 'shadow_banned', 'new']).default('all'),
+    // Plain offset paging: staff page through at most a few thousand rows
+    offset: z.coerce.number().int().min(0).max(100_000).default(0),
 });
 
+// Suspended and shadow-banned lists put the latest bans first; the rest list the newest accounts first
+const usersOrder = (filter: string): Prisma.UserOrderByWithRelationInput[] =>
+    filter === 'shadow_banned'
+        ? [{ shadow_banned_at: 'desc' }, { id: 'desc' }]
+        : filter === 'suspended'
+          ? [{ suspended_until: { sort: 'desc', nulls: 'first' } }, { id: 'desc' }]
+          : [{ created_at: 'desc' }, { id: 'desc' }];
+
 router.get('/users', requireStaff(...MODERATION), async (request, response) => {
-    const { q, filter } = parse(usersQuery, request.query);
+    const { q, filter, offset } = parse(usersQuery, request.query);
     const value = q?.toLowerCase();
     const where: Prisma.UserWhereInput = {
         status: { not: 'deleted' },
@@ -148,8 +163,11 @@ router.get('/users', requireStaff(...MODERATION), async (request, response) => {
         ...(filter === 'shadow_banned' ? { shadow_banned_at: { not: null } } : {}),
         ...(filter === 'new' ? { created_at: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } } : {}),
     };
-    const users = await prisma.user.findMany({ where, orderBy: { created_at: 'desc' }, take: 50, select: userSelect });
-    response.json({ users });
+    const [rows, total] = await Promise.all([
+        prisma.user.findMany({ where, orderBy: usersOrder(filter), skip: offset, take: USERS_PAGE + 1, select: userSelect }),
+        prisma.user.count({ where }),
+    ]);
+    response.json({ users: rows.slice(0, USERS_PAGE), total, next_offset: rows.length > USERS_PAGE ? offset + USERS_PAGE : null });
 });
 
 async function findUser(username: string) {

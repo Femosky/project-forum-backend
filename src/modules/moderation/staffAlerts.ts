@@ -3,6 +3,7 @@ import { env } from '../../config/env';
 import { linkEmail } from '../../lib/email';
 import { defineScheduledJob, onJobsWake } from '../../lib/jobs';
 import { emailJob } from '../auth/jobs';
+import { FOR_ADMINS } from './queue';
 
 // Tells the site's owner and admins what has reached the site's queue: new reports, and content held for them by the
 // automatic checks. At most one email per person per 10 minutes, only when something new arrived. Turned off per
@@ -21,7 +22,10 @@ export async function sendStaffAlerts(now = new Date()) {
         if (last && now.getTime() - last.getTime() < GAP_MS) continue;
         const since = { gt: last ?? new Date(now.getTime() - 24 * 60 * 60 * 1000) };
         const [reports, posts, comments] = await Promise.all([
-            prisma.report.count({ where: { status: 'open', created_at: since } }),
+            // New reports for admins, and community reports a moderator has just sent on to them
+            prisma.report.count({
+                where: { status: 'open', OR: [{ created_at: since, ...FOR_ADMINS }, { escalated_at: since }] },
+            }),
             prisma.post.count({ where: { status: 'pending', held_for_admins: true, created_at: since } }),
             prisma.comment.count({ where: { status: 'pending', held_for_admins: true, created_at: since } }),
         ]);

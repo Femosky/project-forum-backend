@@ -92,6 +92,13 @@ enum ReportReason {
   other
 }
 
+// Which rules a report says were broken: the community's own (its moderators decide) or the site's content policy
+// (the community's moderators and the site's admins both see it)
+enum ReportRuleKind {
+  community
+  site
+}
+
 enum ReportStatus {
   open
   resolved
@@ -212,6 +219,7 @@ model User {
 
   reports_sent     Report[]    @relation("reporter")
   reports_resolved Report[]    @relation("resolver")
+  reports_escalated Report[]   @relation("escalator")
   mod_actions      ModAction[]
 
   notifications      Notification[] @relation("notification_recipient")
@@ -628,7 +636,15 @@ model Report {
   community    Community?       @relation(fields: [community_id], references: [id], onDelete: Cascade)
 
   reason_code       ReportReason
+  // community: rule_title is the community rule picked (copied, so later rule edits don't change old reports)
+  rule_kind         ReportRuleKind @default(site)
+  rule_title        String?
   note              String?
+  // A community moderator sent it on to the site's admins
+  escalated_at      DateTime?
+  escalated_by      String?       @db.Uuid
+  escalator         User?         @relation("escalator", fields: [escalated_by], references: [id], onDelete: SetNull)
+  escalation_note   String?
   status            ReportStatus  @default(open)
   resolved_by       String?       @db.Uuid
   resolver          User?         @relation("resolver", fields: [resolved_by], references: [id])
@@ -640,6 +656,7 @@ model Report {
   @@index([community_id, status, created_at])
   @@index([target_type, target_id])
   @@index([status, created_at])
+  @@index([status, rule_kind])
 }
 
 // Audit trail: every moderator or admin action
