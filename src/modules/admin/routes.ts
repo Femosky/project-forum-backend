@@ -54,9 +54,12 @@ async function log(request: Request, action: string, target: { type: 'user' | 'c
     await audit(request, action, target, { ...(extra.reason ? { reason: extra.reason } : {}), ...((extra.details as object | undefined) ?? {}) });
 }
 
-// Every open report and every held item, across all communities
+// What needs the site's admins, across all communities: site-rule and escalated reports, reports about users,
+// communities and ads, and held items. ?view=reports lists every open report in every community instead, community-rule
+// ones included, so staff can see what community moderators are handling.
 router.get('/queue', requireStaff(...MODERATION), async (request, response) => {
-    const items = await buildQueue({ site: true }, STAFF_CONTEXT);
+    const allReports = request.query.view === 'reports';
+    const items = await buildQueue({ site: true, allReports }, STAFF_CONTEXT);
     response.json({ items });
 });
 

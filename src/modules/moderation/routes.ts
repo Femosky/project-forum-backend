@@ -34,12 +34,21 @@ const muteSchema = z.object({
     reason,
 });
 
-const reportSchema = z.object({
-    target_type: z.enum(['post', 'comment', 'user', 'community', 'ad']),
-    target_id: z.uuid(),
-    reason_code: z.enum(REPORT_REASONS),
-    note: z.string().trim().max(LIMITS.REPORT_NOTE_MAX).optional(),
-});
+// A report names either one of the community's rules (by its place in the list; posts and comments only) or a site
+// rule (reason_code). Site-rule reports on community content go to its moderators and to the site's admins.
+const reportSchema = z
+    .object({
+        target_type: z.enum(['post', 'comment', 'user', 'community', 'ad']),
+        target_id: z.uuid(),
+        reason_code: z.enum(REPORT_REASONS).optional(),
+        community_rule: z.number().int().min(0).max(50).optional(),
+        note: z.string().trim().max(LIMITS.REPORT_NOTE_MAX).optional(),
+    })
+    .refine((input) => (input.reason_code === undefined) !== (input.community_rule === undefined), {
+        message: 'Pick one rule: a community rule or a site rule',
+    });
+
+const escalateSchema = z.object({ note: z.string().trim().max(LIMITS.REASON_MAX).optional() });
 
 export const postActionSchema = z.object({
     action: z.enum(['remove', 'approve', 'lock', 'unlock', 'pin', 'unpin', 'mark_mature', 'unmark_mature', 'sponsor', 'unsponsor']),
@@ -80,26 +89,72 @@ async function reportCommunity(targetType: string, targetId: string) {
     return null;
 }
 
+// The rule a community-rule report names, copied from the community's current rules
+async function communityRuleTitle(targetType: string, targetId: string, index: number) {
+    if (targetType !== 'post' && targetType !== 'comment') throw badRequest('Only posts and comments can break a community rule');
+    const communityId =
+        targetType === 'post'
+            ? (await prisma.post.findUnique({ where: { id: targetId }, select: { community_id: true } }))?.community_id
+            : (await prisma.comment.findUnique({ where: { id: targetId }, select: { post: { select: { community_id: true } } } }))?.post.community_id;
+    if (!communityId) throw notFound(targetType === 'post' ? 'Post not found' : 'Comment not found');
+    const community = await prisma.community.findUnique({ where: { id: communityId }, select: { rules: true } });
+    const rules = Array.isArray(community?.rules) ? (community.rules as { title?: unknown }[]) : [];
+    const title = rules[index]?.title;
+    if (typeof title !== 'string') throw badRequest("That rule isn't one of this community's rules");
+    return title;
+}
+
 router.post('/reports', requireAuth, async (request: AuthRequest, response) => {
     const { user } = viewerOf(request);
     const input = parse(reportSchema, request.body);
     const communityId = await reportCommunity(input.target_type, input.target_id);
+    const ruleTitle = input.community_rule === undefined ? null : await communityRuleTitle(input.target_type, input.target_id, input.community_rule);
+    const rule = {
+        rule_kind: ruleTitle === null ? ('site' as const) : ('community' as const),
+        rule_title: ruleTitle,
+        reason_code: input.reason_code ?? ('other' as const),
+        note: input.note ?? null,
+    };
 
     // Reporting the same thing twice just updates the first report
     await prisma.report.upsert({
         where: { reporter_id_target_type_target_id: { reporter_id: user.id, target_type: input.target_type, target_id: input.target_id } },
-        create: {
-            reporter_id: user.id,
-            target_type: input.target_type,
-            target_id: input.target_id,
-            community_id: communityId,
-            reason_code: input.reason_code,
-            note: input.note ?? null,
-        },
-        update: { reason_code: input.reason_code, note: input.note ?? null },
+        create: { reporter_id: user.id, target_type: input.target_type, target_id: input.target_id, community_id: communityId, ...rule },
+        update: rule,
     });
     if (communityId) await alertModerators(communityId, 'mod_report');
     response.status(201).json({ success: true });
+});
+
+// A community moderator sends the open reports on a post or comment to the site's admins (something that needs more
+// than a removal, like illegal content). The item stays in the community's queue too.
+router.post('/reports/:id/escalate', requireAuth, async (request: AuthRequest, response) => {
+    const { user } = viewerOf(request);
+    const { note } = parse(escalateSchema, request.body);
+    const report = await prisma.report.findUnique({ where: { id: uuidParam(request.params.id, 'Report not found') } });
+    if (!report) throw notFound('Report not found');
+    if (!report.community_id) throw badRequest('This report already goes to the site admins');
+    await assertModerator(report.community_id, user);
+    if (report.status !== 'open') throw badRequest('This report is already closed');
+    const result = await prisma.report.updateMany({
+        where: { target_type: report.target_type, target_id: report.target_id, community_id: report.community_id, status: 'open', escalated_at: null },
+        data: { escalated_at: new Date(), escalated_by: user.id, escalation_note: note || null },
+    });
+    // Logged only when something was sent (asking twice changes nothing)
+    if (result.count > 0) {
+        await prisma.modAction.create({
+            data: {
+                actor_id: user.id,
+                community_id: report.community_id,
+                action: 'escalate_reports',
+                target_type: report.target_type,
+                target_id: report.target_id,
+                reason: note || null,
+                details: { count: result.count },
+            },
+        });
+    }
+    response.json({ success: true, escalated: result.count });
 });
 
 async function listReports(where: { community_id: string | null }, query: z.infer<typeof reportsQuery>) {
@@ -113,9 +168,12 @@ async function listReports(where: { community_id: string | null }, query: z.infe
             target_type: true,
             target_id: true,
             reason_code: true,
+            rule_kind: true,
+            rule_title: true,
             note: true,
             status: true,
             resolved_at: true,
+            escalated_at: true,
             reporter: { select: { username: true } },
         },
     });
