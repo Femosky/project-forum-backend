@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { track } from '../../lib/analytics';
 import { z } from 'zod';
 import prisma from '../../prismaConnection';
-import { badRequest, forbidden, parse } from '../../lib/http';
+import { badRequest, forbidden, parse, uuidParam } from '../../lib/http';
 import { moderatorsAmong, DELETED_POST_DATA, LISTED_POST_STATUSES, postInclude, toPublicComment, toPublicPost } from '../../lib/serializers';
 import { urlKey } from '../../lib/urls';
 import { fetchLinkPreview } from '../../lib/linkPreview';
@@ -21,7 +21,12 @@ import { commentsQuery, createCommentSchema, createPostSchema, updatePostSchema,
 import { createPost, findVisiblePost, relatedPosts, serializePosts } from './service';
 import { indexNowJob, postPath } from '../seo/jobs';
 import { isBot } from '../../lib/bots';
-import { recordPostView } from '../metrics/buffer';
+import { recordPostShare, recordPostView } from '../metrics/buffer';
+import { countryOf, visitorId } from '../metrics/visitors';
+import { sourceOf } from '../metrics/sources';
+import { env } from '../../config/env';
+import { lagosDay } from '../../lib/days';
+import { postInsights } from './insights';
 
 const router = Router();
 
@@ -122,18 +127,48 @@ router.get('/:id', optionalAuth, async (request: AuthRequest, response) => {
 // A person opened this post's page. Counts one view for the post and one for each comment that was on screen (sent
 // by the page, at most 100). Bots and the author's own visits don't count. Counts are shown to authors only. Views
 // are buffered in memory and written in batches (modules/metrics/buffer.ts), so a page view costs no write.
-const viewSchema = z.object({ comment_ids: z.array(z.uuid()).max(100).default([]) });
+// referrer_host: the host of the page that linked here (document.referrer's host only), for the author's insights
+const viewSchema = z.object({
+    comment_ids: z.array(z.uuid()).max(100).default([]),
+    referrer_host: z.string().trim().max(255).optional(),
+});
+
+const OWN_HOSTS = env.WEB_ORIGINS.map((origin) => new URL(origin).hostname.replace(/^www\./, ''));
 
 router.post('/:id/view', optionalAuth, async (request: AuthRequest, response) => {
-    const { comment_ids } = parse(viewSchema, request.body ?? {});
+    const { comment_ids, referrer_host } = parse(viewSchema, request.body ?? {});
     if (isBot(request.get('user-agent'))) {
         response.status(204).end();
         return;
     }
     const context = await viewerContext(request.viewer);
     const post = await findVisiblePost(String(request.params.id), request.viewer?.user, context);
-    recordPostView(post, [...new Set(comment_ids.map((id) => id.toLowerCase()))], request.viewer?.user.id ?? null);
+    const userAgent = request.get('user-agent');
+    const origin =
+        request.ip && userAgent
+            ? { visitor: await visitorId(lagosDay(), request.ip, userAgent), country: await countryOf(request), source: sourceOf(referrer_host, OWN_HOSTS) }
+            : undefined;
+    recordPostView(post, [...new Set(comment_ids.map((id) => id.toLowerCase()))], request.viewer?.user.id ?? null, origin);
     response.status(204).end();
+});
+
+// Someone used the post's Share menu (copy link, an app, or the device's share sheet). Counted for the author's
+// insights only; nothing about who shared is kept.
+router.post('/:id/share', optionalAuth, async (request: AuthRequest, response) => {
+    if (isBot(request.get('user-agent'))) {
+        response.status(204).end();
+        return;
+    }
+    const context = await viewerContext(request.viewer);
+    const post = await findVisiblePost(String(request.params.id), request.viewer?.user, context);
+    recordPostShare(post.id);
+    response.status(204).end();
+});
+
+// The author's insights for one post (site admins can open any)
+router.get('/:id/insights', requireAuth, async (request: AuthRequest, response) => {
+    const { user } = viewerOf(request);
+    response.json({ insights: await postInsights(uuidParam(request.params.id, 'Post not found'), user) });
 });
 
 // Internal links for the post page: "Related threads" (full-text match on this post's title, any public community)

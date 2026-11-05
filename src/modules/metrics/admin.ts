@@ -77,20 +77,47 @@ async function topCommunities(from: string, to: string, limit: number) {
     })) as CommunityTotals[];
 }
 
+// Where post readers came from across the site (labels such as Google, WhatsApp, Direct), for the range. Breakdowns
+// are kept 90 days, so older ranges come back partly empty.
+async function trafficSources(from: string, to: string) {
+    const rows = await prisma.$queryRaw<{ key: string; views: bigint }[]>`
+        SELECT "key", sum("views") AS views FROM "PostDailySource"
+        WHERE "kind" = 'source' AND "date" BETWEEN ${from}::date AND ${to}::date
+        GROUP BY "key" ORDER BY views DESC`;
+    return rows.map((row) => ({ source: row.key, views: Number(row.views) }));
+}
+
+// The most-read posts in the range
+async function topPosts(from: string, to: string, limit: number) {
+    const rows = await prisma.$queryRaw<
+        { title: string; short_id: string; slug: string; community: string; views: bigint; readers: bigint; shares: bigint }[]
+    >`
+        SELECT p."title", p."short_id", p."slug", c."name" AS community,
+               sum(s."views") AS views, sum(s."readers") AS readers, sum(s."shares") AS shares
+        FROM "PostDailyStat" s JOIN "Post" p ON p."id" = s."post_id" JOIN "Community" c ON c."id" = p."community_id"
+        WHERE s."date" BETWEEN ${from}::date AND ${to}::date AND p."status" IN ('active', 'locked') AND NOT p."shadow_hidden"
+        GROUP BY p."id", c."name"
+        ORDER BY views DESC
+        LIMIT ${limit}`;
+    return rows.map((row) => ({ ...row, views: Number(row.views), readers: Number(row.readers), shares: Number(row.shares) }));
+}
+
 router.get('/', async (request, response) => {
     const range = rangeOf(parse(rangeQuery, request.query));
     // This process's buffered visits count towards today's live numbers
     await flushMetrics();
-    const [today, days, communities] = await Promise.all([
+    const [today, days, communities, sources, posts] = await Promise.all([
         dayTotals(lagosDay()),
         series(range.from, range.to),
         topCommunities(range.from, range.to, 20),
+        trafficSources(range.from, range.to),
+        topPosts(range.from, range.to, 10),
     ]);
-    response.json({ range, today: { date: lagosDay(), ...today }, days, top_communities: communities });
+    response.json({ range, today: { date: lagosDay(), ...today }, days, top_communities: communities, sources, top_posts: posts });
 });
 
 // Spreadsheet-ready CSV: one row per day, or one per community for the range
-const exportQuery = rangeQuery.extend({ kind: z.enum(['daily', 'communities']).default('daily') });
+const exportQuery = rangeQuery.extend({ kind: z.enum(['daily', 'communities', 'posts', 'sources']).default('daily') });
 
 const csvCell = (value: unknown) => {
     const text = value === null || value === undefined ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
@@ -111,7 +138,11 @@ router.get('/export', async (request, response) => {
     const rows =
         query.kind === 'daily'
             ? (await series(range.from, range.to)).map(({ countries, ...row }) => ({ ...row, countries: countries ?? '' }))
-            : await topCommunities(range.from, range.to, 1000);
+            : query.kind === 'communities'
+              ? await topCommunities(range.from, range.to, 1000)
+              : query.kind === 'posts'
+                ? await topPosts(range.from, range.to, 1000)
+                : await trafficSources(range.from, range.to);
     response.setHeader('Content-Type', 'text/csv; charset=utf-8');
     response.setHeader('Content-Disposition', `attachment; filename="${SITE_ACCOUNT_NAME.toLowerCase()}-${query.kind}-${range.from}-to-${range.to}.csv"`);
     response.setHeader('Cache-Control', 'private, no-store');
