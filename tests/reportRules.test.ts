@@ -110,3 +110,17 @@ describe('community-rule and site-rule reports', () => {
         expect(sent()).toBe(before + 1);
     });
 });
+
+describe('admin users list', () => {
+    it('lists shadow-banned accounts latest first, with a total and paging', async () => {
+        const { agent: admin } = await signInStaff('root', 'owner');
+        for (const name of ['first', 'second']) {
+            await signUp(name);
+            await admin.post(`/v1/admin/users/${name}/shadow-ban`).send({ shadow_banned: true }).expect(200);
+        }
+        const list = await admin.get('/v1/admin/users?filter=shadow_banned');
+        expect(list.body.users.map((user: { username: string }) => user.username)).toEqual(['second', 'first']);
+        expect(list.body).toMatchObject({ total: 2, next_offset: null });
+        expect((await admin.get('/v1/admin/users?filter=shadow_banned&offset=1')).body.users).toHaveLength(1);
+    });
+});
