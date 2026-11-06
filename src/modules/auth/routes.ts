@@ -270,11 +270,13 @@ router.post('/google/link', requireAuth, async (request: AuthRequest, response) 
     response.json({ user: toPrivateUser(updated) });
 });
 
-// A free, random username such as "quiet_river_42". It is never based on the email, because many emails carry
+// A free, random username such as "golden_jollof_42". It is never based on the email, because many emails carry
 // the person's real name and the site is built around staying anonymous.
 const HANDLE_WORDS = {
     first: ['amber', 'bold', 'brave', 'bright', 'calm', 'clever', 'cosmic', 'crisp', 'eager', 'gentle', 'golden', 'happy', 'jolly', 'keen', 'lively', 'lucky', 'mellow', 'misty', 'nimble', 'proud', 'quick', 'quiet', 'rapid', 'sharp', 'silver', 'sunny', 'swift', 'tidy', 'vivid', 'witty'],
-    second: ['badger', 'cedar', 'comet', 'coral', 'crane', 'delta', 'ember', 'falcon', 'fern', 'harbor', 'heron', 'island', 'lagoon', 'maple', 'meadow', 'mango', 'orbit', 'otter', 'panda', 'pebble', 'pepper', 'quartz', 'river', 'robin', 'savanna', 'spark', 'summit', 'tiger', 'willow', 'zebra'],
+    // Nigerian food, places, transport, music and nature, so the suggestions feel at home. No personal names or
+    // ethnic words, so a suggestion never looks like a real person.
+    second: ['jollof', 'suya', 'zobo', 'chinchin', 'akara', 'moimoi', 'puffpuff', 'kunu', 'egusi', 'ofada', 'dodo', 'agege', 'ankara', 'adire', 'gele', 'agbada', 'danfo', 'keke', 'okada', 'iroko', 'baobab', 'udara', 'agbalumo', 'harmattan', 'highlife', 'afrobeat', 'zuma', 'olumo', 'obudu', 'yankari'],
 };
 
 function randomHandle() {
