@@ -6,6 +6,7 @@ import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
 import { badRequest, conflict, notFound, parse, uuidParam } from '../../lib/http';
 import { SITE_ACCOUNT_USERNAME } from '../../shared/site';
 import { LIMITS, pageQuery, username as usernameField } from '../../shared/validation';
+import { createSeedPost, seedAccounts, seedPostSchema } from './seedPosts';
 import { findCommunity } from '../communities/access';
 import { handOverOwnership, setOwner } from '../communities/ownership';
 import { revokeAllSessions } from '../auth/service';
@@ -331,6 +332,17 @@ router.patch('/communities/:name/ads', requireStaff(...ADS), async (request, res
     clearAdCache();
     await log(request, 'set_community_ads', { type: 'community', id: community.id }, { communityId: community.id, details: { ads_enabled } });
     response.json({ success: true, ads_enabled });
+});
+
+// --- Posting as a seed account ---
+// Seed accounts have no password, so owners and admins open threads for them here (seedPosts.ts has the rules)
+
+router.get('/seed-accounts', requireStaff('owner', 'admin'), async (_request, response) => {
+    response.json({ accounts: await seedAccounts() });
+});
+
+router.post('/seed-posts', requireStaff('owner', 'admin'), async (request, response) => {
+    response.status(201).json({ post: await createSeedPost(request, parse(seedPostSchema, request.body)) });
 });
 
 // --- Ads ---

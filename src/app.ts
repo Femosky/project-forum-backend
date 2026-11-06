@@ -24,6 +24,7 @@ import notificationRoutes from './modules/notifications/routes';
 import emailRoutes from './modules/notifications/unsubscribe';
 import seoRoutes from './modules/seo/routes';
 import adminRoutes from './modules/admin/routes';
+import { seedPostKeyRoutes } from './modules/admin/seedPosts';
 import { auditRoutes, staffAuthRoutes, staffRoutes } from './modules/staff/routes';
 import adsRoutes from './modules/ads/routes';
 import metricsRoutes from './modules/metrics/routes';
@@ -122,6 +123,7 @@ v1.use('/email', emailRoutes);
 v1.use('/seo', seoRoutes);
 // The admin panel: staff sign-in first (it limits failed attempts itself: staff/routes.ts), then everything else needs a
 // staff session
+v1.use('/seed-posts', seedPostKeyRoutes);
 v1.use('/admin/auth', staffAuthRoutes);
 v1.use('/admin/staff', staffRoutes);
 v1.use('/admin/audit', auditRoutes);
