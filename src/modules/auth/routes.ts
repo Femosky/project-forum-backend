@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { Request, Response, Router } from 'express';
 import prisma from '../../prismaConnection';
 import { HttpError, badRequest, conflict, notFound, parse, unauthorized, uuidParam } from '../../lib/http';
@@ -237,7 +238,7 @@ router.post('/google', async (request, response) => {
         if (!input.username || !input.is_adult) {
             throw new HttpError(400, 'google_signup_details', 'Pick a username and confirm you are 18 or older to finish joining.', undefined, {
                 email: identity.email,
-                suggested_username: await suggestUsername(identity.email),
+                suggested_username: await suggestUsername(),
             });
         }
         await assertAvailable(identity.email, input.username);
@@ -269,17 +270,21 @@ router.post('/google/link', requireAuth, async (request: AuthRequest, response) 
     response.json({ user: toPrivateUser(updated) });
 });
 
-// A free username based on the email's local part, e.g. "ada.obi@..." becomes "ada_obi" or "ada_obi_4821"
-async function suggestUsername(email: string) {
-    let base = email
-        .split('@')[0]
-        .toLowerCase()
-        .replace(/[^a-z0-9_]+/g, '_')
-        .replace(/^[^a-z]+/, '')
-        .slice(0, 14);
-    if (base.length < 3) base = `user${base}`;
+// A free, random username such as "quiet_river_42". It is never based on the email, because many emails carry
+// the person's real name and the site is built around staying anonymous.
+const HANDLE_WORDS = {
+    first: ['amber', 'bold', 'brave', 'bright', 'calm', 'clever', 'cosmic', 'crisp', 'eager', 'gentle', 'golden', 'happy', 'jolly', 'keen', 'lively', 'lucky', 'mellow', 'misty', 'nimble', 'proud', 'quick', 'quiet', 'rapid', 'sharp', 'silver', 'sunny', 'swift', 'tidy', 'vivid', 'witty'],
+    second: ['badger', 'cedar', 'comet', 'coral', 'crane', 'delta', 'ember', 'falcon', 'fern', 'harbor', 'heron', 'island', 'lagoon', 'maple', 'meadow', 'mango', 'orbit', 'otter', 'panda', 'pebble', 'pepper', 'quartz', 'river', 'robin', 'savanna', 'spark', 'summit', 'tiger', 'willow', 'zebra'],
+};
+
+function randomHandle() {
+    const pick = (list: string[]) => list[randomInt(list.length)];
+    return `${pick(HANDLE_WORDS.first)}_${pick(HANDLE_WORDS.second)}_${randomInt(10, 100)}`;
+}
+
+async function suggestUsername() {
     for (let attempt = 0; attempt < 10; attempt++) {
-        const candidate = attempt === 0 ? base : `${base}_${Math.floor(1000 + Math.random() * 9000)}`;
+        const candidate = randomHandle();
         if (!(await prisma.user.findUnique({ where: { username: candidate } }))) return candidate;
     }
     return `user_${Date.now().toString(36)}`;

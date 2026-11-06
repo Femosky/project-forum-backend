@@ -16,7 +16,12 @@ describe('continue with Google', () => {
         const first = await api().post('/v1/auth/google').send({ id_token: token });
         expect(first.status).toBe(400);
         expect(first.body.error.code).toBe('google_signup_details');
-        expect(first.body.error.details).toMatchObject({ email: 'ngozi.eze@example.test', suggested_username: 'ngozi_eze' });
+        expect(first.body.error.details).toMatchObject({ email: 'ngozi.eze@example.test' });
+        // The suggestion is a random handle, never built from the email (which often holds a real name)
+        const suggested: string = first.body.error.details.suggested_username;
+        expect(suggested).toMatch(/^[a-z]+_[a-z]+_\d{2}$/);
+        expect(suggested.length).toBeLessThanOrEqual(20);
+        expect(suggested).not.toContain('ngozi');
 
         const joined = await api().post('/v1/auth/google').send({ id_token: token, username: 'ngozi', is_adult: true });
         expect(joined.status).toBe(201);
