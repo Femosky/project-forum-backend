@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import prisma from '../src/prismaConnection';
+import request from 'supertest';
+import app from '../src/app';
+import { env } from '../src/config/env';
 import { createCommunity, signInStaff, signUp } from './helpers';
 
 describe('posting as a seed account', () => {
@@ -27,5 +30,36 @@ describe('posting as a seed account', () => {
         expect(stored).toMatchObject({ title: post.title, body: post.body, status: 'active', author: { username: 'seed_ada' } });
         expect((await prisma.community.findUniqueOrThrow({ where: { name: 'lounge' } })).post_count).toBe(1);
         expect(await prisma.staffAudit.count({ where: { action: 'seed_post' } })).toBe(1);
+    });
+
+    it('lets the daily routine post with SEED_POST_KEY, off while unset and capped per day', async () => {
+        const alice = await signUp('alice');
+        await createCommunity(alice.agent, 'lounge');
+        await prisma.user.create({ data: { username: 'seed_ada', email: 'seed_ada@seed.invalid', is_seed: true } });
+        const post = { as: 'seed_ada', community: 'lounge', title: 'What is the best way to save in naira?', body: 'Asking for a friend.' };
+        const key = 'k'.repeat(40);
+
+        const saved = env.SEED_POST_KEY;
+        try {
+            env.SEED_POST_KEY = undefined;
+            expect((await request(app).post('/v1/seed-posts').set('Authorization', `Bearer ${key}`).send(post)).status).toBe(404);
+
+            env.SEED_POST_KEY = key;
+            expect((await request(app).post('/v1/seed-posts').send(post)).status).toBe(401);
+            expect((await request(app).post('/v1/seed-posts').set('Authorization', 'Bearer wrong').send(post)).status).toBe(401);
+            const accounts = await request(app).get('/v1/seed-posts/accounts').set('Authorization', `Bearer ${key}`);
+            expect(accounts.body.accounts.map((a: { username: string }) => a.username)).toEqual(['seed_ada']);
+
+            const created = await request(app).post('/v1/seed-posts').set('Authorization', `Bearer ${key}`).send(post);
+            expect(created.status).toBe(201);
+            expect(await prisma.staffAudit.count({ where: { action: 'seed_post', staff_id: null } })).toBe(1);
+
+            // Ten a day at most
+            await prisma.staffAudit.createMany({ data: Array.from({ length: 9 }, () => ({ action: 'seed_post' })) });
+            const capped = await request(app).post('/v1/seed-posts').set('Authorization', `Bearer ${key}`).send({ ...post, title: 'Another one today' });
+            expect(capped.status).toBe(429);
+        } finally {
+            env.SEED_POST_KEY = saved;
+        }
     });
 });

@@ -57,6 +57,7 @@ Optional; each feature turns itself off without its key, and the boot log warns 
 | `POSTHOG_HOST` | Defaults to `https://eu.i.posthog.com` | |
 | `SENTRY_DSN` | Error alerts: unexpected errors (500s, crashes) with the route and request id, never bodies or cookies. Repeats within a minute are sent once. | sentry.io → project (Node.js) → Settings → Client Keys (DSN) |
 | `INDEXNOW_KEY` | Pings Bing when a post is created. Leave unset while the site is private. | any 8-128 letters/digits, same value in the web app |
+| `SEED_POST_KEY` | Lets the daily trending routine open threads as seed accounts (`POST /v1/seed-posts`, bearer token, 10 a day). Unset turns it off. | 32-256 letters/digits, e.g. `openssl rand -hex 32` |
 | `JOBS_ENABLED` | `true` (render.yaml) runs pg-boss with its schedules while the site is in use. `false` runs emails and link previews inline, with trending and daily stats recomputed by whoever reads them stale (see Jobs below) | |
 | `JOBS_IDLE_SUSPEND_MINUTES` | Default 5: with no requests for this long (health checks don't count) the job queue stops, so the API sends Neon nothing and it can suspend; the next request starts it again and catches up. 0 = always on, once traffic is steady | |
 | `DATABASE_POOL_SIZE` | Default 5 connections for the app (the job queue adds up to 3) | |

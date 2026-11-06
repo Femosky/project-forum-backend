@@ -5,9 +5,8 @@ import prisma from '../../prismaConnection';
 import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
 import { badRequest, conflict, notFound, parse, uuidParam } from '../../lib/http';
 import { SITE_ACCOUNT_USERNAME } from '../../shared/site';
-import { LIMITS, communityRef, pageQuery, postBody, title, username as usernameField } from '../../shared/validation';
-import { createPost } from '../posts/service';
-import { indexNowJob, postPath } from '../seo/jobs';
+import { LIMITS, pageQuery, username as usernameField } from '../../shared/validation';
+import { createSeedPost, seedAccounts, seedPostSchema } from './seedPosts';
 import { findCommunity } from '../communities/access';
 import { handOverOwnership, setOwner } from '../communities/ownership';
 import { revokeAllSessions } from '../auth/service';
@@ -336,42 +335,14 @@ router.patch('/communities/:name/ads', requireStaff(...ADS), async (request, res
 });
 
 // --- Posting as a seed account ---
-// Seed accounts (is_seed: the launch personas and the site account) have no password, so owners and admins open
-// threads for them here. Text posts only, never replies or votes: replies to real people come from real accounts.
+// Seed accounts have no password, so owners and admins open threads for them here (seedPosts.ts has the rules)
 
 router.get('/seed-accounts', requireStaff('owner', 'admin'), async (_request, response) => {
-    const accounts = await prisma.user.findMany({
-        where: { is_seed: true, status: 'active' },
-        select: { username: true, display_name: true },
-        orderBy: { username: 'asc' },
-    });
-    response.json({ accounts });
+    response.json({ accounts: await seedAccounts() });
 });
 
-const seedPostSchema = z.object({ as: usernameField, community: communityRef, title, body: postBody.default('') });
-
 router.post('/seed-posts', requireStaff('owner', 'admin'), async (request, response) => {
-    const input = parse(seedPostSchema, request.body);
-    const author = await prisma.user.findUnique({ where: { username: input.as.toLowerCase() }, select: { id: true, is_seed: true, status: true } });
-    if (!author?.is_seed || author.status !== 'active') throw badRequest('Pick one of the seed accounts.', 'not_seed_account');
-    const community = await findCommunity(input.community);
-    if (community.status !== 'active') throw badRequest('That community is not active.', 'community_inactive');
-
-    const post = await createPost({
-        communityId: community.id,
-        authorId: author.id,
-        type: 'text',
-        title: input.title,
-        body: input.body,
-        is_anonymous: false,
-        is_nsfw: community.is_nsfw,
-        held_reason: null,
-        shadow_hidden: false,
-    });
-    const path = postPath(post);
-    if (community.visibility === 'public') await indexNowJob.enqueue({ paths: [path] });
-    await audit(request, 'seed_post', { type: 'community', id: community.id }, { as: input.as.toLowerCase(), post_id: post.id });
-    response.status(201).json({ post: { id: post.id, short_id: post.short_id, path } });
+    response.status(201).json({ post: await createSeedPost(request, parse(seedPostSchema, request.body)) });
 });
 
 // --- Ads ---

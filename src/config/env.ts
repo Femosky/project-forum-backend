@@ -59,6 +59,13 @@ const envSchema = z.object({
         .regex(/^[a-zA-Z0-9-]{8,128}$/, 'INDEXNOW_KEY must be 8-128 letters, digits or dashes')
         .optional(),
 
+    // Lets the daily trending routine open threads as seed accounts (POST /v1/seed-posts with this as a bearer token,
+    // admin/seedPosts.ts). Unset turns that route off.
+    SEED_POST_KEY: z
+        .string()
+        .regex(/^[a-zA-Z0-9_-]{32,256}$/, 'SEED_POST_KEY must be 32-256 letters, digits, dashes or underscores')
+        .optional(),
+
     // Ads (Phase 6). ADS_ENABLED is the master switch for every ad slot. Direct and house campaigns come from the
     // admin panel; AdSense fills slots nothing else does once ADSENSE_ENABLED is on and the ids below are set.
     ADS_ENABLED: booleanFlag(true),
