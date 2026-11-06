@@ -3,6 +3,7 @@ import prisma from '../prismaConnection';
 import { canModerate, showsMature, ViewerContext } from '../modules/communities/access';
 import { isIndexable } from './indexing';
 import { anonymousAvatarCode, avatarCode } from './avatars';
+import { publicLive } from '../modules/posts/live';
 
 // The only way posts and comments leave the API. Anonymous authors are hidden from everyone except the author
 // and moderators of that community; deleted and removed comments become placeholders.
@@ -112,6 +113,8 @@ export function toPublicPost(post: PostRow, context: ViewerContext, votes?: Vote
         created_at: post.created_at,
         edited_at: post.edited_at,
         pinned_at: post.pinned_at,
+        // Live thread state: null for posts that were never live
+        live: publicLive(post),
         upvote_count: isDeleted ? 0 : post.upvote_count,
         downvote_count: isDeleted ? 0 : post.downvote_count,
         score: isDeleted ? 0 : post.score,

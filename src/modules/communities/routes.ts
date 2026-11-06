@@ -1,5 +1,6 @@
 import { avatarCode } from '../../lib/avatars';
 import { Router } from 'express';
+import { liveWhere } from '../posts/live';
 import { alertModerators } from '../moderation/alerts';
 import { Community, CommunityMember, Prisma } from '@prisma/client';
 import prisma from '../../prismaConnection';
@@ -204,26 +205,31 @@ router.get('/:name/posts', optionalAuth, async (request: AuthRequest, response) 
     await assertCanView(community, request.viewer?.user);
     const context = await viewerContext(request.viewer);
 
-    // Pinned posts lead the first page of the default sort
+    // Live threads, then pinned posts, lead the first page of the default sort
     const showPinned = query.sort === 'hot' && !query.cursor;
+    const leading = { community_id: community.id, status: { in: LISTED_POST_STATUSES }, ...notShadowHidden(context) };
+    const liveRows = showPinned
+        ? await prisma.post.findMany({ where: { AND: [leading, liveWhere()] }, orderBy: { live_started_at: 'desc' }, take: 2, include: postInclude })
+        : [];
     const pinnedRows = showPinned
         ? await prisma.post.findMany({
-              where: { community_id: community.id, status: { in: LISTED_POST_STATUSES }, pinned_at: { not: null }, ...notShadowHidden(context) },
+              where: { ...leading, pinned_at: { not: null }, NOT: { id: { in: liveRows.map((post) => post.id) } } },
               orderBy: { pinned_at: 'desc' },
               take: 2,
               include: postInclude,
           })
         : [];
+    const leadRows = [...liveRows, ...pinnedRows];
 
     const page = await listPosts({
-        where: { community_id: community.id, ...(showPinned ? { NOT: { id: { in: pinnedRows.map((post) => post.id) } } } : {}) },
+        where: { community_id: community.id, ...(showPinned ? { NOT: { id: { in: leadRows.map((post) => post.id) } } } : {}) },
         sort: query.sort,
         window: query.t,
         cursor: query.cursor,
         limit: query.limit,
         context,
     });
-    response.json({ posts: [...(await serializePosts(pinnedRows, context)), ...page.posts], next_cursor: page.next_cursor });
+    response.json({ posts: [...(await serializePosts(leadRows, context)), ...page.posts], next_cursor: page.next_cursor });
 });
 
 // Join. Private communities get a join request for the moderators instead.

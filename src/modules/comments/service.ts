@@ -187,6 +187,18 @@ export async function listPostComments({ postId, communityId, sort, cursor, limi
     };
 }
 
+// Top-level comments added after `afterId` (comment ids are UUIDv7, so they sort by time), newest first, each with
+// its first replies. Live threads poll this to show new updates without a reload.
+export async function listNewComments(postId: string, communityId: string, afterId: string, context: ViewerContext, limit = 50) {
+    const rows = await prisma.comment.findMany({
+        where: { post_id: postId, depth: 0, id: { gt: afterId }, status: { in: THREAD_COMMENT_STATUSES }, ...notShadowHidden(context) },
+        orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+        take: limit,
+        include: commentInclude,
+    });
+    return buildTree(rows, 1, 3, 'new', communityId, context);
+}
+
 // Direct replies to one comment (keyset paginated), each with its own replies. Also serves "continue thread".
 export async function listReplies(
     parentId: string,
