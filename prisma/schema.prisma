@@ -473,6 +473,10 @@ model Post {
   status          ContentStatus @default(active)
   edited_at       DateTime?
   pinned_at       DateTime?
+  // Live thread (match days, events): live from live_started_at until live_ended_at, or until LIVE_MAX_HOURS pass
+  // (modules/posts/live.ts) so a forgotten thread doesn't stay "Live" for ever
+  live_started_at DateTime?
+  live_ended_at   DateTime?
   // Why the automatic filters held this post for review (status pending); shown to moderators only
   held_reason     String?
   // Held for the site's admins only (sexual content, or worse): community moderators can't approve it
@@ -509,6 +513,8 @@ model Post {
   @@index([search_vector], type: Gin)
   // The mod queue's held posts
   @@index([community_id, status])
+  // The home page's "Live now" strip and live posts leading their community
+  @@index([live_started_at(sort: Desc)])
 
   daily_stats   PostDailyStat[]
   daily_sources PostDailySource[]

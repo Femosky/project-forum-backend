@@ -5,7 +5,9 @@ import { parse } from '../../lib/http';
 import { AuthRequest, optionalAuth } from '../../middlewares/auth';
 import { pageQuery, postSort, topWindow } from '../../shared/validation';
 import { notMaturePost, viewerContext } from '../communities/access';
-import { listPosts } from '../posts/service';
+import { listPosts, serializePosts } from '../posts/service';
+import { LISTED_POST_STATUSES, notShadowHidden, postInclude } from '../../lib/serializers';
+import { liveWhere } from '../posts/live';
 
 const router = Router();
 
@@ -46,6 +48,25 @@ router.get('/', optionalAuth, async (request: AuthRequest, response) => {
         context,
     });
     response.json({ ...page, scope });
+});
+
+// Live threads in public communities, newest first, for the home page's "Live now" strip. Same mature rule as the feed.
+router.get('/live', optionalAuth, async (request: AuthRequest, response) => {
+    const context = await viewerContext(request.viewer);
+    const rows = await prisma.post.findMany({
+        where: {
+            AND: [
+                liveWhere(),
+                { status: { in: LISTED_POST_STATUSES }, community: { visibility: 'public', status: 'active' } },
+                notShadowHidden(context),
+                notMaturePost(context),
+            ],
+        },
+        orderBy: { live_started_at: 'desc' },
+        take: 6,
+        include: postInclude,
+    });
+    response.json({ posts: await serializePosts(rows, context) });
 });
 
 export default router;

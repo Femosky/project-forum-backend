@@ -14,7 +14,8 @@ import { checkImage } from '../safety/imageCheck';
 import { readStoredObject } from '../../lib/storage';
 import { alertModerators } from '../moderation/alerts';
 import { assertAnonymousAllowed, assertLinksAllowed, assertPicturesAllowed, assertWithinYoungAccountLimits } from '../safety/policy';
-import { assertCommentable, createComment, listPostComments } from '../comments/service';
+import { assertCommentable, createComment, listNewComments, listPostComments } from '../comments/service';
+import { canSetLive, publicLive } from './live';
 import { notifyForComment } from '../notifications/service';
 import { postViewerState, votePost } from '../votes/service';
 import { commentsQuery, createCommentSchema, createPostSchema, updatePostSchema, voteSchema } from './schema';
@@ -121,7 +122,60 @@ router.get('/:id', optionalAuth, async (request: AuthRequest, response) => {
     const context = await viewerContext(request.viewer);
     const post = await findVisiblePost(String(request.params.id), request.viewer?.user, context);
     const { votes, saved } = await postViewerState(context?.userId, [post.id]);
-    response.json({ post: toPublicPost(post, context, votes, saved, await moderatorsAmong([post])) });
+    const serialized = toPublicPost(post, context, votes, saved, await moderatorsAmong([post]));
+    const user = request.viewer?.user;
+    // Whether the viewer gets the "Start live thread" / "End live thread" option
+    if (serialized.viewer && user) Object.assign(serialized.viewer, { can_set_live: canSetLive(post, user, context) });
+    response.json({ post: serialized });
+});
+
+// Starts or ends a live thread. Starting again after an end picks the same thread up again.
+const liveSchema = z.object({ live: z.boolean() });
+
+router.put('/:id/live', requireAuth, async (request: AuthRequest, response) => {
+    const { user } = viewerOf(request);
+    const { live } = parse(liveSchema, request.body);
+    const context = await viewerContext(request.viewer);
+    const post = await findVisiblePost(String(request.params.id), user, context);
+    if (!canSetLive(post, user, context)) {
+        throw forbidden("Live threads can be started by the community's moderators and trusted accounts.", 'not_allowed');
+    }
+    if (live && post.status !== 'active') throw badRequest('Only open, visible posts can go live.', 'post_unavailable');
+
+    const updated = await prisma.post.update({
+        where: { id: post.id },
+        data: live ? { live_started_at: new Date(), live_ended_at: null } : { live_ended_at: post.live_started_at ? new Date() : null },
+        include: postInclude,
+    });
+    response.json({ post: toPublicPost(updated, context) });
+});
+
+// What changed in a live thread since the reader's last look: top-level comments after `after` (the newest
+// comment id the page has; leave it out on an empty thread), the comment count and whether it is still live.
+// Signed-out readers share a 5-second copy per post and position, so a busy match day costs a few queries a second.
+const liveUpdatesQuery = z.object({ after: z.uuid().optional() });
+const guestUpdates = new Map<string, { at: number; body: unknown }>();
+const GUEST_UPDATES_MS = 5_000;
+
+router.get('/:id/live-updates', optionalAuth, async (request: AuthRequest, response) => {
+    const { after } = parse(liveUpdatesQuery, request.query);
+    const key = `${String(request.params.id)}:${after ?? ''}`;
+    const cached = request.viewer ? undefined : guestUpdates.get(key);
+    if (cached && Date.now() - cached.at < GUEST_UPDATES_MS) return response.json(cached.body);
+
+    const context = await viewerContext(request.viewer);
+    const post = await findVisiblePost(String(request.params.id), request.viewer?.user, context);
+    const body = {
+        comments: await listNewComments(post.id, post.community_id, after ?? '00000000-0000-0000-0000-000000000000', context),
+        comment_count: post.comment_count,
+        live: publicLive(post),
+        status: post.status,
+    };
+    if (!request.viewer) {
+        if (guestUpdates.size > 2_000) guestUpdates.clear();
+        guestUpdates.set(key, { at: Date.now(), body });
+    }
+    response.json(body);
 });
 
 // A person opened this post's page. Counts one view for the post and one for each comment that was on screen (sent
