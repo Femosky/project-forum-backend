@@ -86,4 +86,27 @@ describe('live threads', () => {
         expect((await reader.agent.get(`/v1/posts/${post.id}/live-updates`)).body.comments).toHaveLength(3);
         expect((await reader.agent.get(`/v1/posts/${post.id}/live-updates?after=nope`)).status).toBe(400);
     });
+
+    it('lets an account run two live threads at a time, unless it is a site admin', async () => {
+        const owner = await signUp('owner');
+        const admin = await signUp('siteadmin', { admin: true });
+        await createCommunity(owner.agent, 'matchday');
+        const posts = [];
+        for (let i = 0; i < 3; i++) posts.push(await createPost(owner.agent, 'matchday'));
+        expect((await owner.agent.put(`/v1/posts/${posts[0].id}/live`).send({ live: true })).status).toBe(200);
+        expect((await owner.agent.put(`/v1/posts/${posts[1].id}/live`).send({ live: true })).status).toBe(200);
+        const third = await owner.agent.put(`/v1/posts/${posts[2].id}/live`).send({ live: true });
+        expect(third.status).toBe(400);
+        expect(third.body.error.code).toBe('live_limit');
+        // Pressing it again on one that's already live is fine
+        expect((await owner.agent.put(`/v1/posts/${posts[1].id}/live`).send({ live: true })).status).toBe(200);
+        // Ending one frees a place
+        await owner.agent.put(`/v1/posts/${posts[0].id}/live`).send({ live: false });
+        expect((await owner.agent.put(`/v1/posts/${posts[2].id}/live`).send({ live: true })).status).toBe(200);
+
+        for (let i = 0; i < 3; i++) {
+            const post = await createPost(admin.agent, 'matchday');
+            expect((await admin.agent.put(`/v1/posts/${post.id}/live`).send({ live: true })).status).toBe(200);
+        }
+    });
 });

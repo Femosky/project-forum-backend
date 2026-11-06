@@ -30,6 +30,10 @@ export function publicLive(post: LiveFields) {
     return { is_live: live, started_at: post.live_started_at, ended_at: live ? null : liveEndsAt(post) };
 }
 
+// How many live threads one account may run at once (site admins aren't limited), so one account can't fill the
+// home page's "Live now" box
+export const LIVE_PER_ACCOUNT = 2;
+
 // Posts that are live right now (status is filtered by the caller's list query)
 export function liveWhere(now = new Date()): Prisma.PostWhereInput {
     return { live_started_at: { gt: new Date(now.getTime() - LIVE_MAX_MS) }, live_ended_at: null, status: 'active' };
