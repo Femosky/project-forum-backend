@@ -50,10 +50,15 @@ router.get('/', optionalAuth, async (request: AuthRequest, response) => {
     response.json({ ...page, scope });
 });
 
-// Live threads in public communities, newest first, for the home page's "Live now" strip. Same mature rule as the feed.
+// Live threads in public communities for the home page's "Live now" box, busiest first: replies in the last 30
+// minutes, then the post's hot rank (votes, replies, age), then the newest start. Same mature rule as the feed.
+const LIVE_LIMIT = 6;
+const LIVE_CANDIDATES = 300;
+const LIVE_ACTIVITY_MINUTES = 30;
+
 router.get('/live', optionalAuth, async (request: AuthRequest, response) => {
     const context = await viewerContext(request.viewer);
-    const rows = await prisma.post.findMany({
+    const candidates = await prisma.post.findMany({
         where: {
             AND: [
                 liveWhere(),
@@ -63,9 +68,30 @@ router.get('/live', optionalAuth, async (request: AuthRequest, response) => {
             ],
         },
         orderBy: { live_started_at: 'desc' },
-        take: 6,
-        include: postInclude,
+        take: LIVE_CANDIDATES,
+        select: { id: true, hot_rank: true, live_started_at: true },
     });
+    if (candidates.length === 0) return response.json({ posts: [] });
+
+    const since = new Date(Date.now() - LIVE_ACTIVITY_MINUTES * 60_000);
+    const recent = await prisma.comment.groupBy({
+        by: ['post_id'],
+        where: { post_id: { in: candidates.map((post) => post.id) }, created_at: { gt: since }, status: 'active', shadow_hidden: false },
+        _count: { _all: true },
+    });
+    const activity = new Map(recent.map((row) => [row.post_id, row._count._all]));
+    const chosen = candidates
+        .sort(
+            (a, b) =>
+                (activity.get(b.id) ?? 0) - (activity.get(a.id) ?? 0) ||
+                b.hot_rank - a.hot_rank ||
+                b.live_started_at!.getTime() - a.live_started_at!.getTime()
+        )
+        .slice(0, LIVE_LIMIT)
+        .map((post) => post.id);
+
+    const rows = await prisma.post.findMany({ where: { id: { in: chosen } }, include: postInclude });
+    rows.sort((a, b) => chosen.indexOf(a.id) - chosen.indexOf(b.id));
     response.json({ posts: await serializePosts(rows, context) });
 });
 

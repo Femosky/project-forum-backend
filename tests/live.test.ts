@@ -109,4 +109,21 @@ describe('live threads', () => {
             expect((await admin.agent.put(`/v1/posts/${post.id}/live`).send({ live: true })).status).toBe(200);
         }
     });
+
+    it('puts the busiest live threads first in the home page box', async () => {
+        const owner = await signUp('owner', { admin: true });
+        await createCommunity(owner.agent, 'matchday');
+        const quiet = await createPost(owner.agent, 'matchday', { title: 'Quiet' });
+        const busy = await createPost(owner.agent, 'matchday', { title: 'Busy' });
+        const newest = await createPost(owner.agent, 'matchday', { title: 'Newest' });
+        for (const post of [quiet, busy, newest]) await owner.agent.put(`/v1/posts/${post.id}/live`).send({ live: true });
+        for (let i = 0; i < 3; i++) await createComment(owner.agent, busy.id, { body: `update ${i}` });
+        await createComment(owner.agent, quiet.id, { body: 'one' });
+        // An old reply doesn't count as activity
+        const old = await createComment(owner.agent, newest.id, { body: 'old' });
+        await prisma.comment.update({ where: { id: old.id }, data: { created_at: new Date(Date.now() - 3600_000) } });
+
+        const strip = await api().get('/v1/feed/live');
+        expect(strip.body.posts.map((p: { title: string }) => p.title).slice(0, 2)).toEqual(['Busy', 'Quiet']);
+    });
 });
