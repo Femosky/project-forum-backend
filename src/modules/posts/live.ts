@@ -1,4 +1,7 @@
 import { Prisma, User } from '@prisma/client';
+import prisma from '../../prismaConnection';
+import { badRequest } from '../../lib/http';
+import { postInclude } from '../../lib/serializers';
 import { canModerate, ViewerContext } from '../communities/access';
 
 // Live threads (match days, events). A post is live from live_started_at until live_ended_at, and never longer
@@ -45,4 +48,23 @@ export function liveWhere(now = new Date()): Prisma.PostWhereInput {
 export function canSetLive(post: { author_id: string; community_id: string }, user: Pick<User, 'id' | 'is_trusted' | 'is_seed' | 'role'>, context: ViewerContext) {
     if (canModerate(context, post.community_id)) return true;
     return post.author_id === user.id && (user.is_trusted || user.is_seed || user.role === 'admin');
+}
+
+// Starts or ends a live thread once the caller has checked who may. Starting again after an end picks the same thread
+// up again. The running-threads cap counts against the post's author, whoever presses the switch; site admins' own
+// threads aren't limited.
+export async function switchLive(post: LiveFields & { id: string; author_id: string }, live: boolean) {
+    if (live && post.status !== 'active') throw badRequest('Only open, visible posts can go live.', 'post_unavailable');
+    if (live && !isLive(post)) {
+        const author = await prisma.user.findUniqueOrThrow({ where: { id: post.author_id }, select: { role: true } });
+        const running = author.role === 'admin' ? 0 : await prisma.post.count({ where: { AND: [liveWhere(), { author_id: post.author_id }] } });
+        if (running >= LIVE_PER_ACCOUNT) {
+            throw badRequest(`An account can run ${LIVE_PER_ACCOUNT} live threads at a time. End one of them first.`, 'live_limit');
+        }
+    }
+    return prisma.post.update({
+        where: { id: post.id },
+        data: live ? { live_started_at: new Date(), live_ended_at: null } : { live_ended_at: post.live_started_at ? new Date() : null },
+        include: postInclude,
+    });
 }

@@ -15,7 +15,7 @@ import { readStoredObject } from '../../lib/storage';
 import { alertModerators } from '../moderation/alerts';
 import { assertAnonymousAllowed, assertLinksAllowed, assertPicturesAllowed, assertWithinYoungAccountLimits } from '../safety/policy';
 import { assertCommentable, createComment, listNewComments, listPostComments } from '../comments/service';
-import { canSetLive, isLive, LIVE_PER_ACCOUNT, liveWhere, publicLive } from './live';
+import { canSetLive, liveWhere, publicLive, switchLive } from './live';
 import { notifyForComment } from '../notifications/service';
 import { postViewerState, votePost } from '../votes/service';
 import { commentsQuery, createCommentSchema, createPostSchema, updatePostSchema, voteSchema } from './schema';
@@ -140,21 +140,7 @@ router.put('/:id/live', requireAuth, async (request: AuthRequest, response) => {
     if (!canSetLive(post, user, context)) {
         throw forbidden("Live threads can be started by the community's moderators and trusted accounts.", 'not_allowed');
     }
-    if (live && post.status !== 'active') throw badRequest('Only open, visible posts can go live.', 'post_unavailable');
-    // Counted against the post's author, whoever presses the switch. Site admins' own threads aren't limited.
-    if (live && !isLive(post)) {
-        const author = await prisma.user.findUniqueOrThrow({ where: { id: post.author_id }, select: { role: true } });
-        const running = author.role === 'admin' ? 0 : await prisma.post.count({ where: { AND: [liveWhere(), { author_id: post.author_id }] } });
-        if (running >= LIVE_PER_ACCOUNT) {
-            throw badRequest(`An account can run ${LIVE_PER_ACCOUNT} live threads at a time. End one of them first.`, 'live_limit');
-        }
-    }
-
-    const updated = await prisma.post.update({
-        where: { id: post.id },
-        data: live ? { live_started_at: new Date(), live_ended_at: null } : { live_ended_at: post.live_started_at ? new Date() : null },
-        include: postInclude,
-    });
+    const updated = await switchLive(post, live);
     response.json({ post: toPublicPost(updated, context) });
 });
 
