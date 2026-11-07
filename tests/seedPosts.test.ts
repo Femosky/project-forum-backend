@@ -62,4 +62,58 @@ describe('posting as a seed account', () => {
             env.SEED_POST_KEY = saved;
         }
     });
+
+    it('lets the key reply as the site account and run the live switch, only on seed threads', async () => {
+        const alice = await signUp('alice');
+        await createCommunity(alice.agent, 'lounge');
+        const site = await prisma.user.upsert({
+            where: { username: 'site_team' },
+            update: { is_seed: true },
+            create: { username: 'site_team', email: 'site-team@invalid.local', is_seed: true },
+        });
+        const key = 'k'.repeat(40);
+        const auth = { Authorization: `Bearer ${key}` };
+
+        const saved = env.SEED_POST_KEY;
+        try {
+            env.SEED_POST_KEY = key;
+            const thread = await request(app).post('/v1/seed-posts').set(auth).send({ as: 'site_team', community: 'lounge', title: 'Live: Final', body: '' });
+            const shortId = thread.body.post.short_id;
+            const human = await alice.agent.post('/v1/posts').send({ community: 'lounge', type: 'text', title: 'My own thread', body: 'hi' });
+            expect(human.status).toBe(201);
+
+            // Same key gate as posting
+            expect((await request(app).post(`/v1/seed-posts/${shortId}/comments`).send({ body: 'x' })).status).toBe(401);
+            // Never on real people's threads
+            const onHuman = await request(app).post(`/v1/seed-posts/${human.body.post.short_id}/comments`).set(auth).send({ body: 'Hello' });
+            expect(onHuman.body.error.code).toBe('not_seed_thread');
+            expect((await request(app).put(`/v1/seed-posts/${human.body.post.short_id}/live`).set(auth).send({ live: true })).status).toBe(403);
+            expect((await request(app).post('/v1/seed-posts/zzzzzzzz/comments').set(auth).send({ body: 'Hello' })).status).toBe(404);
+            // Top-level, text only: an "as" or parent_id is ignored, not honoured
+            const wentLive = await request(app).put(`/v1/seed-posts/${shortId}/live`).set(auth).send({ live: true });
+            expect(wentLive.status).toBe(200);
+            expect(wentLive.body.post.live.is_live).toBe(true);
+
+            const reply = await request(app).post(`/v1/seed-posts/${shortId}/comments`).set(auth).send({ body: "GOAL! 1-0 on 23'", as: 'alice', parent_id: thread.body.post.id });
+            expect(reply.status).toBe(201);
+            const stored = await prisma.comment.findUniqueOrThrow({ where: { id: reply.body.comment.id } });
+            expect(stored).toMatchObject({ author_id: site.id, depth: 0, parent_id: null, status: 'active', body: "GOAL! 1-0 on 23'" });
+            expect((await prisma.post.findUniqueOrThrow({ where: { id: thread.body.post.id } })).comment_count).toBe(1);
+            expect(await prisma.staffAudit.count({ where: { action: 'seed_comment', staff_id: null } })).toBe(1);
+            expect(await prisma.staffAudit.count({ where: { action: 'seed_live', staff_id: null } })).toBe(1);
+
+            // It shows in the live-updates poll the page uses
+            const updates = await request(app).get(`/v1/posts/${shortId}/live-updates`);
+            expect(updates.body.comments.map((c: { id: string }) => c.id)).toContain(stored.id);
+
+            // Thirty a day at most
+            await prisma.staffAudit.createMany({ data: Array.from({ length: 29 }, () => ({ action: 'seed_comment' })) });
+            expect((await request(app).post(`/v1/seed-posts/${shortId}/comments`).set(auth).send({ body: 'One more' })).status).toBe(429);
+
+            const ended = await request(app).put(`/v1/seed-posts/${shortId}/live`).set(auth).send({ live: false });
+            expect(ended.body.post.live.is_live).toBe(false);
+        } finally {
+            env.SEED_POST_KEY = saved;
+        }
+    });
 });
