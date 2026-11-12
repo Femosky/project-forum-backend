@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { ContentStatus, Prisma } from '@prisma/client';
 import { avatarCode, avatarConfigSchema } from '../../lib/avatars';
 import { Router } from 'express';
 import { handOverOwnership, setOwner } from '../communities/ownership';
@@ -6,6 +6,7 @@ import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { afterCursor, decodeCursor, paginate } from '../../lib/cursor';
 import { badRequest, notFound, parse } from '../../lib/http';
+import { isUserIndexable } from '../../lib/indexing';
 import { commentInclude, notShadowHidden, postInclude, READABLE_POST_WHERE, toPublicComment } from '../../lib/serializers';
 import { AuthRequest, optionalAuth, requireAuth, viewerOf } from '../../middlewares/auth';
 import { LIMITS, pageQuery } from '../../shared/validation';
@@ -239,8 +240,19 @@ async function findPublicUser(username: string) {
     return user;
 }
 
+// Public, non-anonymous posts and replies that are still up: what a visitor (or crawler) finds on the profile
+async function publicActivity(userId: string) {
+    const visible = { is_anonymous: false, status: { in: ['active', 'locked'] as ContentStatus[] } };
+    const [posts, comments] = await Promise.all([
+        prisma.post.count({ where: { author_id: userId, ...visible, community: { visibility: 'public' } } }),
+        prisma.comment.count({ where: { author_id: userId, ...visible, post: { community: { visibility: 'public' } } } }),
+    ]);
+    return posts + comments;
+}
+
 router.get('/:username', async (request, response) => {
     const user = await findPublicUser(String(request.params.username));
+    const activity = user.status === 'active' && !user.is_seed ? await publicActivity(user.id) : 0;
     response.json({
         user: {
             // For reporting a user
@@ -251,6 +263,8 @@ router.get('/:username', async (request, response) => {
             avatar: avatarCode(user.avatar_config, user.username),
             karma: user.karma,
             is_suspended: user.status !== 'active',
+            // Search engines index the profile once it has enough to read (src/lib/indexing.ts)
+            is_indexable: isUserIndexable(user, activity),
             created_at: user.created_at,
         },
     });

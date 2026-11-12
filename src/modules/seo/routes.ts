@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import prisma from '../../prismaConnection';
 import { notFound, parse } from '../../lib/http';
-import { INDEXABLE_POST_SQL } from '../../lib/indexing';
+import { INDEXABLE_COMMUNITY_SQL, INDEXABLE_POST_SQL, INDEXABLE_USER_SQL } from '../../lib/indexing';
 import { idOrShortId } from '../../lib/ids';
 import { postPath } from './jobs';
 
@@ -17,9 +17,10 @@ export const SITEMAP_CHUNK = 50_000;
 
 type Chunk = { page: number; lastmod: Date | null };
 
-// Users worth a sitemap entry: active accounts with at least one indexable, non-anonymous post
+// Users worth a sitemap entry: indexable profiles (real accounts with enough activity) with at least one
+// indexable, non-anonymous post
 const LISTED_USER_SQL = Prisma.sql`
-    u."status" = 'active' AND EXISTS (
+    ${INDEXABLE_USER_SQL} AND EXISTS (
         SELECT 1 FROM "Post" p JOIN "Community" c ON c."id" = p."community_id"
         WHERE p."author_id" = u."id" AND NOT p."is_anonymous" AND p."status" <> 'deleted' AND ${INDEXABLE_POST_SQL}
     )`;
@@ -40,7 +41,7 @@ router.get('/sitemap', async (request, response) => {
         prisma.$queryRaw<{ chunk: bigint; lastmod: Date | null }[]>`
             SELECT (n - 1) / ${SITEMAP_CHUNK} AS chunk, max(lastmod) AS lastmod FROM (
                 SELECT row_number() OVER (ORDER BY "created_at", "id") AS n, "updated_at" AS lastmod
-                FROM "Community" WHERE "status" = 'active' AND "visibility" = 'public'
+                FROM "Community" WHERE ${INDEXABLE_COMMUNITY_SQL}
             ) numbered GROUP BY chunk ORDER BY chunk`,
         prisma.$queryRaw<{ chunk: bigint; lastmod: Date | null }[]>`
             SELECT (n - 1) / ${SITEMAP_CHUNK} AS chunk, max(lastmod) AS lastmod FROM (
@@ -70,7 +71,7 @@ router.get('/sitemap/:kind/:page', async (request, response) => {
     } else if (kind === 'communities') {
         urls = await prisma.$queryRaw<object[]>`
             SELECT "name", "updated_at" AS lastmod FROM "Community"
-            WHERE "status" = 'active' AND "visibility" = 'public'
+            WHERE ${INDEXABLE_COMMUNITY_SQL}
             ORDER BY "created_at", "id" LIMIT ${SITEMAP_CHUNK} OFFSET ${offset}`;
     } else {
         urls = await prisma.$queryRaw<object[]>`

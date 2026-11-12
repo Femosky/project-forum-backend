@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import prisma from '../src/prismaConnection';
 import { api, createComment, createCommunity, createPost, signUp } from './helpers';
 
-const LONG_BODY = 'Agents keep asking for two years upfront, is that normal everywhere?';
+// Over THIN_WORDS (80) words, so a post with it is worth indexing on its own
+const LONG_BODY = Array(8).fill('Agents keep asking for two years upfront, is that normal everywhere in Lagos?').join(' ');
+const SHORT_BODY = 'Agents keep asking for two years upfront, is that normal everywhere?';
 
 
 describe('indexing rule', () => {
@@ -15,6 +17,44 @@ describe('indexing rule', () => {
         expect((await api().get(`/v1/posts/${post.short_id}`)).body.post.is_indexable).toBe(false);
         await bob.agent.put(`/v1/posts/${post.id}/vote`).send({ value: 1 });
         expect((await api().get(`/v1/posts/${post.short_id}`)).body.post.is_indexable).toBe(true);
+    });
+
+    it('holds back short text posts until someone replies', async () => {
+        const alice = await signUp('alice');
+        await createCommunity(alice.agent, 'lounge');
+        const post = await createPost(alice.agent, 'lounge', { title: 'Renting a flat in Yaba', body: SHORT_BODY });
+
+        expect((await api().get(`/v1/posts/${post.short_id}`)).body.post.is_indexable).toBe(false);
+        await createComment(alice.agent, post.id, { body: 'Two years is normal in Lekki, one year on the mainland.' });
+        expect((await api().get(`/v1/posts/${post.short_id}`)).body.post.is_indexable).toBe(true);
+    });
+
+    it('indexes a community once it has five threads', async () => {
+        const alice = await signUp('alice');
+        await createCommunity(alice.agent, 'lounge');
+        expect((await api().get('/v1/communities/lounge')).body.community.is_indexable).toBe(false);
+        await prisma.community.update({ where: { name: 'lounge' }, data: { post_count: 5 } });
+        expect((await api().get('/v1/communities/lounge')).body.community.is_indexable).toBe(true);
+    });
+
+    it('indexes a profile once a real account has three public posts and replies', async () => {
+        const alice = await signUp('alice');
+        await createCommunity(alice.agent, 'lounge');
+        await createCommunity(alice.agent, 'secret', { visibility: 'private' });
+        const post = await createPost(alice.agent, 'lounge', { title: 'Renting a flat in Yaba', body: LONG_BODY });
+        await createPost(alice.agent, 'secret', { title: 'Private thoughts on rent', body: `${LONG_BODY} Asking privately.` });
+        await createComment(alice.agent, post.id, { body: 'Update: found one.', is_anonymous: true });
+        const profile = () => api().get('/v1/users/alice').then((response) => response.body.user.is_indexable);
+
+        // One public post: the private one and the anonymous reply don't count
+        expect(await profile()).toBe(false);
+        await createComment(alice.agent, post.id, { body: 'Update: the agent came down to one year.' });
+        await createComment(alice.agent, post.id, { body: 'Signed the lease today, thanks all.' });
+        expect(await profile()).toBe(true);
+
+        // Seed accounts are never indexed
+        await prisma.user.update({ where: { id: alice.user.id }, data: { is_seed: true } });
+        expect(await profile()).toBe(false);
     });
 
     it('holds back very short posts with no replies, and removed posts', async () => {
@@ -34,7 +74,7 @@ describe('indexing rule', () => {
 });
 
 describe('sitemap data', () => {
-    it('lists indexable posts, public communities and users with indexable posts', async () => {
+    it('lists indexable posts, communities with enough threads and profiles with enough activity', async () => {
         const alice = await signUp('alice');
         const newbie = await signUp('newbie', { fresh: true });
         await createCommunity(alice.agent, 'lounge');
@@ -45,6 +85,10 @@ describe('sitemap data', () => {
         await createPost(alice.agent, 'secret', { title: 'Private thoughts on rent', body: `${LONG_BODY} Asking privately.` });
         await createPost(alice.agent, 'lounge', { title: 'Anon post about rent', body: LONG_BODY, is_anonymous: true });
         await createPost(newbie.agent, 'lounge', { title: 'New account post about rent', body: LONG_BODY });
+        await createPost(alice.agent, 'lounge', { title: 'Short question about rent', body: SHORT_BODY });
+        // Enough threads for lounge to be listed; alice has two public posts and one reply
+        await prisma.community.updateMany({ where: { name: { in: ['lounge', 'secret'] } }, data: { post_count: 5 } });
+        await createComment(alice.agent, listed.id, { body: 'Update: found one in the end.' });
 
         const index = await api().get('/v1/seo/sitemap');
         expect(index.status).toBe(200);
