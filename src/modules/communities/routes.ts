@@ -37,6 +37,8 @@ import {
     updateCommunitySchema,
 } from './schema';
 
+import { isCommunityIndexable } from '../../lib/indexing';
+
 const router = Router();
 
 export function toPublicCommunity(community: Community) {
@@ -56,6 +58,8 @@ export function toPublicCommunity(community: Community) {
         is_nsfw: community.is_nsfw,
         member_count: community.member_count,
         post_count: community.post_count,
+        // Search engines index it once it has enough threads (src/lib/indexing.ts)
+        is_indexable: isCommunityIndexable(community),
         created_at: community.created_at,
     };
 }
