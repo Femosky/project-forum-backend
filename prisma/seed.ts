@@ -39,7 +39,7 @@ async function devSeed() {
     const communities = [
         // name is the lowercase URL key; name_styled the handle as shown
         { name: 'lagosrent', name_styled: 'LagosRent', category: 'housing', description: 'Renting, agents, landlords and house hunting in Lagos.' },
-        { name: 'naijatech', name_styled: 'NaijaTech', category: 'tech', description: 'Jobs, tools and building tech in and from Nigeria.' },
+        { name: 'tech', name_styled: 'Tech', category: 'tech', description: 'Jobs, tools and building tech in and from Nigeria.' },
         { name: 'japa', name_styled: 'Japa', category: 'relocation', description: 'Moving abroad: visas, schools, jobs and settling in.' },
         { name: 'diasporahome', name_styled: 'DiasporaHome', category: 'other', description: 'Staying connected to home from London, Houston, Toronto and everywhere else.' },
     ];
